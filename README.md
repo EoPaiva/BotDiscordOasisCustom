@@ -127,6 +127,7 @@ Vá para os canais de texto correspondentes configurados no `config.json` e use 
 ---
 
 ## 📁 Estrutura do Projeto
+```md
 .
 ├── cogs/
 │ ├── absence_system.py
