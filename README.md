@@ -140,6 +140,3 @@ Vá para os canais de texto correspondentes configurados no `config.json` e use 
 ├── main.py
 ├── ranking_config.json
 └── requirements.txt
-
-
-<p align="center">Desenvolvido com ❤️</p>
