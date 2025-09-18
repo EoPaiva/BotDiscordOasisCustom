@@ -1,0 +1,23 @@
+{
+  "name": "oasiscustom",
+  "version": "1.0.0",
+  "description": "Este projeto é um bot para gerenciamento de tickets de vendas no Discord.",
+  "main": "main.py",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EoPaiva/Ticket-De-Vendas-Discord.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/EoPaiva/Ticket-De-Vendas-Discord/issues"
+  },
+  "homepage": "https://github.com/EoPaiva/Ticket-De-Vendas-Discord#readme",
+  "dependencies": {
+    "discord.js": "^14.22.1"
+  }
+}

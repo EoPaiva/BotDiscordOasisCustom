@@ -1,0 +1,12 @@
+# Ignorar arquivos de ambiente com segredos
+.env
+
+# Ignorar pastas de ambiente virtual do Python
+venv/
+.venv/
+
+# Ignorar caches do Python
+__pycache__/
+
+# Ignorar arquivos de banco de dados
+*.db
