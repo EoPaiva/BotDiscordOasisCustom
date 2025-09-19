@@ -21,6 +21,36 @@ Cada módulo foi projetado para ser intuitivo, utilizando interações do Discor
 
 ---
 
+---
+
+### **🛠️ Tecnologias e Ferramentas Utilizadas**
+
+Este projeto foi construído com foco em desempenho, modularidade e confiabilidade, utilizando as seguintes tecnologias:
+
+<p align="left">
+  <a href="https://skillicons.dev">
+    <img src="https://skillicons.dev/icons?i=python,sqlite,git,discord,vscode" />
+  </a>
+</p>
+
+* **Linguagem Principal: Python**
+    * Todo o bot foi desenvolvido em Python, uma linguagem poderosa e versátil, ideal para projetos de automação e back-end.
+
+* **Biblioteca Principal: `discord.py`**
+    * Utilizamos a biblioteca `discord.py` para toda a interação com a API do Discord. Sua natureza assíncrona garante que o bot possa lidar com múltiplas ações simultaneamente sem travar, oferecendo uma experiência fluida para os usuários.
+
+* **Banco de Dados: SQLite (via `aiosqlite`)**
+    * Para persistência de dados (registros de farm, ausências, caixa, etc.), foi escolhido o SQLite.
+    * **Por quê?** É um banco de dados leve, rápido e que não requer um servidor separado, sendo armazenado em um único arquivo (`.db`) junto com o bot.
+    * A biblioteca `aiosqlite` foi usada para garantir que todas as operações de banco de dados sejam assíncronas, mantendo o bot responsivo.
+
+* **Ferramentas de Desenvolvimento e Configuração**
+    * **Git & GitHub:** Para controle de versão e gerenciamento do código-fonte.
+    * **JSON:** Utilizado para os arquivos de configuração (`config.json`, etc.), permitindo uma personalização fácil de todos os IDs e parâmetros do bot sem precisar alterar o código Python.
+    * **`.env`:** Para o armazenamento seguro de informações sensíveis, como o token do bot.
+
+---
+
 ## ✨ Funcionalidades Principais
 
 ### 📝 Sistema de Registro com Aprovação
