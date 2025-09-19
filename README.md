@@ -21,8 +21,6 @@ Cada módulo foi projetado para ser intuitivo, utilizando interações do Discor
 
 ---
 
----
-
 ### **🛠️ Tecnologias e Ferramentas Utilizadas**
 
 Este projeto foi construído com foco em desempenho, modularidade e confiabilidade, utilizando as seguintes tecnologias:
