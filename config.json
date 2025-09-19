@@ -18,22 +18,51 @@
     "HR_LOGS_CHANNEL_ID": "1399795449354911865",
     "DISMISSAL_ALERT_CHANNEL_ID": 1415767747983310879,
     "PROMOTION_ALERT_CHANNEL_ID": 1415767619079897249,
-    "DEMOTION_ALERT_CHANNEL_ID": 1415767747983310879,
+    "DEMOTION_ALERT_CHANNEL_ID": 1415767668740456560,
 
     "RESCUE_PANEL_CHANNEL_ID": "1418279038245666907",
     "RESCUE_ALERT_CHANNEL_ID": 1416436492837847232,
+    "HIERARCHY_CHANNEL_ID": 1415767131718553651,
+    "HIERARCHY_BULLET_EMOJI": "<:pontofinal:1418437389990363226>",
 
-    "HIERARQUIA_CARGOS": [
-        "1418236854263742604",
-        "1418262317866680511",
-        "1418262327555391508",
-        "1418262643776426014"
-    ],
-    "HIERARQUIA_PREFIXOS": [
-        "[AJD]",
-        "[MEC]",
-        "[MEC.S]",
-        "[GER]",
-        "[SUB]"
+    "CASH_CONTROL_LOG_CHANNEL_ID": "1415775637850816602",
+    "CASH_CONTROL_PANEL_CHANNEL_ID": "1418441162766684243",
+    "BUG_REPORT_CHANNEL_ID": "1418445348954705920",
+    "HIERARQUIA": [
+        {
+            "role_id": "1299454606497026079",
+            "prefix": "[AJD]",
+            "display_name": "📌 Ajudantes:"
+        },
+        {
+            "role_id": "1299454604408524810",
+            "prefix": "[MEC]",
+            "display_name": "🔧 Mecânicos:"
+        },
+        {
+            "role_id": "1299454603372400691",
+            "prefix": "[MEC.S]",
+            "display_name": "🛠️ Mecânicos Superiores:"
+        },
+        {
+            "role_id": "1299454602185408615",
+            "prefix": "[GER]",
+            "display_name": "📌 Gerentes:"
+        },
+        {
+            "role_id": "1299454601329770589",
+            "prefix": "[GER.G]",
+            "display_name": "📊 Gerentes Gerais:"
+        },
+        {
+            "role_id": "1321592680249036822",
+            "prefix": "[SUB]",
+            "display_name": "⚔️ Sub-Líderes:"
+        },
+        {
+            "role_id": "1299454599136153675",
+            "prefix": "[LIDER]",
+            "display_name": "👑 Donos:"
+        }
     ]
 }

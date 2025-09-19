@@ -6,6 +6,12 @@ from dotenv import load_dotenv
 import asyncio
 import json
 
+# --- NOVO CÓDIGO PARA CORRIGIR O ModuleNotFoundError ---
+import sys
+# Adiciona o diretório raiz ao path do Python para garantir que os módulos sejam encontrados
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# --- FIM DA CORREÇÃO ---
+
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
 
@@ -21,7 +27,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 async def on_ready():
     print(f'Bot conectado como {bot.user}!')
     try:
-        with open('config.json', 'r') as f:
+        with open('config.json', 'r', encoding='utf-8') as f:
             config = json.load(f)
         guild_id = config.get('GUILD_ID')
         if guild_id:
