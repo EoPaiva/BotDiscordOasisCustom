@@ -1,0 +1,111 @@
+.confirmation {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 13px 16px;
+  border: 1px solid rgba(113, 144, 109, .42);
+  border-left: 3px solid var(--success);
+  background: rgba(113, 144, 109, .08);
+  color: var(--text-muted);
+}
+
+.confirmation strong { display: block; color: var(--text); }
+.confirmation p { margin: 3px 0 0; }
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-bottom: 1px solid var(--line);
+}
+
+.summary > div {
+  display: grid;
+  min-height: 70px;
+  align-content: center;
+  gap: 4px;
+  padding: 12px 17px;
+  border-right: 1px solid var(--line);
+}
+
+.summary > div:last-child { border-right: 0; }
+.summary span { color: var(--text-dim); font: 500 8px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.summary strong { color: var(--khaki); font: 600 23px var(--font-title); }
+
+.editor {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(210px, 1.2fr) 150px minmax(200px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 17px;
+  border-bottom: 1px solid var(--line);
+  background: #0d110e;
+}
+
+.editor label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font: 500 9px var(--font-mono);
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.editor select,
+.editor input[type="text"] {
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 9px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-800);
+  color: var(--text);
+}
+
+.confirmCheck {
+  grid-column: 1 / -2;
+  display: flex !important;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px !important;
+  text-transform: none !important;
+}
+
+.confirmCheck input { accent-color: var(--olive-active); }
+
+.remove {
+  min-width: 150px;
+}
+
+.remove summary {
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  list-style: none;
+}
+
+.remove summary::-webkit-details-marker { display: none; }
+.remove form { display: grid; gap: 8px; margin-top: 8px; }
+.remove label { display: flex; align-items: flex-start; gap: 7px; color: var(--text-muted); font-size: 9px; }
+.remove input { margin-top: 2px; accent-color: var(--danger); }
+
+.subject {
+  display: grid;
+  gap: 3px;
+}
+
+.subject code { color: var(--text-dim); font-size: 8px; }
+.permissionCode { color: var(--khaki); overflow-wrap: anywhere; }
+.reason { max-width: 320px; color: var(--text-muted); white-space: normal; }
+
+@media (max-width: 1180px) {
+  .editor { grid-template-columns: 1fr 1fr; }
+  .confirmCheck { grid-column: 1; }
+}
+
+@media (max-width: 680px) {
+  .summary,
+  .editor { grid-template-columns: 1fr; }
+  .summary > div { border-right: 0; border-bottom: 1px solid var(--line); }
+  .confirmCheck { grid-column: 1; }
+}

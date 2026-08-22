@@ -1,106 +1,150 @@
-# cogs/hierarchy_system.py
-import discord
-from discord.ext import commands
-from discord import app_commands
-import json
-from datetime import datetime
+from __future__ import annotations
+
 import asyncio
+import logging
+from typing import TYPE_CHECKING, cast
 
-# --- Carregar Configurações ---
-with open('config.json', 'r', encoding='utf-8') as f:
-    config = json.load(f)
+import discord
+from discord import app_commands
+from discord.ext import commands
 
-HIERARQUIA = config.get('HIERARQUIA', [])
-HIERARCHY_BULLET_EMOJI = config.get('HIERARCHY_BULLET_EMOJI', '•')
-HIERARCHY_CHANNEL_ID = config.get('HIERARCHY_CHANNEL_ID')
+from choque.embeds import branded_embed
+from choque.errors import PermissionDenied, ValidationError
 
-# --- Cog Principal ---
-class HierarchySystem(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-        self._hierarchy_lock = asyncio.Lock() # Para evitar atualizações simultâneas
+LOGGER = logging.getLogger(__name__)
 
-    async def post_hierarchy(self, channel: discord.TextChannel):
-        """Função que limpa o canal e posta a hierarquia em várias mensagens separadas."""
-        async with self._hierarchy_lock: # Garante que apenas uma atualização rode por vez
-            if not channel:
-                print("HIERARQUIA: Canal de hierarquia não encontrado.")
-                return
 
+class HierarchyCommands(commands.Cog):
+    def __init__(self, bot: commands.Bot) -> None:
+        self.bot = cast("ChoqueBot", bot)
+        self.services = self.bot.services
+        self._panel_lock = asyncio.Lock()
+
+    async def build_embed(self, guild_id: int) -> discord.Embed:
+        rows = await self.services.database.fetchall(
+            """
+            SELECT r.level, r.name, r.prefix, r.discord_role_id, r.rbac_profile,
+                   COUNT(m.id) AS member_count
+            FROM ranks r LEFT JOIN members m ON m.rank_id=r.id AND m.status='ACTIVE'
+            WHERE r.guild_id=? AND r.active=1
+            GROUP BY r.id ORDER BY r.level DESC
+            """,
+            (guild_id,),
+        )
+        embed = branded_embed(
+            self.bot.config.branding,
+            title="CHOQUE - BGR • Hierarquia",
+            description="Patentes operacionais cadastradas no sistema.",
+        )
+        if not rows:
+            embed.description = "Nenhuma patente ativa configurada."
+            return embed
+        guild = self.bot.get_guild(guild_id)
+        strategic_role_ids = await self.services.settings.get(
+            guild_id, "hierarchy_strategic_role_ids", []
+        )
+        if guild and isinstance(strategic_role_ids, list):
+            strategic_lines = []
+            for raw_role_id in strategic_role_ids:
+                try:
+                    role_id = int(raw_role_id)
+                except (TypeError, ValueError):
+                    continue
+                discord_role = guild.get_role(role_id)
+                if discord_role is None:
+                    continue
+                member_count = sum(not member.bot for member in discord_role.members)
+                strategic_lines.append(
+                    f"{discord_role.mention} • **{member_count}** membro(s) no cargo"
+                )
+            if strategic_lines:
+                embed.add_field(
+                    name="🛡️ Estrutura estratégica",
+                    value="\n".join(strategic_lines),
+                    inline=False,
+                )
+        for row in rows:
+            role = f"<@&{row['discord_role_id']}>" if row["discord_role_id"] else "Sem cargo"
+            member_count = int(row["member_count"])
+            if guild and row["discord_role_id"]:
+                discord_role = guild.get_role(int(row["discord_role_id"]))
+                if discord_role:
+                    # O cargo Discord é a verdade operacional; o banco permanece
+                    # como fallback no modo de verificação sem conexão.
+                    member_count = sum(not member.bot for member in discord_role.members)
+            embed.add_field(
+                name=f"{row['prefix']} {row['name']}".strip(),
+                value=(
+                    f"Nível `{row['level']}` • {role}\n"
+                    f"Perfil `{row['rbac_profile']}` • {member_count} membro(s) no cargo"
+                ),
+                inline=False,
+            )
+        return embed
+
+    async def publish_or_refresh(
+        self, guild: discord.Guild, channel: discord.TextChannel
+    ) -> discord.Message:
+        """Atualiza a mensagem registrada e evita painéis duplicados."""
+        async with self._panel_lock:
+            embed = await self.build_embed(guild.id)
+            panel = await self.services.settings.get_panel(guild.id, "HIERARCHY")
+            if panel and int(panel["channel_id"]) == channel.id:
+                try:
+                    message = await channel.fetch_message(int(panel["message_id"]))
+                    await message.edit(embed=embed)
+                    return message
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+            message = await channel.send(embed=embed)
+            await self.services.settings.upsert_panel(guild.id, "HIERARCHY", channel.id, message.id)
+            return message
+
+    async def refresh_configured_panel(self, guild: discord.Guild) -> None:
+        channel_id = await self.services.settings.get(guild.id, "hierarchy_channel_id")
+        channel = guild.get_channel(int(channel_id)) if channel_id else None
+        if isinstance(channel, discord.TextChannel):
+            await self.publish_or_refresh(guild, channel)
+
+    @app_commands.command(name="hierarquia", description="Mostra a hierarquia CHOQUE - BGR.")
+    @app_commands.describe(publicar="Publica e armazena o painel neste canal")
+    async def hierarchy(self, interaction: discord.Interaction, publicar: bool = False) -> None:
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            raise ValidationError("Este comando só pode ser usado no servidor.")
+        if not publicar:
+            await interaction.response.send_message(
+                embed=await self.build_embed(interaction.guild.id), ephemeral=True
+            )
+            return
+        if not await self.services.permissions.has(interaction.user, "panel.manage"):
+            raise PermissionDenied("Você não possui permissão para publicar painéis.")
+        if not isinstance(interaction.channel, discord.TextChannel):
+            raise ValidationError("Use o comando em um canal de texto.")
+        message = await self.publish_or_refresh(interaction.guild, interaction.channel)
+        await self.services.settings.set(
+            interaction.guild.id,
+            "hierarchy_channel_id",
+            interaction.channel.id,
+            interaction.user.id,
+        )
+        await interaction.response.send_message(
+            f"Painel de hierarquia atualizado em {message.channel.mention}.", ephemeral=True
+        )
+
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        if self.bot.check_mode:
+            return
+        for guild in self.bot.guilds:
             try:
-                # Limpa as mensagens anteriores do bot no canal
-                await channel.purge(limit=100, check=lambda m: m.author == self.bot.user)
-                
-                guild = channel.guild
-                await guild.chunk(cache=True)
+                await self.refresh_configured_panel(guild)
+            except Exception:
+                LOGGER.exception("Falha ao restaurar painel de hierarquia da guild %s", guild.id)
 
-                # Itera na ordem inversa para mostrar do maior para o menor cargo
-                for rank_info in reversed(HIERARQUIA):
-                    role_id = int(rank_info.get("role_id"))
-                    display_name = rank_info.get("display_name", "Cargo Desconhecido")
-                    
-                    role = guild.get_role(role_id)
-                    
-                    if not role:
-                        print(f"HIERARQUIA: Cargo com ID {role_id} não encontrado.")
-                        continue
 
-                    # Cria um embed separado para cada cargo
-                    embed = discord.Embed(
-                        title=display_name,
-                        color=role.color if role.color.value != 0 else 0x2b2d31
-                    )
-                    
-                    members_with_role = sorted(role.members, key=lambda m: m.display_name)
-                    
-                    if not members_with_role:
-                        embed.description = f"{HIERARCHY_BULLET_EMOJI} *Vago*"
-                    else:
-                        # Lógica para dividir a lista de membros se ela for maior que o limite da descrição
-                        member_list_parts = []
-                        current_part = ""
-                        for member in members_with_role:
-                            mention = f"{HIERARCHY_BULLET_EMOJI} {member.mention}\n"
-                            if len(current_part) + len(mention) > 4096:
-                                member_list_parts.append(current_part)
-                                current_part = ""
-                            current_part += mention
-                        member_list_parts.append(current_part)
-                        
-                        # Envia a primeira parte na descrição do embed principal
-                        embed.description = member_list_parts[0]
-                        await channel.send(embed=embed)
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(HierarchyCommands(bot))
 
-                        # Se houver mais partes, envia em embeds separados sem título
-                        if len(member_list_parts) > 1:
-                            for part in member_list_parts[1:]:
-                                continuation_embed = discord.Embed(description=part, color=embed.color)
-                                await channel.send(embed=continuation_embed)
-                    
-                    # Envia um separador visual
-                    await channel.send("━━━━━━━━━━━━━━━━━━")
-                    await asyncio.sleep(1) # Pequeno delay para não sobrecarregar a API
 
-                print("HIERARQUIA: Mensagens de hierarquia postadas com sucesso.")
-
-            except discord.Forbidden:
-                print(f"HIERARQUIA: ERRO - Permissão negada para limpar ou enviar mensagens no canal {channel.name}.")
-            except Exception as e:
-                print(f"HIERARQUIA: Erro inesperado ao postar: {e}")
-
-    @commands.Cog.listener("on_hierarchy_update")
-    async def on_hierarchy_update(self, guild: discord.Guild):
-        channel = guild.get_channel(HIERARCHY_CHANNEL_ID)
-        if channel:
-            await self.post_hierarchy(channel)
-
-    @app_commands.command(name="hierarquia", description="Limpa o canal e posta a lista hierárquica atualizada.")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def hierarchy_command(self, interaction: discord.Interaction):
-        # Usamos o canal da interação para postar
-        channel = interaction.channel
-        await interaction.response.send_message(f"✅ A hierarquia será postada em {channel.mention}. Isso pode levar um momento...", ephemeral=True)
-        await self.post_hierarchy(channel)
-
-async def setup(bot: commands.Bot):
-    await bot.add_cog(HierarchySystem(bot))
+if TYPE_CHECKING:
+    from choque.bot import ChoqueBot

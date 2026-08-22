@@ -1,60 +1,82 @@
-# main.py
-import discord
-from discord.ext import commands
-import os
-from dotenv import load_dotenv
+from __future__ import annotations
+
+import argparse
 import asyncio
-import json
-
-# --- NOVO CÓDIGO PARA CORRIGIR O ModuleNotFoundError ---
 import sys
-# Adiciona o diretório raiz ao path do Python para garantir que os módulos sejam encontrados
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-# --- FIM DA CORREÇÃO ---
 
-load_dotenv()
-TOKEN = os.getenv("TOKEN")
+import discord
 
-# Habilita todas as intents necessárias para os sistemas funcionarem
-intents = discord.Intents.default()
-intents.members = True
-intents.messages = True
-intents.message_content = True
+from choque.bot import ChoqueBot
+from choque.config import AppConfig
+from choque.logging_config import configure_logging
 
-bot = commands.Bot(command_prefix="!", intents=intents)
 
-@bot.event
-async def on_ready():
-    print(f'Bot conectado como {bot.user}!')
+async def run_check(config: AppConfig) -> int:
+    bot = ChoqueBot(config, check_mode=True)
     try:
-        with open('config.json', 'r', encoding='utf-8') as f:
-            config = json.load(f)
-        guild_id = config.get('GUILD_ID')
-        if guild_id:
-            guild = discord.Object(id=guild_id)
-            bot.tree.copy_global_to(guild=guild)
-            synced = await bot.tree.sync(guild=guild)
-            print(f"Sincronizados {len(synced)} comandos para o servidor {guild_id}.")
-    except Exception as e:
-        print(f"Falha ao sincronizar comandos: {e}")
+        await bot.setup_hook()
+        migration = await bot.services.database.fetchone(
+            "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"
+        )
+        commands = list(bot.tree.walk_commands())
+        persistent_views = len(bot.persistent_views)
+        print("CHECK_OK")
+        print(f"database={config.database_path.resolve()}")
+        print(f"migration={migration['version']}")
+        print(f"guild_id={bot.guild_id or 'not_configured'}")
+        print(f"cogs={len(bot.cogs)}")
+        print(f"commands={len(commands)}")
+        print(f"persistent_views={persistent_views}")
+        return 0
+    finally:
+        await bot.close()
 
-async def load_cogs():
-    for filename in os.listdir('./cogs'):
-        if filename.endswith('.py'):
-            try:
-                await bot.load_extension(f'cogs.{filename[:-3]}')
-                print(f"Carregado com sucesso: {filename}")
-            except Exception as e:
-                print(f"--- FALHA AO CARREGAR: {filename} ---")
-                print(f"ERRO: {e}\n")
 
-async def main():
-    if not TOKEN:
-        print("ERRO: O TOKEN do bot não foi encontrado no arquivo '.env'.")
-        return
-    async with bot:
-        await load_cogs()
-        await bot.start(TOKEN)
+async def run_bot(config: AppConfig) -> int:
+    if not config.token:
+        print(
+            "ERRO: defina DISCORD_TOKEN com um token novo. "
+            "O token encontrado no histórico deve ser considerado comprometido.",
+            file=sys.stderr,
+        )
+        return 2
+    bot = ChoqueBot(config)
+    try:
+        async with bot:
+            await bot.start(config.token)
+    except discord.PrivilegedIntentsRequired:
+        print(
+            "ERRO: habilite Server Members Intent em Discord Developer Portal > "
+            "Bot > Privileged Gateway Intents.",
+            file=sys.stderr,
+        )
+        return 3
+    except discord.LoginFailure:
+        print("ERRO: DISCORD_TOKEN inválido ou revogado.", file=sys.stderr)
+        return 4
+    return 0
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="CHOQUE - BGR Discord Bot")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Valida banco, migrations, cogs, comandos e views sem conectar ao Discord.",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    config = AppConfig.load()
+    configure_logging(config.log_level)
+    try:
+        return asyncio.run(run_check(config) if args.check else run_bot(config))
+    except KeyboardInterrupt:
+        print("Encerramento solicitado; recursos fechados com segurança.")
+        return 0
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(main())

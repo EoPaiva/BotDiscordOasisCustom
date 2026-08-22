@@ -1,0 +1,2700 @@
+from __future__ import annotations
+
+import asyncio
+import inspect
+import logging
+import shutil
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+import aiosqlite
+
+LOGGER = logging.getLogger(__name__)
+
+
+MIGRATION_001 = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    applied_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS guild_settings (
+    guild_id INTEGER NOT NULL,
+    setting_key TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    updated_by INTEGER,
+    PRIMARY KEY (guild_id, setting_key)
+);
+
+CREATE TABLE IF NOT EXISTS authorized_voice_channels (
+    guild_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    label TEXT,
+    created_at INTEGER NOT NULL,
+    created_by INTEGER,
+    PRIMARY KEY (guild_id, channel_id)
+);
+
+CREATE TABLE IF NOT EXISTS rbac_bindings (
+    guild_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    profile TEXT NOT NULL CHECK (profile IN ('MEMBRO','GRADUADO','INSTRUTOR','COMANDO','ADMINISTRADOR')),
+    created_at INTEGER NOT NULL,
+    created_by INTEGER,
+    PRIMARY KEY (guild_id, role_id)
+);
+
+CREATE TABLE IF NOT EXISTS ranks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    prefix TEXT NOT NULL DEFAULT '',
+    level INTEGER NOT NULL,
+    discord_role_id INTEGER,
+    rbac_profile TEXT NOT NULL DEFAULT 'MEMBRO',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    UNIQUE (guild_id, level),
+    UNIQUE (guild_id, discord_role_id)
+);
+
+CREATE TABLE IF NOT EXISTS members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    discord_id INTEGER NOT NULL,
+    discord_nick TEXT,
+    mta_nick TEXT NOT NULL,
+    character_id TEXT,
+    rank_id INTEGER REFERENCES ranks(id),
+    unit TEXT,
+    status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('PENDING','ACTIVE','AWAY','RESERVE','SUSPENDED','DISMISSED')),
+    joined_at INTEGER NOT NULL,
+    notes TEXT,
+    last_activity_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (guild_id, discord_id)
+);
+
+CREATE TABLE IF NOT EXISTS member_applications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    discord_id INTEGER NOT NULL,
+    mta_nick TEXT NOT NULL,
+    character_id TEXT,
+    unit TEXT,
+    recruiter TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','APPROVED','REJECTED')),
+    submitted_at INTEGER NOT NULL,
+    reviewed_at INTEGER,
+    reviewed_by INTEGER,
+    review_reason TEXT
+);
+
+CREATE TABLE IF NOT EXISTS shifts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id),
+    status TEXT NOT NULL CHECK (status IN ('ACTIVE','GRACE','REVIEW_REQUIRED','CLOSED')),
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    closed_at INTEGER,
+    end_reason TEXT,
+    grace_started_at INTEGER,
+    grace_deadline INTEGER,
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS shift_segments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE RESTRICT,
+    voice_channel_id INTEGER NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    end_reason TEXT
+);
+
+CREATE TABLE IF NOT EXISTS shift_adjustments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE RESTRICT,
+    delta_ms INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    actor_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS voice_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER,
+    shift_id INTEGER,
+    discord_id INTEGER NOT NULL,
+    before_channel_id INTEGER,
+    after_channel_id INTEGER,
+    event_type TEXT NOT NULL,
+    occurred_at INTEGER NOT NULL,
+    details_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    correlation_id TEXT NOT NULL UNIQUE,
+    guild_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    actor_id INTEGER,
+    target_id INTEGER,
+    before_json TEXT,
+    after_json TEXT,
+    reason TEXT,
+    created_at INTEGER NOT NULL,
+    delivery_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (delivery_status IN ('PENDING','DELIVERED','FAILED')),
+    delivery_attempts INTEGER NOT NULL DEFAULT 0,
+    delivered_at INTEGER,
+    last_error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS panels (
+    guild_id INTEGER NOT NULL,
+    panel_type TEXT NOT NULL,
+    channel_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, panel_type)
+);
+
+CREATE TABLE IF NOT EXISTS bot_runtime (
+    guild_id INTEGER PRIMARY KEY,
+    last_heartbeat_at INTEGER NOT NULL,
+    started_at INTEGER NOT NULL,
+    clean_shutdown INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_active_shift_per_member
+ON shifts(guild_id, member_id)
+WHERE status IN ('ACTIVE', 'GRACE');
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_open_segment_per_shift
+ON shift_segments(shift_id)
+WHERE ended_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS ix_members_discord ON members(guild_id, discord_id);
+CREATE INDEX IF NOT EXISTS ix_members_status ON members(guild_id, status);
+CREATE INDEX IF NOT EXISTS ix_shifts_member_started ON shifts(member_id, started_at);
+CREATE INDEX IF NOT EXISTS ix_shifts_status ON shifts(guild_id, status);
+CREATE INDEX IF NOT EXISTS ix_segments_shift_started ON shift_segments(shift_id, started_at);
+CREATE INDEX IF NOT EXISTS ix_voice_events_member_time ON voice_events(guild_id, discord_id, occurred_at);
+CREATE INDEX IF NOT EXISTS ix_audit_delivery ON audit_logs(delivery_status, created_at);
+"""
+
+MIGRATION_002 = """
+ALTER TABLE shift_segments RENAME TO shift_segments_v1;
+
+CREATE TABLE shift_segments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE RESTRICT,
+    voice_channel_id INTEGER NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    end_reason TEXT
+);
+
+INSERT INTO shift_segments(id, guild_id, shift_id, voice_channel_id, started_at, ended_at, end_reason)
+SELECT ss.id, s.guild_id, ss.shift_id, ss.voice_channel_id, ss.started_at, ss.ended_at, ss.end_reason
+FROM shift_segments_v1 ss JOIN shifts s ON s.id=ss.shift_id;
+
+DROP TABLE shift_segments_v1;
+
+ALTER TABLE shift_adjustments RENAME TO shift_adjustments_v1;
+
+CREATE TABLE shift_adjustments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE RESTRICT,
+    delta_ms INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    actor_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+INSERT INTO shift_adjustments(id, guild_id, shift_id, delta_ms, reason, actor_id, created_at)
+SELECT sa.id, s.guild_id, sa.shift_id, sa.delta_ms, sa.reason, sa.actor_id, sa.created_at
+FROM shift_adjustments_v1 sa JOIN shifts s ON s.id=sa.shift_id;
+
+DROP TABLE shift_adjustments_v1;
+
+CREATE UNIQUE INDEX ux_open_segment_per_shift
+ON shift_segments(shift_id)
+WHERE ended_at IS NULL;
+
+CREATE INDEX ix_segments_guild_shift_started
+ON shift_segments(guild_id, shift_id, started_at);
+
+CREATE INDEX ix_adjustments_guild_shift
+ON shift_adjustments(guild_id, shift_id);
+"""
+
+MIGRATION_003 = """
+CREATE TABLE personnel_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    action_type TEXT NOT NULL CHECK (action_type IN ('PROMOTION','DEMOTION')),
+    from_rank_id INTEGER REFERENCES ranks(id),
+    to_rank_id INTEGER NOT NULL REFERENCES ranks(id),
+    reason TEXT NOT NULL,
+    actor_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE punishments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    punishment_type TEXT NOT NULL CHECK (
+        punishment_type IN ('WARNING','SUSPENSION','DISMISSAL')
+    ),
+    reason TEXT NOT NULL,
+    previous_member_status TEXT,
+    starts_at INTEGER NOT NULL,
+    ends_at INTEGER,
+    status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (
+        status IN ('ACTIVE','REVOKED','EXPIRED')
+    ),
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    revoked_by INTEGER,
+    revoked_at INTEGER,
+    revoke_reason TEXT
+);
+
+CREATE TABLE absence_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    starts_at INTEGER NOT NULL,
+    ends_at INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','APPROVED','REJECTED','CANCELLED','ENDED')
+    ),
+    submitted_at INTEGER NOT NULL,
+    reviewed_by INTEGER,
+    reviewed_at INTEGER,
+    review_reason TEXT,
+    cancelled_at INTEGER,
+    ended_at INTEGER
+);
+
+CREATE INDEX ix_personnel_actions_member_time
+ON personnel_actions(guild_id, discord_id, created_at DESC);
+
+CREATE INDEX ix_punishments_member_status
+ON punishments(guild_id, discord_id, status, created_at DESC);
+
+CREATE INDEX ix_absences_status_time
+ON absence_requests(guild_id, status, starts_at, ends_at);
+
+CREATE UNIQUE INDEX ux_open_absence_per_member
+ON absence_requests(guild_id, member_id)
+WHERE status IN ('PENDING','APPROVED');
+"""
+
+MIGRATION_004 = """
+ALTER TABLE absence_requests ADD COLUMN observation TEXT;
+ALTER TABLE absence_requests ADD COLUMN previous_member_status TEXT;
+
+CREATE TABLE administrative_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    request_type TEXT NOT NULL CHECK (
+        request_type IN (
+            'EARLY_RETURN','RESERVE_ENTRY','RESERVE_EXIT',
+            'HOURS_CORRECTION','DATA_CHANGE','DISMISSAL'
+        )
+    ),
+    payload_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','APPROVED','REJECTED','CANCELLED')
+    ),
+    submitted_at INTEGER NOT NULL,
+    reviewed_by INTEGER,
+    reviewed_at INTEGER,
+    review_reason TEXT,
+    applied_at INTEGER,
+    cancelled_at INTEGER
+);
+
+CREATE UNIQUE INDEX ux_pending_administrative_request
+ON administrative_requests(guild_id, member_id, request_type)
+WHERE status='PENDING';
+
+CREATE INDEX ix_administrative_requests_queue
+ON administrative_requests(guild_id, status, submitted_at);
+
+CREATE INDEX ix_administrative_requests_member
+ON administrative_requests(guild_id, discord_id, submitted_at DESC);
+"""
+
+MIGRATION_005 = """
+DROP INDEX IF EXISTS ix_punishments_member_status;
+
+ALTER TABLE punishments RENAME TO punishments_v4;
+
+CREATE TABLE punishments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    punishment_type TEXT NOT NULL CHECK (
+        punishment_type IN ('WARNING','SUSPENSION','DISMISSAL')
+    ),
+    warning_type TEXT,
+    reason TEXT NOT NULL,
+    evidence_url TEXT,
+    observation TEXT,
+    previous_member_status TEXT,
+    starts_at INTEGER NOT NULL,
+    ends_at INTEGER,
+    status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (
+        status IN ('SCHEDULED','ACTIVE','FULFILLED','REVOKED','EXPIRED')
+    ),
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    fulfilled_by INTEGER,
+    fulfilled_at INTEGER,
+    fulfilled_reason TEXT,
+    revoked_by INTEGER,
+    revoked_at INTEGER,
+    revoke_reason TEXT
+);
+
+INSERT INTO punishments(
+    id, guild_id, member_id, discord_id, punishment_type, reason,
+    previous_member_status, starts_at, ends_at, status, created_by, created_at,
+    revoked_by, revoked_at, revoke_reason
+)
+SELECT
+    id, guild_id, member_id, discord_id, punishment_type, reason,
+    previous_member_status, starts_at, ends_at, status, created_by, created_at,
+    revoked_by, revoked_at, revoke_reason
+FROM punishments_v4;
+
+DROP TABLE punishments_v4;
+
+CREATE INDEX ix_punishments_member_status
+ON punishments(guild_id, discord_id, status, created_at DESC);
+
+CREATE UNIQUE INDEX ux_open_suspension_per_member
+ON punishments(guild_id, member_id)
+WHERE punishment_type='SUSPENSION' AND status IN ('SCHEDULED','ACTIVE');
+
+CREATE TABLE disciplinary_occurrences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    description TEXT NOT NULL,
+    evidence_url TEXT,
+    observation TEXT,
+    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (
+        status IN ('OPEN','ARCHIVED','CONVERTED_TO_WARNING')
+    ),
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    archived_by INTEGER,
+    archived_at INTEGER,
+    archive_reason TEXT,
+    converted_punishment_id INTEGER REFERENCES punishments(id) ON DELETE RESTRICT,
+    converted_by INTEGER,
+    converted_at INTEGER
+);
+
+CREATE INDEX ix_disciplinary_occurrences_member
+ON disciplinary_occurrences(guild_id, discord_id, created_at DESC);
+
+CREATE INDEX ix_disciplinary_occurrences_status
+ON disciplinary_occurrences(guild_id, status, created_at);
+"""
+
+MIGRATION_006 = """
+CREATE TABLE training_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    scheduled_at INTEGER NOT NULL,
+    responsible_id INTEGER NOT NULL,
+    capacity INTEGER NOT NULL CHECK (capacity BETWEEN 1 AND 100),
+    course_name TEXT,
+    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (
+        status IN ('OPEN','CLOSED','COMPLETED','CANCELLED')
+    ),
+    channel_id INTEGER,
+    message_id INTEGER,
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    enrollment_closed_at INTEGER,
+    completed_by INTEGER,
+    completed_at INTEGER,
+    cancelled_by INTEGER,
+    cancelled_at INTEGER,
+    cancel_reason TEXT,
+    UNIQUE(guild_id, name, scheduled_at)
+);
+
+CREATE TABLE training_enrollments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    training_id INTEGER NOT NULL REFERENCES training_events(id) ON DELETE RESTRICT,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    enrollment_status TEXT NOT NULL DEFAULT 'ENROLLED' CHECK (
+        enrollment_status IN ('ENROLLED','CANCELLED')
+    ),
+    attendance_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        attendance_status IN ('PENDING','PRESENT','ABSENT')
+    ),
+    result_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        result_status IN ('PENDING','APPROVED','FAILED')
+    ),
+    enrolled_at INTEGER NOT NULL,
+    cancelled_at INTEGER,
+    decided_by INTEGER,
+    decided_at INTEGER,
+    decision_notes TEXT,
+    UNIQUE(training_id, member_id)
+);
+
+CREATE TABLE member_qualifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    training_id INTEGER REFERENCES training_events(id) ON DELETE RESTRICT,
+    course_name TEXT NOT NULL,
+    result TEXT NOT NULL CHECK (result IN ('APPROVED','FAILED')),
+    responsible_id INTEGER NOT NULL,
+    recorded_at INTEGER NOT NULL,
+    notes TEXT,
+    UNIQUE(training_id, member_id)
+);
+
+CREATE INDEX ix_training_events_status_time
+ON training_events(guild_id, status, scheduled_at);
+
+CREATE INDEX ix_training_enrollments_member
+ON training_enrollments(guild_id, discord_id, enrolled_at DESC);
+
+CREATE INDEX ix_training_enrollments_event
+ON training_enrollments(training_id, enrollment_status, attendance_status);
+
+CREATE INDEX ix_member_qualifications_member
+ON member_qualifications(guild_id, discord_id, recorded_at DESC);
+"""
+
+MIGRATION_007 = """
+CREATE TABLE weekly_activity_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    week_start_at INTEGER NOT NULL,
+    week_end_at INTEGER NOT NULL,
+    total_ms INTEGER NOT NULL,
+    goal_minutes INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('FULFILLED','NEAR','NOT_MET','EXEMPT')
+    ),
+    exemption_reason TEXT,
+    member_status_at_close TEXT NOT NULL,
+    closed_by INTEGER,
+    created_at INTEGER NOT NULL,
+    UNIQUE(guild_id, member_id, week_start_at)
+);
+
+CREATE INDEX ix_weekly_activity_member
+ON weekly_activity_snapshots(guild_id, discord_id, week_start_at DESC);
+
+CREATE INDEX ix_weekly_activity_period_status
+ON weekly_activity_snapshots(guild_id, week_start_at, status);
+"""
+
+MIGRATION_008 = """
+CREATE TABLE service_tickets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    discord_id INTEGER NOT NULL,
+    ticket_type TEXT NOT NULL CHECK (ticket_type IN ('CANDIDACY','TRANSFER','REPORT')),
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','IN_REVIEW','APPROVED','REJECTED','CANCELLED','CLOSED')
+    ),
+    subject_discord_id INTEGER,
+    payload_json TEXT NOT NULL,
+    submitted_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    claimed_by INTEGER,
+    claimed_at INTEGER,
+    reviewed_by INTEGER,
+    reviewed_at INTEGER,
+    review_reason TEXT,
+    member_application_id INTEGER REFERENCES member_applications(id) ON DELETE RESTRICT
+);
+
+CREATE UNIQUE INDEX ux_open_service_ticket
+ON service_tickets(guild_id, discord_id, ticket_type)
+WHERE status IN ('PENDING','IN_REVIEW');
+
+CREATE INDEX ix_service_tickets_queue
+ON service_tickets(guild_id, ticket_type, status, submitted_at);
+
+CREATE INDEX ix_service_tickets_requester
+ON service_tickets(guild_id, discord_id, submitted_at DESC);
+"""
+
+MIGRATION_009 = """
+CREATE TABLE service_tickets_v9 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    discord_id INTEGER NOT NULL,
+    ticket_type TEXT NOT NULL CHECK (
+        ticket_type IN ('CANDIDACY','TRANSFER','REPORT','OTHER')
+    ),
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','IN_REVIEW','APPROVED','REJECTED','CANCELLED','CLOSED')
+    ),
+    subject_discord_id INTEGER,
+    payload_json TEXT NOT NULL,
+    submitted_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    claimed_by INTEGER,
+    claimed_at INTEGER,
+    reviewed_by INTEGER,
+    reviewed_at INTEGER,
+    review_reason TEXT,
+    member_application_id INTEGER REFERENCES member_applications(id) ON DELETE RESTRICT
+);
+
+INSERT INTO service_tickets_v9(
+    id, guild_id, discord_id, ticket_type, status, subject_discord_id,
+    payload_json, submitted_at, updated_at, claimed_by, claimed_at,
+    reviewed_by, reviewed_at, review_reason, member_application_id
+)
+SELECT
+    id, guild_id, discord_id, ticket_type, status, subject_discord_id,
+    payload_json, submitted_at, updated_at, claimed_by, claimed_at,
+    reviewed_by, reviewed_at, review_reason, member_application_id
+FROM service_tickets;
+
+DROP TABLE service_tickets;
+ALTER TABLE service_tickets_v9 RENAME TO service_tickets;
+
+CREATE UNIQUE INDEX ux_open_service_ticket
+ON service_tickets(guild_id, discord_id, ticket_type)
+WHERE status IN ('PENDING','IN_REVIEW');
+
+CREATE INDEX ix_service_tickets_queue
+ON service_tickets(guild_id, ticket_type, status, submitted_at);
+
+CREATE INDEX ix_service_tickets_requester
+ON service_tickets(guild_id, discord_id, submitted_at DESC);
+"""
+
+MIGRATION_010 = """
+ALTER TABLE members ADD COLUMN rank_sync_status TEXT NOT NULL DEFAULT 'SYNCED'
+    CHECK (rank_sync_status IN ('SYNCED','MISSING_ROLE','MULTIPLE_RANKS','ERROR'));
+ALTER TABLE members ADD COLUMN rank_sync_checked_at INTEGER;
+
+CREATE TABLE rank_sync_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL CHECK (
+        event_type IN ('PROMOTION','DEMOTION','SYNC','MISSING_ROLE','INCONSISTENCY')
+    ),
+    source TEXT NOT NULL,
+    from_rank_id INTEGER REFERENCES ranks(id),
+    to_rank_id INTEGER REFERENCES ranks(id),
+    actor_id INTEGER,
+    role_ids_json TEXT NOT NULL,
+    previous_nickname TEXT,
+    expected_nickname TEXT,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_rank_sync_member_time
+ON rank_sync_events(guild_id, discord_id, created_at DESC);
+
+CREATE INDEX ix_rank_sync_source_time
+ON rank_sync_events(guild_id, source, created_at DESC);
+"""
+
+MIGRATION_011 = """
+CREATE TABLE ticket_rooms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    ticket_id INTEGER NOT NULL REFERENCES service_tickets(id) ON DELETE RESTRICT,
+    requester_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    control_message_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','CLOSED','ARCHIVED')),
+    created_at INTEGER NOT NULL,
+    closed_by INTEGER,
+    closed_at INTEGER,
+    close_reason TEXT,
+    archived_at INTEGER,
+    UNIQUE(guild_id, ticket_id),
+    UNIQUE(guild_id, channel_id)
+);
+
+CREATE INDEX ix_ticket_rooms_status
+ON ticket_rooms(guild_id, status, created_at);
+"""
+
+MIGRATION_012 = """
+ALTER TABLE member_applications ADD COLUMN review_channel_id INTEGER;
+ALTER TABLE member_applications ADD COLUMN review_message_id INTEGER;
+ALTER TABLE member_applications ADD COLUMN result_channel_id INTEGER;
+ALTER TABLE member_applications ADD COLUMN result_message_id INTEGER;
+ALTER TABLE member_applications ADD COLUMN delivery_status TEXT NOT NULL DEFAULT 'PENDING'
+    CHECK (delivery_status IN ('PENDING','DELIVERED','LEGACY'));
+
+UPDATE member_applications
+SET delivery_status='LEGACY'
+WHERE status IN ('APPROVED','REJECTED');
+
+CREATE INDEX ix_member_applications_delivery
+ON member_applications(guild_id, status, delivery_status, submitted_at);
+"""
+
+MIGRATION_013 = """
+CREATE TABLE course_catalog (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    internal_code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    course_role_id INTEGER NOT NULL,
+    course_role_name TEXT NOT NULL,
+    passing_score INTEGER NOT NULL CHECK (passing_score BETWEEN 0 AND 100),
+    cooldown_days INTEGER NOT NULL DEFAULT 14 CHECK (cooldown_days BETWEEN 0 AND 365),
+    enrollment_status TEXT NOT NULL DEFAULT 'CLOSED' CHECK (
+        enrollment_status IN ('OPEN','CLOSED')
+    ),
+    notes TEXT,
+    source_channel_id INTEGER NOT NULL,
+    source_message_id INTEGER NOT NULL,
+    source_content_sha256 TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, internal_code),
+    UNIQUE(guild_id, course_role_id),
+    UNIQUE(guild_id, source_channel_id, source_message_id)
+);
+
+CREATE TABLE course_requirements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    course_id INTEGER NOT NULL REFERENCES course_catalog(id) ON DELETE RESTRICT,
+    required_role_id INTEGER NOT NULL,
+    required_role_name TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(course_id, required_role_id)
+);
+
+CREATE TABLE course_applications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    course_id INTEGER NOT NULL REFERENCES course_catalog(id) ON DELETE RESTRICT,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','APPROVED','REJECTED','CANCELLED')
+    ),
+    eligibility_json TEXT NOT NULL,
+    submitted_at INTEGER NOT NULL,
+    decided_by INTEGER,
+    decided_at INTEGER,
+    decision_reason TEXT
+);
+
+CREATE UNIQUE INDEX uq_course_applications_pending
+ON course_applications(guild_id, course_id, member_id)
+WHERE status='PENDING';
+
+CREATE INDEX ix_course_catalog_status
+ON course_catalog(guild_id, active, enrollment_status, internal_code);
+
+CREATE INDEX ix_course_requirements_course
+ON course_requirements(guild_id, course_id, active, sort_order);
+
+CREATE INDEX ix_course_applications_status
+ON course_applications(guild_id, status, submitted_at, id);
+
+CREATE INDEX ix_course_applications_member
+ON course_applications(guild_id, discord_id, submitted_at DESC, id DESC);
+"""
+
+MIGRATION_014 = """
+ALTER TABLE authorized_voice_channels
+ADD COLUMN service_allowed INTEGER NOT NULL DEFAULT 1 CHECK (service_allowed IN (0,1));
+
+ALTER TABLE authorized_voice_channels
+ADD COLUMN counts_toward_patrol_minimum INTEGER NOT NULL DEFAULT 1
+    CHECK (counts_toward_patrol_minimum IN (0,1));
+
+ALTER TABLE shift_segments
+ADD COLUMN counts_toward_patrol_minimum INTEGER NOT NULL DEFAULT 1
+    CHECK (counts_toward_patrol_minimum IN (0,1));
+
+ALTER TABLE shifts ADD COLUMN minimum_patrol_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE shifts ADD COLUMN patrol_duration_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE shifts ADD COLUMN gross_duration_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE shifts ADD COLUMN patrol_requirement_met_at INTEGER;
+ALTER TABLE shifts ADD COLUMN validation_status TEXT NOT NULL DEFAULT 'VALID' CHECK (
+    validation_status IN ('PENDING','VALID','INVALIDATED','REVIEW_REQUIRED')
+);
+ALTER TABLE shifts ADD COLUMN automatic_validation_status TEXT NOT NULL DEFAULT 'VALID' CHECK (
+    automatic_validation_status IN ('PENDING','VALID','INVALIDATED','REVIEW_REQUIRED')
+);
+ALTER TABLE shifts ADD COLUMN invalid_reason TEXT;
+ALTER TABLE shifts ADD COLUMN validation_source TEXT NOT NULL DEFAULT 'LEGACY' CHECK (
+    validation_source IN ('AUTO','ADMIN_OVERRIDE','LEGACY')
+);
+ALTER TABLE shifts ADD COLUMN validated_by INTEGER;
+ALTER TABLE shifts ADD COLUMN validated_at INTEGER;
+ALTER TABLE shifts ADD COLUMN validation_reason TEXT;
+
+UPDATE shifts
+SET patrol_duration_ms = COALESCE((
+        SELECT SUM(MAX(0, COALESCE(ss.ended_at, shifts.ended_at, ss.started_at) - ss.started_at))
+        FROM shift_segments ss
+        WHERE ss.shift_id=shifts.id AND ss.counts_toward_patrol_minimum=1
+    ), 0),
+    gross_duration_ms = MAX(0, COALESCE(ended_at, started_at) - started_at),
+    validation_status = CASE
+        WHEN status IN ('ACTIVE','GRACE') THEN 'PENDING'
+        WHEN status='REVIEW_REQUIRED' THEN 'REVIEW_REQUIRED'
+        ELSE 'VALID'
+    END,
+    automatic_validation_status = CASE
+        WHEN status IN ('ACTIVE','GRACE') THEN 'PENDING'
+        WHEN status='REVIEW_REQUIRED' THEN 'REVIEW_REQUIRED'
+        ELSE 'VALID'
+    END,
+    validation_source = CASE
+        WHEN status IN ('ACTIVE','GRACE','REVIEW_REQUIRED') THEN 'AUTO'
+        ELSE 'LEGACY'
+    END;
+
+CREATE TABLE shift_validation_overrides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE RESTRICT,
+    actor_id INTEGER NOT NULL,
+    previous_validation_status TEXT NOT NULL,
+    resulting_validation_status TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_shift_validation_status
+ON shifts(guild_id, validation_status, started_at DESC);
+
+CREATE INDEX ix_shift_validation_overrides_shift
+ON shift_validation_overrides(guild_id, shift_id, created_at DESC);
+"""
+
+MIGRATION_015 = """
+CREATE TABLE member_operational_status (
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    manual_status TEXT NOT NULL DEFAULT 'UNAVAILABLE' CHECK (
+        manual_status IN ('AVAILABLE_FOR_PATROL','UNAVAILABLE')
+    ),
+    updated_at INTEGER NOT NULL,
+    updated_by INTEGER,
+    PRIMARY KEY(guild_id, member_id),
+    UNIQUE(guild_id, discord_id)
+);
+
+CREATE TABLE patrol_channels (
+    guild_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    channel_type TEXT NOT NULL CHECK (channel_type IN ('WAITING','ACTIVE')),
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    label TEXT,
+    created_at INTEGER NOT NULL,
+    created_by INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(guild_id, channel_id)
+);
+
+CREATE UNIQUE INDEX ux_patrol_waiting_channel
+ON patrol_channels(guild_id)
+WHERE channel_type='WAITING' AND enabled=1;
+
+CREATE INDEX ix_patrol_channels_order
+ON patrol_channels(guild_id, channel_type, enabled, sort_order, channel_id);
+
+CREATE TABLE patrols (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    sequence_number INTEGER NOT NULL,
+    voice_channel_id INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('RESERVED','ACTIVE','CLOSED','CANCELLED')),
+    origin TEXT NOT NULL CHECK (origin IN ('AUTO','ADMIN')),
+    minimum_members INTEGER NOT NULL,
+    continue_until_empty INTEGER NOT NULL DEFAULT 1 CHECK (continue_until_empty IN (0,1)),
+    leader_member_id INTEGER REFERENCES members(id) ON DELETE RESTRICT,
+    reserved_at INTEGER NOT NULL,
+    started_at INTEGER,
+    ended_at INTEGER,
+    end_reason TEXT,
+    created_by INTEGER,
+    movement_error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, sequence_number)
+);
+
+CREATE UNIQUE INDEX ux_active_patrol_call
+ON patrols(guild_id, voice_channel_id)
+WHERE status IN ('RESERVED','ACTIVE');
+
+CREATE INDEX ix_patrol_status
+ON patrols(guild_id, status, started_at, id);
+
+CREATE TABLE patrol_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    patrol_id INTEGER NOT NULL REFERENCES patrols(id) ON DELETE RESTRICT,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    member_role TEXT NOT NULL DEFAULT 'MEMBER' CHECK (member_role IN ('LEADER','MEMBER')),
+    status TEXT NOT NULL DEFAULT 'RESERVED' CHECK (
+        status IN ('RESERVED','ACTIVE','LEFT','CANCELLED')
+    ),
+    reserved_at INTEGER NOT NULL,
+    joined_at INTEGER,
+    left_at INTEGER,
+    associated_shift_id INTEGER REFERENCES shifts(id) ON DELETE RESTRICT,
+    UNIQUE(patrol_id, member_id)
+);
+
+CREATE UNIQUE INDEX ux_member_active_patrol
+ON patrol_members(guild_id, member_id)
+WHERE status IN ('RESERVED','ACTIVE');
+
+CREATE INDEX ix_patrol_members_patrol
+ON patrol_members(patrol_id, status, reserved_at);
+
+CREATE TABLE patrol_queue_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'QUEUED' CHECK (
+        status IN ('QUEUED','FORMING','REMOVED','FORMED','INVALIDATED')
+    ),
+    source TEXT NOT NULL CHECK (source IN ('VOICE','PANEL','RECOVERY')),
+    queue_entered_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    exited_at INTEGER,
+    exit_reason TEXT,
+    patrol_id INTEGER REFERENCES patrols(id) ON DELETE RESTRICT
+);
+
+CREATE UNIQUE INDEX ux_member_current_patrol_queue
+ON patrol_queue_entries(guild_id, member_id)
+WHERE status IN ('QUEUED','FORMING');
+
+CREATE INDEX ix_patrol_queue_fifo
+ON patrol_queue_entries(guild_id, status, queue_entered_at, id);
+
+CREATE TABLE patrol_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    patrol_id INTEGER NOT NULL REFERENCES patrols(id) ON DELETE RESTRICT,
+    subject_member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    subject_discord_id INTEGER NOT NULL,
+    author_id INTEGER NOT NULL,
+    rating TEXT NOT NULL CHECK (rating IN ('POSITIVE','NEUTRAL','NEEDS_ATTENTION')),
+    observation TEXT,
+    created_at INTEGER NOT NULL,
+    UNIQUE(patrol_id, subject_member_id, author_id)
+);
+
+CREATE INDEX ix_patrol_feedback_subject
+ON patrol_feedback(guild_id, subject_member_id, created_at DESC);
+
+CREATE TABLE operational_flags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    shift_id INTEGER REFERENCES shifts(id) ON DELETE RESTRICT,
+    flag_type TEXT NOT NULL,
+    evidence_json TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','DISMISSED','RESOLVED')),
+    created_at INTEGER NOT NULL,
+    reviewed_by INTEGER,
+    reviewed_at INTEGER,
+    review_reason TEXT,
+    UNIQUE(guild_id, fingerprint)
+);
+
+CREATE INDEX ix_operational_flags_status
+ON operational_flags(guild_id, status, created_at DESC);
+
+CREATE TABLE integrity_findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER,
+    finding_type TEXT NOT NULL,
+    fix_class TEXT NOT NULL CHECK (fix_class IN ('AUTO_FIX_SAFE','REQUIRES_REVIEW')),
+    evidence_json TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','RESOLVED','DISMISSED')),
+    detected_at INTEGER NOT NULL,
+    resolved_by INTEGER,
+    resolved_at INTEGER,
+    resolution TEXT,
+    UNIQUE(guild_id, fingerprint)
+);
+
+CREATE INDEX ix_integrity_findings_status
+ON integrity_findings(guild_id, status, fix_class, detected_at DESC);
+
+ALTER TABLE course_catalog ADD COLUMN minimum_rank_level INTEGER;
+ALTER TABLE course_catalog ADD COLUMN minimum_valid_hours_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE course_catalog ADD COLUMN minimum_tenure_days INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE course_catalog ADD COLUMN require_no_active_suspension INTEGER NOT NULL DEFAULT 1
+    CHECK (require_no_active_suspension IN (0,1));
+ALTER TABLE course_catalog ADD COLUMN prerequisite_course_name TEXT;
+
+CREATE TABLE training_evaluations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    training_id INTEGER NOT NULL REFERENCES training_events(id) ON DELETE RESTRICT,
+    enrollment_id INTEGER NOT NULL REFERENCES training_enrollments(id) ON DELETE RESTRICT,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    attendance TEXT NOT NULL CHECK (attendance IN ('PRESENT','ABSENT')),
+    result TEXT NOT NULL CHECK (result IN ('APPROVED','FAILED')),
+    performance TEXT NOT NULL CHECK (performance IN ('EXCELLENT','GOOD','REGULAR','INSUFFICIENT')),
+    observation TEXT,
+    evaluator_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(training_id, enrollment_id)
+);
+
+CREATE INDEX ix_training_evaluations_member
+ON training_evaluations(guild_id, member_id, created_at DESC);
+
+CREATE TABLE recruit_evaluations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    evaluator_id INTEGER NOT NULL,
+    outcome TEXT NOT NULL CHECK (outcome IN ('POSITIVE','NEUTRAL','NEEDS_ATTENTION')),
+    observation TEXT,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_recruit_evaluations_member
+ON recruit_evaluations(guild_id, member_id, created_at DESC);
+
+CREATE TABLE activity_swap_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    requester_member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    requester_discord_id INTEGER NOT NULL,
+    target_member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    target_discord_id INTEGER NOT NULL,
+    activity_name TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    requires_command INTEGER NOT NULL DEFAULT 1 CHECK (requires_command IN (0,1)),
+    status TEXT NOT NULL CHECK (
+        status IN ('WAITING_MEMBER','WAITING_COMMAND','APPROVED','DENIED','CANCELLED')
+    ),
+    submitted_at INTEGER NOT NULL,
+    member_decided_at INTEGER,
+    member_decision_reason TEXT,
+    command_decided_at INTEGER,
+    command_decided_by INTEGER,
+    command_decision_reason TEXT
+);
+
+CREATE UNIQUE INDEX ux_open_activity_swap
+ON activity_swap_requests(guild_id, requester_member_id, target_member_id, activity_name)
+WHERE status IN ('WAITING_MEMBER','WAITING_COMMAND');
+
+CREATE INDEX ix_activity_swaps_status
+ON activity_swap_requests(guild_id, status, submitted_at);
+
+CREATE TABLE module_maintenance (
+    guild_id INTEGER NOT NULL,
+    module_key TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0,1)),
+    reason TEXT,
+    expected_end_at INTEGER,
+    enabled_by INTEGER,
+    enabled_at INTEGER,
+    disabled_by INTEGER,
+    disabled_at INTEGER,
+    PRIMARY KEY(guild_id, module_key)
+);
+
+CREATE TABLE domain_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    aggregate_type TEXT NOT NULL,
+    aggregate_id INTEGER,
+    event_key TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(guild_id, event_key)
+);
+
+CREATE INDEX ix_domain_events_type
+ON domain_events(guild_id, event_type, created_at DESC);
+"""
+
+MIGRATION_016 = """
+CREATE TABLE web_action_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    action_type TEXT NOT NULL CHECK (
+        action_type IN ('RANK_SYNC','MEMBER_SYNC','PANEL_REFRESH')
+    ),
+    target_discord_id INTEGER,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    requested_by INTEGER NOT NULL,
+    correlation_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','PROCESSING','COMPLETED','FAILED')
+    ),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    available_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    processed_at INTEGER,
+    last_error TEXT
+);
+
+CREATE INDEX ix_web_action_outbox_delivery
+ON web_action_outbox(status, available_at, created_at);
+
+CREATE TABLE web_access_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    discord_id INTEGER,
+    event_type TEXT NOT NULL,
+    route TEXT,
+    result TEXT NOT NULL,
+    correlation_id TEXT NOT NULL,
+    ip_hash TEXT,
+    user_agent_hash TEXT,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_web_access_events_time
+ON web_access_events(guild_id, created_at DESC);
+
+CREATE TABLE discord_resource_registry (
+    guild_id INTEGER NOT NULL,
+    resource_id INTEGER NOT NULL,
+    resource_type TEXT NOT NULL CHECK (
+        resource_type IN ('CATEGORY','TEXT_CHANNEL','VOICE_CHANNEL','ROLE')
+    ),
+    name TEXT NOT NULL,
+    parent_id INTEGER,
+    position INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(guild_id, resource_id, resource_type)
+);
+
+CREATE INDEX ix_discord_resource_registry_type
+ON discord_resource_registry(guild_id, resource_type, active, position, name);
+"""
+
+MIGRATION_017 = """
+CREATE TABLE recruitment_form_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    version_number INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','PUBLISHED','RETIRED')),
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    created_by INTEGER,
+    published_at INTEGER,
+    published_by INTEGER,
+    UNIQUE(guild_id, version_number)
+);
+
+CREATE TABLE recruitment_question_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    questions_per_application INTEGER NOT NULL DEFAULT 1,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    UNIQUE(guild_id, code)
+);
+
+CREATE TABLE recruitment_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    stable_key TEXT NOT NULL,
+    group_id INTEGER NOT NULL REFERENCES recruitment_question_groups(id) ON DELETE RESTRICT,
+    title TEXT NOT NULL,
+    description TEXT,
+    question_type TEXT NOT NULL CHECK (
+        question_type IN ('SHORT_TEXT','LONG_TEXT','NUMBER','DATE','BOOLEAN','SINGLE_SELECT','MULTI_SELECT')
+    ),
+    required INTEGER NOT NULL DEFAULT 1 CHECK (required IN (0,1)),
+    position INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+    min_length INTEGER,
+    max_length INTEGER,
+    expected_min_length INTEGER,
+    expected_max_length INTEGER,
+    security_level TEXT NOT NULL DEFAULT 'NORMAL' CHECK (
+        security_level IN ('NORMAL','CONTROLLED','STRICT')
+    ),
+    timer_enabled INTEGER NOT NULL DEFAULT 0 CHECK (timer_enabled IN (0,1)),
+    timer_mode TEXT NOT NULL DEFAULT 'AUTO' CHECK (timer_mode IN ('AUTO','FIXED','NONE')),
+    fixed_time_seconds INTEGER,
+    allow_back INTEGER NOT NULL DEFAULT 1 CHECK (allow_back IN (0,1)),
+    shuffle_position INTEGER NOT NULL DEFAULT 0 CHECK (shuffle_position IN (0,1)),
+    difficulty TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (difficulty IN ('EASY','MEDIUM','HARD')),
+    options_json TEXT NOT NULL DEFAULT '[]',
+    condition_json TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, stable_key)
+);
+
+CREATE INDEX ix_recruitment_questions_group
+ON recruitment_questions(guild_id, group_id, enabled, difficulty, position);
+
+CREATE TABLE recruitment_form_version_questions (
+    form_version_id INTEGER NOT NULL REFERENCES recruitment_form_versions(id) ON DELETE RESTRICT,
+    question_id INTEGER NOT NULL REFERENCES recruitment_questions(id) ON DELETE RESTRICT,
+    position INTEGER NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    PRIMARY KEY(form_version_id, question_id)
+);
+
+CREATE TABLE recruitment_campaigns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    public_id TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (
+        status IN ('DRAFT','SCHEDULED','OPEN','PAUSED','CLOSED','ARCHIVED')
+    ),
+    opens_at INTEGER,
+    closes_at INTEGER,
+    form_version_id INTEGER REFERENCES recruitment_form_versions(id) ON DELETE RESTRICT,
+    cooldown_days INTEGER NOT NULL DEFAULT 30 CHECK (cooldown_days BETWEEN 0 AND 365),
+    minimum_age INTEGER NOT NULL DEFAULT 16 CHECK (minimum_age BETWEEN 13 AND 100),
+    maximum_applications INTEGER,
+    initial_rank_id INTEGER REFERENCES ranks(id) ON DELETE RESTRICT,
+    candidate_role_id INTEGER,
+    interview_channel_id INTEGER,
+    created_at INTEGER NOT NULL,
+    created_by INTEGER,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, name)
+);
+
+CREATE INDEX ix_recruitment_campaign_status
+ON recruitment_campaigns(guild_id, status, opens_at, closes_at);
+
+CREATE TABLE recruitment_applications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    public_id TEXT NOT NULL UNIQUE,
+    protocol TEXT UNIQUE,
+    campaign_id INTEGER NOT NULL REFERENCES recruitment_campaigns(id) ON DELETE RESTRICT,
+    form_version_id INTEGER NOT NULL REFERENCES recruitment_form_versions(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    discord_username TEXT,
+    discord_global_name TEXT,
+    discord_avatar TEXT,
+    guild_membership_verified_at INTEGER,
+    consent_accepted_at INTEGER,
+    bgr_id TEXT NOT NULL,
+    candidate_nick TEXT NOT NULL,
+    age INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (
+        status IN ('DRAFT','SUBMITTED','UNDER_REVIEW','INTERVIEW_PENDING',
+                   'INTERVIEW_SCHEDULED','INTERVIEW_COMPLETED','FINAL_REVIEW',
+                   'APPROVED','REJECTED','WITHDRAWN','EXPIRED')
+    ),
+    stage TEXT NOT NULL DEFAULT 'APPLICATION',
+    version INTEGER NOT NULL DEFAULT 1,
+    idempotency_key TEXT NOT NULL,
+    assigned_to INTEGER,
+    assigned_at INTEGER,
+    started_at INTEGER NOT NULL,
+    submitted_at INTEGER,
+    reviewed_at INTEGER,
+    decided_at INTEGER,
+    decided_by INTEGER,
+    internal_reason TEXT,
+    candidate_message TEXT,
+    cooldown_until INTEGER,
+    legacy_incomplete INTEGER NOT NULL DEFAULT 0 CHECK (legacy_incomplete IN (0,1)),
+    legacy_ticket_id INTEGER REFERENCES service_tickets(id) ON DELETE RESTRICT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, idempotency_key),
+    UNIQUE(guild_id, legacy_ticket_id)
+);
+
+CREATE UNIQUE INDEX ux_recruitment_active_discord
+ON recruitment_applications(guild_id, discord_id)
+WHERE status IN ('DRAFT','SUBMITTED','UNDER_REVIEW','INTERVIEW_PENDING',
+                 'INTERVIEW_SCHEDULED','INTERVIEW_COMPLETED','FINAL_REVIEW');
+
+CREATE UNIQUE INDEX ux_recruitment_active_bgr_id
+ON recruitment_applications(guild_id, bgr_id)
+WHERE status IN ('DRAFT','SUBMITTED','UNDER_REVIEW','INTERVIEW_PENDING',
+                 'INTERVIEW_SCHEDULED','INTERVIEW_COMPLETED','FINAL_REVIEW');
+
+CREATE INDEX ix_recruitment_application_queue
+ON recruitment_applications(guild_id, status, submitted_at, created_at);
+
+CREATE TABLE recruitment_application_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id INTEGER NOT NULL REFERENCES recruitment_applications(id) ON DELETE RESTRICT,
+    question_id INTEGER NOT NULL REFERENCES recruitment_questions(id) ON DELETE RESTRICT,
+    ordinal INTEGER NOT NULL,
+    question_snapshot_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'NOT_STARTED' CHECK (
+        status IN ('NOT_STARTED','ACTIVE','SUBMITTED','TIME_EXPIRED','SKIPPED')
+    ),
+    token_nonce TEXT,
+    started_at INTEGER,
+    expires_at INTEGER,
+    draft_answer_json TEXT,
+    final_answer_json TEXT,
+    saved_at INTEGER,
+    submitted_at INTEGER,
+    duration_ms INTEGER,
+    UNIQUE(application_id, question_id),
+    UNIQUE(application_id, ordinal)
+);
+
+CREATE INDEX ix_recruitment_application_questions_progress
+ON recruitment_application_questions(application_id, status, ordinal);
+
+CREATE TABLE recruitment_integrity_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    application_id INTEGER NOT NULL REFERENCES recruitment_applications(id) ON DELETE RESTRICT,
+    application_question_id INTEGER REFERENCES recruitment_application_questions(id) ON DELETE RESTRICT,
+    event_type TEXT NOT NULL CHECK (
+        event_type IN ('QUESTION_STARTED','QUESTION_SUBMITTED','QUESTION_TIMEOUT',
+                       'COPY_BLOCKED','PASTE_BLOCKED','CUT_BLOCKED','DROP_BLOCKED',
+                       'TAB_HIDDEN','TAB_VISIBLE','WINDOW_BLURRED','WINDOW_FOCUSED',
+                       'UNUSUAL_INPUT_PATTERN','POSSIBLE_SIMILAR_RESPONSE')
+    ),
+    occurred_at INTEGER NOT NULL,
+    duration_ms INTEGER,
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX ix_recruitment_integrity_application
+ON recruitment_integrity_events(application_id, occurred_at, event_type);
+
+CREATE TABLE recruitment_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    application_id INTEGER NOT NULL REFERENCES recruitment_applications(id) ON DELETE RESTRICT,
+    reviewer_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    reason TEXT,
+    from_status TEXT,
+    to_status TEXT,
+    application_version INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_recruitment_reviews_application
+ON recruitment_reviews(application_id, created_at DESC);
+
+CREATE TABLE recruitment_interviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    application_id INTEGER NOT NULL REFERENCES recruitment_applications(id) ON DELETE RESTRICT,
+    scheduled_at INTEGER NOT NULL,
+    interviewer_id INTEGER NOT NULL,
+    notes TEXT,
+    status TEXT NOT NULL DEFAULT 'SCHEDULED' CHECK (
+        status IN ('SCHEDULED','COMPLETED','CANCELLED','NO_SHOW')
+    ),
+    created_at INTEGER NOT NULL,
+    completed_at INTEGER
+);
+
+CREATE INDEX ix_recruitment_interviews_application
+ON recruitment_interviews(application_id, scheduled_at DESC);
+
+CREATE TABLE recruitment_evaluations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    application_id INTEGER NOT NULL REFERENCES recruitment_applications(id) ON DELETE RESTRICT,
+    interview_id INTEGER REFERENCES recruitment_interviews(id) ON DELETE RESTRICT,
+    evaluator_id INTEGER NOT NULL,
+    communication TEXT NOT NULL,
+    posture TEXT NOT NULL,
+    knowledge TEXT NOT NULL,
+    discipline TEXT NOT NULL,
+    result TEXT NOT NULL CHECK (result IN ('FIT','UNFIT','REEVALUATE')),
+    observation TEXT,
+    evaluated_at INTEGER NOT NULL
+);
+
+CREATE TABLE recruitment_internal_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    application_id INTEGER NOT NULL REFERENCES recruitment_applications(id) ON DELETE RESTRICT,
+    author_id INTEGER NOT NULL,
+    note TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE recruitment_adaptations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    application_id INTEGER NOT NULL REFERENCES recruitment_applications(id) ON DELETE RESTRICT,
+    extra_time_percent INTEGER NOT NULL DEFAULT 0 CHECK (extra_time_percent BETWEEN 0 AND 200),
+    clipboard_adapted INTEGER NOT NULL DEFAULT 0 CHECK (clipboard_adapted IN (0,1)),
+    alternative_format TEXT,
+    reason TEXT NOT NULL,
+    approved_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE recruitment_cooldowns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    discord_id INTEGER NOT NULL,
+    application_id INTEGER REFERENCES recruitment_applications(id) ON DELETE RESTRICT,
+    starts_at INTEGER NOT NULL,
+    ends_at INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_recruitment_cooldowns_candidate
+ON recruitment_cooldowns(guild_id, discord_id, ends_at DESC);
+
+CREATE TABLE recruitment_blocks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    discord_id INTEGER,
+    bgr_id TEXT,
+    reason TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    revoked_by INTEGER,
+    revoked_at INTEGER,
+    CHECK (discord_id IS NOT NULL OR bgr_id IS NOT NULL)
+);
+
+CREATE INDEX ix_recruitment_blocks_candidate
+ON recruitment_blocks(guild_id, active, discord_id, bgr_id);
+
+CREATE TABLE recruitment_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    application_id INTEGER NOT NULL REFERENCES recruitment_applications(id) ON DELETE RESTRICT,
+    event_type TEXT NOT NULL,
+    actor_id INTEGER,
+    public_message TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_recruitment_history_application
+ON recruitment_history(application_id, created_at, id);
+
+CREATE TABLE recruitment_notification_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    application_id INTEGER NOT NULL REFERENCES recruitment_applications(id) ON DELETE RESTRICT,
+    event_type TEXT NOT NULL,
+    event_key TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','PROCESSING','COMPLETED','FAILED')
+    ),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    available_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    processed_at INTEGER,
+    last_error TEXT,
+    delivery_channel_id INTEGER,
+    delivery_message_id INTEGER,
+    UNIQUE(guild_id, event_key)
+);
+
+CREATE INDEX ix_recruitment_notification_delivery
+ON recruitment_notification_outbox(status, available_at, created_at);
+
+CREATE TABLE recruit_followups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    origin_application_id INTEGER NOT NULL REFERENCES recruitment_applications(id) ON DELETE RESTRICT,
+    status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','COMPLETED','CANCELLED')),
+    started_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    UNIQUE(guild_id, origin_application_id),
+    UNIQUE(guild_id, member_id, status)
+);
+
+ALTER TABLE members ADD COLUMN origin_recruitment_application_id INTEGER
+    REFERENCES recruitment_applications(id) ON DELETE RESTRICT;
+"""
+
+MIGRATION_018 = """
+CREATE TABLE recruitment_evaluation_context_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    version_number INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','PUBLISHED','RETIRED')),
+    name TEXT NOT NULL,
+    content_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    created_by INTEGER,
+    published_at INTEGER,
+    published_by INTEGER,
+    UNIQUE(guild_id, version_number)
+);
+
+CREATE TABLE recruitment_rubric_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    version_number INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','PUBLISHED','RETIRED')),
+    name TEXT NOT NULL,
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    created_by INTEGER,
+    published_at INTEGER,
+    published_by INTEGER,
+    UNIQUE(guild_id, version_number)
+);
+
+CREATE TABLE recruitment_rubric_criteria (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rubric_version_id INTEGER NOT NULL REFERENCES recruitment_rubric_versions(id) ON DELETE RESTRICT,
+    code TEXT NOT NULL,
+    label TEXT NOT NULL,
+    description TEXT NOT NULL,
+    weight INTEGER NOT NULL CHECK (weight BETWEEN 1 AND 100),
+    maximum_score REAL NOT NULL DEFAULT 10 CHECK (maximum_score > 0 AND maximum_score <= 100),
+    position INTEGER NOT NULL,
+    UNIQUE(rubric_version_id, code),
+    UNIQUE(rubric_version_id, position)
+);
+
+CREATE TABLE recruitment_analysis_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    application_id INTEGER NOT NULL REFERENCES recruitment_applications(id) ON DELETE RESTRICT,
+    analysis_type TEXT NOT NULL DEFAULT 'PRE_INTERVIEW' CHECK (
+        analysis_type IN ('PRE_INTERVIEW','FINAL_ASSISTED','PREVIEW')
+    ),
+    request_reason TEXT NOT NULL CHECK (
+        request_reason IN ('AUTOMATIC','MANUAL','RUBRIC_CHANGED','CONTEXT_CHANGED','INTERVIEW_COMPLETED','PREVIEW')
+    ),
+    requested_by INTEGER,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','PROCESSING','COMPLETED','FAILED','OUTDATED')
+    ),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3 CHECK (max_attempts BETWEEN 1 AND 10),
+    available_at INTEGER NOT NULL,
+    rubric_version_id INTEGER NOT NULL REFERENCES recruitment_rubric_versions(id) ON DELETE RESTRICT,
+    context_version_id INTEGER NOT NULL REFERENCES recruitment_evaluation_context_versions(id) ON DELETE RESTRICT,
+    prompt_version TEXT NOT NULL,
+    input_hash TEXT,
+    result_id INTEGER,
+    last_error_code TEXT,
+    last_error_detail TEXT,
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    completed_at INTEGER,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX ux_recruitment_analysis_active_job
+ON recruitment_analysis_jobs(application_id, analysis_type)
+WHERE status IN ('PENDING','PROCESSING');
+
+CREATE INDEX ix_recruitment_analysis_jobs_delivery
+ON recruitment_analysis_jobs(status, available_at, created_at);
+
+CREATE TABLE recruitment_analysis_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    application_id INTEGER NOT NULL REFERENCES recruitment_applications(id) ON DELETE RESTRICT,
+    job_id INTEGER NOT NULL REFERENCES recruitment_analysis_jobs(id) ON DELETE RESTRICT,
+    analysis_type TEXT NOT NULL CHECK (analysis_type IN ('PRE_INTERVIEW','FINAL_ASSISTED','PREVIEW')),
+    status TEXT NOT NULL DEFAULT 'COMPLETED' CHECK (status IN ('COMPLETED','OUTDATED')),
+    recommendation TEXT NOT NULL CHECK (recommendation IN ('RECOMMENDED','REVIEW','NOT_RECOMMENDED')),
+    confidence TEXT NOT NULL CHECK (confidence IN ('LOW','MEDIUM','HIGH')),
+    overall_score REAL NOT NULL CHECK (overall_score BETWEEN 0 AND 100),
+    summary TEXT NOT NULL,
+    criteria_json TEXT NOT NULL,
+    strengths_json TEXT NOT NULL,
+    concerns_json TEXT NOT NULL,
+    contradictions_json TEXT NOT NULL,
+    interview_questions_json TEXT NOT NULL,
+    integrity_review_recommended INTEGER NOT NULL DEFAULT 0 CHECK (integrity_review_recommended IN (0,1)),
+    deterministic_checks_json TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    rubric_version_id INTEGER NOT NULL REFERENCES recruitment_rubric_versions(id) ON DELETE RESTRICT,
+    context_version_id INTEGER NOT NULL REFERENCES recruitment_evaluation_context_versions(id) ON DELETE RESTRICT,
+    input_hash TEXT NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(application_id, analysis_type, input_hash)
+);
+
+CREATE INDEX ix_recruitment_analysis_results_application
+ON recruitment_analysis_results(application_id, created_at DESC, id DESC);
+
+CREATE TABLE recruitment_analysis_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    result_id INTEGER NOT NULL REFERENCES recruitment_analysis_results(id) ON DELETE RESTRICT,
+    reviewer_id INTEGER NOT NULL,
+    usefulness TEXT NOT NULL CHECK (usefulness IN ('YES','PARTIAL','NO')),
+    note TEXT,
+    created_at INTEGER NOT NULL,
+    UNIQUE(result_id, reviewer_id)
+);
+"""
+
+MIGRATION_019 = """
+CREATE TABLE security_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK (severity IN ('INFO','LOW','MEDIUM','HIGH','CRITICAL')),
+    actor_discord_id INTEGER,
+    target_type TEXT,
+    target_id TEXT,
+    source TEXT NOT NULL,
+    route TEXT,
+    request_id TEXT NOT NULL,
+    result TEXT NOT NULL CHECK (result IN ('ALLOWED','DENIED','BLOCKED','FAILED','DETECTED','RESOLVED')),
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_security_events_guild_time
+ON security_events(guild_id, created_at DESC, id DESC);
+
+CREATE INDEX ix_security_events_type_time
+ON security_events(event_type, created_at DESC, id DESC);
+
+CREATE TABLE security_session_revocations (
+    guild_id INTEGER NOT NULL,
+    discord_id INTEGER NOT NULL,
+    revoked_at INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    revoked_by INTEGER,
+    PRIMARY KEY (guild_id, discord_id)
+);
+
+CREATE TABLE internal_request_nonces (
+    nonce TEXT PRIMARY KEY,
+    guild_id INTEGER NOT NULL,
+    request_timestamp INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_internal_request_nonces_expiry
+ON internal_request_nonces(expires_at);
+
+CREATE TABLE security_discord_audit_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    findings_hash TEXT NOT NULL,
+    findings_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(guild_id, findings_hash)
+);
+
+CREATE INDEX ix_security_discord_snapshots_guild_time
+ON security_discord_audit_snapshots(guild_id, created_at DESC, id DESC);
+"""
+
+MIGRATION_020 = """
+ALTER TABLE patrols ADD COLUMN commander_member_id INTEGER
+    REFERENCES members(id) ON DELETE RESTRICT;
+ALTER TABLE patrols ADD COLUMN commander_assigned_at INTEGER;
+ALTER TABLE patrols ADD COLUMN commander_assignment_source TEXT
+    CHECK (commander_assignment_source IN ('AUTOMATIC','MANUAL_OVERRIDE','REASSIGNMENT'));
+ALTER TABLE patrols ADD COLUMN commander_manual_lock INTEGER NOT NULL DEFAULT 0
+    CHECK (commander_manual_lock IN (0,1));
+
+CREATE TABLE patrol_commander_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    patrol_id INTEGER NOT NULL REFERENCES patrols(id) ON DELETE RESTRICT,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    source TEXT NOT NULL CHECK (source IN ('AUTOMATIC','MANUAL_OVERRIDE','REASSIGNMENT')),
+    reason TEXT NOT NULL,
+    assigned_by INTEGER
+);
+
+CREATE UNIQUE INDEX ux_patrol_open_commander_history
+ON patrol_commander_history(patrol_id)
+WHERE ended_at IS NULL;
+
+CREATE INDEX ix_patrol_commander_history_timeline
+ON patrol_commander_history(guild_id, patrol_id, started_at, id);
+
+CREATE TABLE patrol_operational_flags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    patrol_id INTEGER NOT NULL REFERENCES patrols(id) ON DELETE RESTRICT,
+    flag_type TEXT NOT NULL CHECK (flag_type IN ('PATROL_WITHOUT_ELIGIBLE_COMMANDER')),
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','RESOLVED','DISMISSED')),
+    created_at INTEGER NOT NULL,
+    resolved_at INTEGER,
+    resolution TEXT
+);
+
+CREATE UNIQUE INDEX ux_patrol_open_operational_flag
+ON patrol_operational_flags(patrol_id, flag_type)
+WHERE status='OPEN';
+
+CREATE INDEX ix_patrol_operational_flags_inbox
+ON patrol_operational_flags(guild_id, status, created_at DESC);
+"""
+
+MIGRATION_021 = """
+CREATE UNIQUE INDEX ux_members_bgr_identity
+ON members(guild_id, lower(trim(character_id)))
+WHERE character_id IS NOT NULL AND trim(character_id)<>'';
+
+CREATE TABLE registration_gate_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    discord_id INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('UNREGISTERED','PENDING','REGISTERED','REQUIRES_REVIEW','BLOCKED')
+    ),
+    access_tier TEXT NOT NULL DEFAULT 'REGISTERED_VISITOR' CHECK (
+        access_tier IN ('REGISTERED_VISITOR','CANDIDATE','RECRUIT','MEMBER')
+    ),
+    mta_nick TEXT,
+    bgr_id TEXT,
+    member_id INTEGER REFERENCES members(id) ON DELETE RESTRICT,
+    recruitment_application_id INTEGER REFERENCES recruitment_applications(id) ON DELETE RESTRICT,
+    source TEXT NOT NULL CHECK (
+        source IN ('SELF_REGISTRATION','ADMIN_APPROVAL','SYSTEM_RECONCILIATION','REJOIN')
+    ),
+    conflict_code TEXT,
+    conflict_member_id INTEGER REFERENCES members(id) ON DELETE RESTRICT,
+    sync_status TEXT NOT NULL DEFAULT 'NOT_REQUIRED' CHECK (
+        sync_status IN ('NOT_REQUIRED','PENDING','SYNCED','FAILED')
+    ),
+    sync_error TEXT,
+    idempotency_key TEXT,
+    submitted_at INTEGER,
+    completed_at INTEGER,
+    reviewed_at INTEGER,
+    reviewed_by INTEGER,
+    review_reason TEXT,
+    last_attempt_at INTEGER,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, discord_id),
+    UNIQUE(guild_id, idempotency_key)
+);
+
+CREATE INDEX ix_registration_gate_queue
+ON registration_gate_records(guild_id, status, updated_at, id);
+
+CREATE INDEX ix_registration_gate_bgr_id
+ON registration_gate_records(guild_id, bgr_id, status);
+
+CREATE TABLE registration_gate_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    registration_id INTEGER NOT NULL REFERENCES registration_gate_records(id) ON DELETE RESTRICT,
+    event_type TEXT NOT NULL CHECK (
+        event_type IN (
+            'REGISTRATION_STARTED','REGISTRATION_COMPLETED','REGISTRATION_REVIEW_REQUIRED',
+            'REGISTRATION_APPROVED','REGISTRATION_REJECTED','REGISTRATION_IDENTITY_LINKED',
+            'REGISTRATION_ACCESS_GRANTED','REGISTRATION_ACCESS_REVOKED',
+            'REGISTRATION_RECONCILED','REGISTRATION_SYNC_FAILED'
+        )
+    ),
+    actor_id INTEGER,
+    source TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_registration_gate_events_timeline
+ON registration_gate_events(guild_id, registration_id, created_at, id);
+
+CREATE TABLE registration_access_classifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    resource_type TEXT NOT NULL CHECK (resource_type IN ('CATEGORY','CHANNEL')),
+    resource_id INTEGER NOT NULL,
+    internal_key TEXT NOT NULL,
+    access_class TEXT NOT NULL CHECK (
+        access_class IN ('ONBOARDING_VISIBLE','MEMBER_ONLY','STAFF_ONLY','PUBLIC')
+    ),
+    created_at INTEGER NOT NULL,
+    created_by INTEGER,
+    updated_at INTEGER NOT NULL,
+    updated_by INTEGER,
+    UNIQUE(guild_id, resource_type, resource_id),
+    UNIQUE(guild_id, resource_type, internal_key)
+);
+
+CREATE INDEX ix_registration_access_class
+ON registration_access_classifications(guild_id, access_class, resource_type);
+
+CREATE TABLE registration_permission_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    operation_id TEXT NOT NULL UNIQUE,
+    snapshot_json TEXT NOT NULL,
+    snapshot_sha256 TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PREVIEW' CHECK (
+        status IN ('PREVIEW','APPLIED','ROLLED_BACK','FAILED','STALE')
+    ),
+    created_by INTEGER,
+    created_at INTEGER NOT NULL,
+    applied_at INTEGER,
+    rolled_back_at INTEGER
+);
+
+CREATE INDEX ix_registration_permission_snapshots
+ON registration_permission_snapshots(guild_id, created_at DESC);
+
+CREATE TABLE registration_access_findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    finding_type TEXT NOT NULL CHECK (
+        finding_type IN (
+            'UNCLASSIFIED_RESOURCE','UNREGISTERED_ACCESS_LEAK','BOT_PERMISSION_ERROR',
+            'OWNER_LOCKOUT_RISK','ONBOARDING_UNAVAILABLE','SYNC_FAILURE'
+        )
+    ),
+    resource_id INTEGER,
+    discord_id INTEGER,
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','RESOLVED','DISMISSED')),
+    created_at INTEGER NOT NULL,
+    resolved_at INTEGER,
+    resolution TEXT,
+    UNIQUE(guild_id, fingerprint)
+);
+
+CREATE INDEX ix_registration_access_findings_queue
+ON registration_access_findings(guild_id, status, created_at DESC);
+
+CREATE TABLE recruit_onboarding_checklists (
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    registration_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        registration_status IN ('PENDING','COMPLETED')
+    ),
+    nickname_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        nickname_status IN ('PENDING','COMPLETED')
+    ),
+    role_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        role_status IN ('PENDING','COMPLETED')
+    ),
+    rank_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        rank_status IN ('PENDING','COMPLETED')
+    ),
+    regulation_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        regulation_status IN ('PENDING','COMPLETED')
+    ),
+    training_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        training_status IN ('PENDING','COMPLETED')
+    ),
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(guild_id, member_id)
+);
+"""
+
+MIGRATION_022 = """
+ALTER TABLE service_tickets ADD COLUMN priority TEXT NOT NULL DEFAULT 'NORMAL'
+    CHECK (priority IN ('LOW','NORMAL','HIGH','URGENT'));
+ALTER TABLE service_tickets ADD COLUMN last_requester_notification_at INTEGER;
+ALTER TABLE service_tickets ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+
+ALTER TABLE ticket_rooms ADD COLUMN active_category_id INTEGER;
+ALTER TABLE ticket_rooms ADD COLUMN archive_category_id INTEGER;
+ALTER TABLE ticket_rooms ADD COLUMN responsible_role_id INTEGER;
+ALTER TABLE ticket_rooms ADD COLUMN responsible_role_mentioned_at INTEGER;
+ALTER TABLE ticket_rooms ADD COLUMN reopened_by INTEGER;
+ALTER TABLE ticket_rooms ADD COLUMN reopened_at INTEGER;
+ALTER TABLE ticket_rooms ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+
+CREATE TABLE ticket_participants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    ticket_id INTEGER NOT NULL REFERENCES service_tickets(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    added_by INTEGER NOT NULL,
+    added_at INTEGER NOT NULL,
+    removed_by INTEGER,
+    removed_at INTEGER,
+    UNIQUE(guild_id, ticket_id, discord_id, added_at)
+);
+
+CREATE UNIQUE INDEX ux_ticket_active_participant
+ON ticket_participants(guild_id, ticket_id, discord_id)
+WHERE removed_at IS NULL;
+
+CREATE INDEX ix_ticket_participants_current
+ON ticket_participants(guild_id, ticket_id, removed_at, added_at);
+
+CREATE TABLE ticket_operation_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    ticket_id INTEGER NOT NULL REFERENCES service_tickets(id) ON DELETE RESTRICT,
+    event_type TEXT NOT NULL CHECK (
+        event_type IN (
+            'ROOM_CREATED','RESPONSIBLE_ROLE_MENTIONED','CLAIMED','RELEASED',
+            'PRIORITY_CHANGED','PARTICIPANT_ADDED','PARTICIPANT_REMOVED',
+            'REQUESTER_NOTIFIED','TRANSCRIPT_GENERATED','CLOSED','ARCHIVED','REOPENED'
+        )
+    ),
+    actor_id INTEGER,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_ticket_operation_timeline
+ON ticket_operation_events(guild_id, ticket_id, created_at, id);
+
+CREATE TABLE ticket_transcripts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    ticket_id INTEGER NOT NULL REFERENCES service_tickets(id) ON DELETE RESTRICT,
+    generated_by INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    message_count INTEGER NOT NULL,
+    content_sha256 TEXT NOT NULL,
+    format_version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_ticket_transcripts_history
+ON ticket_transcripts(guild_id, ticket_id, created_at DESC);
+"""
+
+MIGRATION_023 = """
+CREATE TABLE access_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, code)
+);
+
+CREATE TABLE access_profile_permissions (
+    access_profile_id INTEGER NOT NULL REFERENCES access_profiles(id) ON DELETE CASCADE,
+    permission TEXT NOT NULL,
+    effect TEXT NOT NULL DEFAULT 'GRANT' CHECK (effect IN ('GRANT','DENY')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(access_profile_id, permission)
+);
+
+CREATE TABLE functional_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    access_profile_id INTEGER REFERENCES access_profiles(id) ON DELETE RESTRICT,
+    is_primary_candidate INTEGER NOT NULL DEFAULT 1 CHECK (is_primary_candidate IN (0,1)),
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, code)
+);
+
+CREATE TABLE functional_position_permissions (
+    position_id INTEGER NOT NULL REFERENCES functional_positions(id) ON DELETE CASCADE,
+    permission TEXT NOT NULL,
+    effect TEXT NOT NULL DEFAULT 'GRANT' CHECK (effect IN ('GRANT','DENY')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(position_id, permission)
+);
+
+CREATE TABLE rank_permissions (
+    rank_id INTEGER NOT NULL REFERENCES ranks(id) ON DELETE CASCADE,
+    permission TEXT NOT NULL,
+    effect TEXT NOT NULL DEFAULT 'GRANT' CHECK (effect IN ('GRANT','DENY')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(rank_id, permission)
+);
+
+CREATE TABLE discord_role_mappings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    discord_role_id INTEGER NOT NULL,
+    mapping_type TEXT NOT NULL CHECK (
+        mapping_type IN ('RANK','POSITION','QUALIFICATION','SYSTEM','COSMETIC','ACCESS')
+    ),
+    internal_code TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    rank_id INTEGER REFERENCES ranks(id) ON DELETE CASCADE,
+    position_id INTEGER REFERENCES functional_positions(id) ON DELETE CASCADE,
+    access_profile_id INTEGER REFERENCES access_profiles(id) ON DELETE RESTRICT,
+    is_primary_position_candidate INTEGER NOT NULL DEFAULT 0
+        CHECK (is_primary_position_candidate IN (0,1)),
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    created_by INTEGER,
+    CHECK (
+        (mapping_type='RANK' AND rank_id IS NOT NULL)
+        OR (mapping_type='POSITION' AND position_id IS NOT NULL)
+        OR (mapping_type='ACCESS' AND access_profile_id IS NOT NULL)
+        OR mapping_type IN ('QUALIFICATION','SYSTEM','COSMETIC')
+    ),
+    UNIQUE(guild_id, discord_role_id, mapping_type)
+);
+
+CREATE INDEX ix_discord_role_mappings_lookup
+ON discord_role_mappings(guild_id, discord_role_id, enabled, mapping_type);
+
+CREATE TRIGGER validate_discord_role_mappings_insert
+BEFORE INSERT ON discord_role_mappings
+FOR EACH ROW
+WHEN (
+    NEW.rank_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM ranks r WHERE r.id=NEW.rank_id AND r.guild_id=NEW.guild_id
+    )
+) OR (
+    NEW.position_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM functional_positions p
+        WHERE p.id=NEW.position_id AND p.guild_id=NEW.guild_id
+    )
+) OR (
+    NEW.access_profile_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM access_profiles ap
+        WHERE ap.id=NEW.access_profile_id AND ap.guild_id=NEW.guild_id
+    )
+)
+BEGIN
+    SELECT RAISE(ABORT, 'cross-guild discord role mapping');
+END;
+
+CREATE TRIGGER validate_discord_role_mappings_update
+BEFORE UPDATE OF guild_id, rank_id, position_id, access_profile_id
+ON discord_role_mappings
+FOR EACH ROW
+WHEN (
+    NEW.rank_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM ranks r WHERE r.id=NEW.rank_id AND r.guild_id=NEW.guild_id
+    )
+) OR (
+    NEW.position_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM functional_positions p
+        WHERE p.id=NEW.position_id AND p.guild_id=NEW.guild_id
+    )
+) OR (
+    NEW.access_profile_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM access_profiles ap
+        WHERE ap.id=NEW.access_profile_id AND ap.guild_id=NEW.guild_id
+    )
+)
+BEGIN
+    SELECT RAISE(ABORT, 'cross-guild discord role mapping');
+END;
+
+CREATE UNIQUE INDEX ux_discord_role_mappings_enabled_rank
+ON discord_role_mappings(guild_id, rank_id)
+WHERE mapping_type='RANK' AND enabled=1 AND rank_id IS NOT NULL;
+
+CREATE TABLE member_positions (
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+    position_id INTEGER NOT NULL REFERENCES functional_positions(id) ON DELETE RESTRICT,
+    source_role_id INTEGER NOT NULL,
+    is_primary INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0,1)),
+    assigned_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    PRIMARY KEY(member_id, position_id)
+);
+
+CREATE UNIQUE INDEX ux_member_primary_position
+ON member_positions(member_id)
+WHERE is_primary=1;
+
+CREATE TRIGGER validate_member_positions_insert
+BEFORE INSERT ON member_positions
+FOR EACH ROW
+WHEN NOT EXISTS (
+    SELECT 1
+    FROM members m
+    JOIN functional_positions p
+      ON p.id=NEW.position_id AND p.guild_id=m.guild_id
+    JOIN discord_role_mappings drm
+      ON drm.guild_id=m.guild_id
+     AND drm.discord_role_id=NEW.source_role_id
+     AND drm.mapping_type='POSITION'
+     AND drm.position_id=NEW.position_id
+    WHERE m.id=NEW.member_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid member position projection');
+END;
+
+CREATE TRIGGER validate_member_positions_update
+BEFORE UPDATE OF member_id, position_id, source_role_id ON member_positions
+FOR EACH ROW
+WHEN NOT EXISTS (
+    SELECT 1
+    FROM members m
+    JOIN functional_positions p
+      ON p.id=NEW.position_id AND p.guild_id=m.guild_id
+    JOIN discord_role_mappings drm
+      ON drm.guild_id=m.guild_id
+     AND drm.discord_role_id=NEW.source_role_id
+     AND drm.mapping_type='POSITION'
+     AND drm.position_id=NEW.position_id
+    WHERE m.id=NEW.member_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid member position projection');
+END;
+
+CREATE TABLE member_access_profiles (
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+    access_profile_id INTEGER NOT NULL REFERENCES access_profiles(id) ON DELETE RESTRICT,
+    source_mapping_id INTEGER NOT NULL
+        REFERENCES discord_role_mappings(id) ON DELETE CASCADE,
+    source_role_id INTEGER NOT NULL,
+    assigned_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    PRIMARY KEY(member_id, source_mapping_id)
+);
+
+CREATE INDEX ix_member_access_profiles_member
+ON member_access_profiles(member_id, access_profile_id);
+
+CREATE INDEX ix_member_access_profiles_mapping
+ON member_access_profiles(source_mapping_id);
+
+CREATE INDEX ix_member_access_profiles_profile
+ON member_access_profiles(access_profile_id);
+
+CREATE TRIGGER validate_member_access_profiles_insert
+BEFORE INSERT ON member_access_profiles
+FOR EACH ROW
+WHEN NOT EXISTS (
+    SELECT 1
+    FROM members m
+    JOIN access_profiles ap
+      ON ap.id=NEW.access_profile_id
+     AND ap.guild_id=m.guild_id
+    JOIN discord_role_mappings drm
+      ON drm.id=NEW.source_mapping_id
+     AND drm.guild_id=m.guild_id
+     AND drm.mapping_type='ACCESS'
+     AND drm.access_profile_id=NEW.access_profile_id
+     AND drm.discord_role_id=NEW.source_role_id
+    WHERE m.id=NEW.member_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid member access projection');
+END;
+
+CREATE TRIGGER validate_member_access_profiles_update
+BEFORE UPDATE OF member_id, access_profile_id, source_mapping_id, source_role_id
+ON member_access_profiles
+FOR EACH ROW
+WHEN NOT EXISTS (
+    SELECT 1
+    FROM members m
+    JOIN access_profiles ap
+      ON ap.id=NEW.access_profile_id
+     AND ap.guild_id=m.guild_id
+    JOIN discord_role_mappings drm
+      ON drm.id=NEW.source_mapping_id
+     AND drm.guild_id=m.guild_id
+     AND drm.mapping_type='ACCESS'
+     AND drm.access_profile_id=NEW.access_profile_id
+     AND drm.discord_role_id=NEW.source_role_id
+    WHERE m.id=NEW.member_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid member access projection');
+END;
+
+CREATE TABLE member_permission_overrides (
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+    permission TEXT NOT NULL,
+    effect TEXT NOT NULL CHECK (effect IN ('GRANT','DENY')),
+    reason TEXT NOT NULL,
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(member_id, permission)
+);
+
+CREATE TABLE member_identity_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    source TEXT NOT NULL,
+    actor_id INTEGER,
+    correlation_id TEXT NOT NULL,
+    before_json TEXT NOT NULL DEFAULT '{}',
+    after_json TEXT NOT NULL DEFAULT '{}',
+    role_ids_json TEXT NOT NULL DEFAULT '[]',
+    authorization_version INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_member_identity_events_timeline
+ON member_identity_events(guild_id, member_id, created_at DESC, id DESC);
+
+CREATE INDEX ix_member_identity_events_correlation
+ON member_identity_events(correlation_id, id);
+
+ALTER TABLE rank_sync_events ADD COLUMN correlation_id TEXT;
+
+CREATE INDEX ix_rank_sync_events_correlation
+ON rank_sync_events(correlation_id, id);
+
+CREATE TRIGGER validate_member_identity_events_insert
+BEFORE INSERT ON member_identity_events
+FOR EACH ROW
+WHEN NOT EXISTS (
+    SELECT 1 FROM members m
+    WHERE m.id=NEW.member_id
+      AND m.guild_id=NEW.guild_id
+      AND m.discord_id=NEW.discord_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'cross-guild identity event');
+END;
+
+CREATE TABLE identity_reconciliation_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    mode TEXT NOT NULL CHECK (mode IN ('PREVIEW','APPLY')),
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','PROCESSING','COMPLETED','FAILED')
+    ),
+    requested_by INTEGER NOT NULL,
+    source_job_id INTEGER REFERENCES identity_reconciliation_jobs(id) ON DELETE RESTRICT,
+    correlation_id TEXT NOT NULL UNIQUE,
+    catalog_hash TEXT,
+    total_members INTEGER NOT NULL DEFAULT 0,
+    unchanged_members INTEGER NOT NULL DEFAULT 0,
+    divergent_positions INTEGER NOT NULL DEFAULT 0,
+    divergent_ranks INTEGER NOT NULL DEFAULT 0,
+    review_required INTEGER NOT NULL DEFAULT 0,
+    failed_members INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    completed_at INTEGER,
+    last_error TEXT
+);
+
+CREATE TABLE identity_reconciliation_job_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL REFERENCES identity_reconciliation_jobs(id) ON DELETE CASCADE,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    result TEXT NOT NULL CHECK (
+        result IN ('UNCHANGED','DIVERGENT','REVIEW_REQUIRED','APPLIED','FAILED')
+    ),
+    before_json TEXT NOT NULL DEFAULT '{}',
+    after_json TEXT NOT NULL DEFAULT '{}',
+    role_ids_json TEXT NOT NULL DEFAULT '[]',
+    roles_hash TEXT,
+    discord_present_snapshot INTEGER NOT NULL DEFAULT 1
+        CHECK (discord_present_snapshot IN (0,1)),
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    UNIQUE(job_id, member_id)
+);
+
+CREATE INDEX ix_identity_reconciliation_jobs_status
+ON identity_reconciliation_jobs(guild_id, status, created_at DESC);
+
+CREATE UNIQUE INDEX ux_identity_reconciliation_apply_source
+ON identity_reconciliation_jobs(source_job_id)
+WHERE mode='APPLY' AND source_job_id IS NOT NULL;
+
+CREATE TRIGGER validate_identity_reconciliation_items_insert
+BEFORE INSERT ON identity_reconciliation_job_items
+FOR EACH ROW
+WHEN NOT EXISTS (
+    SELECT 1
+    FROM identity_reconciliation_jobs j
+    JOIN members m
+      ON m.id=NEW.member_id
+     AND m.guild_id=j.guild_id
+     AND m.discord_id=NEW.discord_id
+    WHERE j.id=NEW.job_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'cross-guild reconciliation item');
+END;
+
+ALTER TABLE members ADD COLUMN primary_position_id INTEGER
+    REFERENCES functional_positions(id) ON DELETE SET NULL;
+ALTER TABLE members ADD COLUMN access_profile_id INTEGER
+    REFERENCES access_profiles(id) ON DELETE RESTRICT;
+ALTER TABLE members ADD COLUMN discord_roles_synced_at INTEGER;
+ALTER TABLE members ADD COLUMN authorization_version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE members ADD COLUMN identity_sync_status TEXT NOT NULL DEFAULT 'PENDING'
+    CHECK (identity_sync_status IN ('PENDING','SYNCED','REVIEW_REQUIRED','ERROR','DISCORD_ABSENT'));
+ALTER TABLE members ADD COLUMN identity_sync_error TEXT;
+ALTER TABLE members ADD COLUMN discord_roles_hash TEXT;
+ALTER TABLE members ADD COLUMN discord_present INTEGER NOT NULL DEFAULT 0
+    CHECK (discord_present IN (0,1));
+ALTER TABLE members ADD COLUMN original_discord_nickname TEXT;
+ALTER TABLE members ADD COLUMN original_nickname_captured INTEGER NOT NULL DEFAULT 0
+    CHECK (original_nickname_captured IN (0,1));
+
+UPDATE members
+SET original_discord_nickname = CASE
+        WHEN EXISTS (
+            SELECT 1 FROM rank_sync_events e
+            WHERE e.guild_id=members.guild_id AND e.discord_id=members.discord_id
+        ) THEN (
+            SELECT e.previous_nickname FROM rank_sync_events e
+            WHERE e.guild_id=members.guild_id AND e.discord_id=members.discord_id
+            ORDER BY e.created_at, e.id LIMIT 1
+        )
+        ELSE discord_nick
+    END,
+    original_nickname_captured = CASE
+        WHEN EXISTS (
+            SELECT 1 FROM rank_sync_events e
+            WHERE e.guild_id=members.guild_id AND e.discord_id=members.discord_id
+        ) OR discord_nick IS NOT NULL THEN 1
+        ELSE 0
+    END;
+
+ALTER TABLE registration_gate_records ADD COLUMN review_channel_id INTEGER;
+ALTER TABLE registration_gate_records ADD COLUMN review_message_id INTEGER;
+ALTER TABLE registration_gate_records ADD COLUMN result_channel_id INTEGER;
+ALTER TABLE registration_gate_records ADD COLUMN result_message_id INTEGER;
+ALTER TABLE registration_gate_records ADD COLUMN delivery_status TEXT NOT NULL DEFAULT 'PENDING'
+    CHECK (delivery_status IN ('PENDING','DELIVERED'));
+
+UPDATE registration_gate_records
+SET delivery_status='DELIVERED'
+WHERE status NOT IN ('PENDING','REQUIRES_REVIEW') AND reviewed_at IS NULL;
+
+CREATE INDEX ix_registration_gate_delivery
+ON registration_gate_records(guild_id, status, delivery_status, submitted_at);
+
+CREATE TRIGGER validate_member_identity_references_update
+BEFORE UPDATE OF primary_position_id, access_profile_id ON members
+FOR EACH ROW
+WHEN (
+    NEW.primary_position_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM functional_positions p
+        WHERE p.id=NEW.primary_position_id AND p.guild_id=NEW.guild_id
+    )
+) OR (
+    NEW.access_profile_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM access_profiles ap
+        WHERE ap.id=NEW.access_profile_id AND ap.guild_id=NEW.guild_id
+    )
+)
+BEGIN
+    SELECT RAISE(ABORT, 'cross-guild member identity reference');
+END;
+
+INSERT INTO access_profiles(guild_id, code, name, priority, created_at, updated_at)
+SELECT guilds.guild_id, seed.code, seed.name, seed.priority, 0, 0
+FROM (
+    SELECT guild_id FROM members
+    UNION SELECT guild_id FROM ranks
+    UNION SELECT guild_id FROM rbac_bindings
+    UNION SELECT guild_id FROM discord_resource_registry
+    UNION SELECT guild_id FROM guild_settings
+) guilds
+CROSS JOIN (
+    SELECT 'CANDIDATO' AS code, 'Candidato' AS name, 10 AS priority
+    UNION ALL SELECT 'RECRUTA', 'Recruta', 20
+    UNION ALL SELECT 'MEMBRO', 'Membro', 30
+    UNION ALL SELECT 'GRADUADO', 'Graduado', 40
+    UNION ALL SELECT 'INSTRUTOR', 'Instrutor', 45
+    UNION ALL SELECT 'SUPERVISOR', 'Supervisor', 50
+    UNION ALL SELECT 'COMANDO', 'Comando', 70
+    UNION ALL SELECT 'ALTO_COMANDO', 'Alto Comando', 90
+    UNION ALL SELECT 'ADMINISTRADOR', 'Administrador técnico', 100
+) seed;
+
+INSERT INTO discord_role_mappings(
+    guild_id, discord_role_id, mapping_type, internal_code, display_name,
+    priority, rank_id, enabled, created_at, updated_at
+)
+SELECT guild_id, discord_role_id, 'RANK', 'RANK_' || id, name,
+       level, id, active, created_at, created_at
+FROM ranks
+WHERE discord_role_id IS NOT NULL;
+
+INSERT INTO discord_role_mappings(
+    guild_id, discord_role_id, mapping_type, internal_code, display_name,
+    priority, access_profile_id, enabled, created_at, updated_at, created_by
+)
+SELECT b.guild_id, b.role_id, 'ACCESS', 'ACCESS_ROLE_' || b.role_id,
+       COALESCE(rr.name, 'Cargo ' || b.role_id), ap.priority,
+       ap.id, 1, b.created_at, b.created_at, b.created_by
+FROM rbac_bindings b
+JOIN access_profiles ap ON ap.guild_id=b.guild_id AND ap.code=b.profile
+LEFT JOIN discord_resource_registry rr
+  ON rr.guild_id=b.guild_id AND rr.resource_id=b.role_id AND rr.resource_type='ROLE';
+
+INSERT INTO functional_positions(
+    guild_id, code, name, priority, access_profile_id,
+    is_primary_candidate, enabled, created_at, updated_at
+)
+SELECT guild_roles.guild_id, seed.code, seed.name, seed.priority, ap.id,
+       seed.primary_candidate, 1, 0, 0
+FROM (
+    SELECT 1146622063004635306 AS role_id, 'COMMANDER_GENERAL' AS code,
+           'Comandante Geral' AS name, 1000 AS priority, 'ALTO_COMANDO' AS profile,
+           1 AS primary_candidate
+    UNION ALL SELECT 1146622062987841555, 'COMMANDER', 'Comandante', 950, 'COMANDO', 1
+    UNION ALL SELECT 1146622062987841554, 'DEPUTY_COMMANDER', 'Sub Comandante', 900, 'COMANDO', 1
+    UNION ALL SELECT 1146632112787693670, 'HIGH_COMMAND_STAFF', 'Alto Comando', 850, 'ALTO_COMANDO', 1
+    UNION ALL SELECT 1162996505678991360, 'INTERNAL_AFFAIRS', 'Corregedoria', 700, 'COMANDO', 1
+    UNION ALL SELECT 1146622062924943470, 'RECRUITMENT_LEAD', 'Responsável pelo Recrutamento', 600, 'INSTRUTOR', 1
+    UNION ALL SELECT 1147302660442161243, 'RECRUITER', 'Recrutador', 500, 'INSTRUTOR', 1
+    UNION ALL SELECT 1162975230453616740, 'INSTRUCTOR', 'Instrutor', 500, 'INSTRUTOR', 1
+    UNION ALL SELECT 1146622062924943461, 'MEMBER', 'Membro CHOQUE', 100, 'MEMBRO', 1
+) seed
+JOIN (
+    SELECT guild_id, role_id FROM rbac_bindings
+    UNION
+    SELECT guild_id, resource_id AS role_id
+    FROM discord_resource_registry
+    WHERE resource_type='ROLE'
+    UNION
+    SELECT guild_id, discord_role_id AS role_id
+    FROM ranks
+    WHERE discord_role_id IS NOT NULL
+) guild_roles ON guild_roles.role_id=seed.role_id
+JOIN access_profiles ap
+  ON ap.guild_id=guild_roles.guild_id AND ap.code=seed.profile;
+
+INSERT INTO discord_role_mappings(
+    guild_id, discord_role_id, mapping_type, internal_code, display_name,
+    priority, position_id, access_profile_id, is_primary_position_candidate,
+    enabled, created_at, updated_at
+)
+SELECT p.guild_id, seed.role_id, 'POSITION', p.code, p.name, p.priority,
+       p.id, p.access_profile_id, p.is_primary_candidate, 1, p.created_at, p.updated_at
+FROM (
+    SELECT 1146622063004635306 AS role_id, 'COMMANDER_GENERAL' AS code
+    UNION ALL SELECT 1146622062987841555, 'COMMANDER'
+    UNION ALL SELECT 1146622062987841554, 'DEPUTY_COMMANDER'
+    UNION ALL SELECT 1146632112787693670, 'HIGH_COMMAND_STAFF'
+    UNION ALL SELECT 1162996505678991360, 'INTERNAL_AFFAIRS'
+    UNION ALL SELECT 1146622062924943470, 'RECRUITMENT_LEAD'
+    UNION ALL SELECT 1147302660442161243, 'RECRUITER'
+    UNION ALL SELECT 1162975230453616740, 'INSTRUCTOR'
+    UNION ALL SELECT 1146622062924943461, 'MEMBER'
+) seed
+JOIN functional_positions p ON p.code=seed.code;
+
+UPDATE members
+SET access_profile_id = (
+    SELECT ap.id FROM access_profiles ap
+    WHERE ap.guild_id=members.guild_id
+      AND ap.code='MEMBRO'
+);
+
+ALTER TABLE web_action_outbox RENAME TO web_action_outbox_v16;
+DROP INDEX IF EXISTS ix_web_action_outbox_delivery;
+
+CREATE TABLE web_action_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    action_type TEXT NOT NULL CHECK (
+        action_type IN (
+            'RANK_SYNC','MEMBER_SYNC','PANEL_REFRESH',
+            'IDENTITY_SYNC','IDENTITY_RECONCILE_BULK'
+        )
+    ),
+    target_discord_id INTEGER,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    requested_by INTEGER NOT NULL,
+    correlation_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','PROCESSING','COMPLETED','FAILED')
+    ),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    available_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    processed_at INTEGER,
+    last_error TEXT
+);
+
+INSERT INTO web_action_outbox(
+    id, guild_id, action_type, target_discord_id, payload_json,
+    requested_by, correlation_id, status, attempts, available_at,
+    created_at, processed_at, last_error
+)
+SELECT id, guild_id, action_type, target_discord_id, payload_json,
+       requested_by, correlation_id, status, attempts, available_at,
+       created_at, processed_at, last_error
+FROM web_action_outbox_v16;
+
+DROP TABLE web_action_outbox_v16;
+
+CREATE INDEX ix_web_action_outbox_delivery
+ON web_action_outbox(status, available_at, created_at);
+"""
+
+MIGRATION_024 = """
+CREATE TABLE rank_registration_compliance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    discord_id INTEGER NOT NULL,
+    rank_role_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','EXPIRING','COMPLETED','EXPIRED','CANCELLED')
+    ),
+    detected_at INTEGER NOT NULL,
+    due_at INTEGER NOT NULL,
+    last_reminder_at INTEGER,
+    next_reminder_at INTEGER,
+    reminder_count INTEGER NOT NULL DEFAULT 0,
+    dm_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        dm_status IN ('PENDING','SENT','FAILED')
+    ),
+    dm_message_id INTEGER,
+    dm_error TEXT,
+    alert_status TEXT NOT NULL DEFAULT 'NOT_REQUIRED' CHECK (
+        alert_status IN ('NOT_REQUIRED','PENDING','SENT','FAILED')
+    ),
+    alert_error TEXT,
+    completed_at INTEGER,
+    completion_reason TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX ux_rank_registration_compliance_pending
+ON rank_registration_compliance(guild_id, discord_id, rank_role_id)
+WHERE status IN ('PENDING','EXPIRING');
+
+CREATE INDEX ix_rank_registration_compliance_due
+ON rank_registration_compliance(guild_id, status, due_at, next_reminder_at, id);
+"""
+
+MIGRATIONS = (
+    (1, MIGRATION_001),
+    (2, MIGRATION_002),
+    (3, MIGRATION_003),
+    (4, MIGRATION_004),
+    (5, MIGRATION_005),
+    (6, MIGRATION_006),
+    (7, MIGRATION_007),
+    (8, MIGRATION_008),
+    (9, MIGRATION_009),
+    (10, MIGRATION_010),
+    (11, MIGRATION_011),
+    (12, MIGRATION_012),
+    (13, MIGRATION_013),
+    (14, MIGRATION_014),
+    (15, MIGRATION_015),
+    (16, MIGRATION_016),
+    (17, MIGRATION_017),
+    (18, MIGRATION_018),
+    (19, MIGRATION_019),
+    (20, MIGRATION_020),
+    (21, MIGRATION_021),
+    (22, MIGRATION_022),
+    (23, MIGRATION_023),
+    (24, MIGRATION_024),
+)
+
+
+class Database:
+    def __init__(self, path: Path, legacy_path: Path | None = None):
+        self.path = path
+        self.legacy_path = legacy_path
+        self.connection: aiosqlite.Connection | None = None
+        self._write_lock = asyncio.Lock()
+        self._after_commit_callbacks: list[Callable[[], Awaitable[object] | object]] | None = None
+
+    async def open(self) -> None:
+        if self.connection:
+            return
+        self._prepare_files()
+        self.connection = await aiosqlite.connect(self.path)
+        self.connection.row_factory = aiosqlite.Row
+        await self.connection.execute("PRAGMA journal_mode=WAL")
+        await self.connection.execute("PRAGMA foreign_keys=ON")
+        await self.connection.execute("PRAGMA busy_timeout=5000")
+        await self._migrate()
+
+    def _prepare_files(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.path.exists() and self.legacy_path and self.legacy_path.exists():
+            shutil.copy2(self.legacy_path, self.path)
+            LOGGER.info("Banco legado copiado para %s", self.path)
+        if self.path.exists():
+            backup_marker = self.path.with_suffix(self.path.suffix + ".migration-backup")
+            if not backup_marker.exists():
+                shutil.copy2(self.path, backup_marker)
+                LOGGER.info("Backup pre-migration criado em %s", backup_marker)
+
+    async def _migrate(self) -> None:
+        assert self.connection is not None
+        row = await self.fetchone(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+        )
+        version = 0
+        if row:
+            current = await self.fetchone(
+                "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"
+            )
+            version = int(current["version"])
+        for migration_version, script in MIGRATIONS:
+            if migration_version <= version:
+                continue
+            async with self._write_lock:
+                try:
+                    await self.connection.executescript("BEGIN IMMEDIATE;\n" + script)
+                    await self.connection.execute(
+                        "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                        (migration_version, int(time.time() * 1000)),
+                    )
+                    await self.connection.commit()
+                except Exception:
+                    await self.connection.rollback()
+                    raise
+            version = migration_version
+
+    async def close(self) -> None:
+        if self.connection:
+            await self.connection.close()
+            self.connection = None
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[aiosqlite.Connection]:
+        if not self.connection:
+            raise RuntimeError("Banco nao inicializado")
+        callbacks: list[Callable[[], Awaitable[object] | object]] = []
+        async with self._write_lock:
+            await self.connection.execute("BEGIN IMMEDIATE")
+            self._after_commit_callbacks = callbacks
+            try:
+                yield self.connection
+            except Exception:
+                await self.connection.rollback()
+                raise
+            else:
+                await self.connection.commit()
+            finally:
+                self._after_commit_callbacks = None
+        for callback in callbacks:
+            try:
+                result = callback()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                LOGGER.exception("Falha em callback pós-commit")
+
+    def after_commit(self, callback: Callable[[], Awaitable[object] | object]) -> None:
+        if self._after_commit_callbacks is None:
+            raise RuntimeError("Callback pós-commit registrado fora de uma transação")
+        self._after_commit_callbacks.append(callback)
+
+    async def fetchone(self, sql: str, params: tuple = ()) -> aiosqlite.Row | None:
+        if not self.connection:
+            raise RuntimeError("Banco nao inicializado")
+        cursor = await self.connection.execute(sql, params)
+        return await cursor.fetchone()
+
+    async def fetchall(self, sql: str, params: tuple = ()) -> list[aiosqlite.Row]:
+        if not self.connection:
+            raise RuntimeError("Banco nao inicializado")
+        cursor = await self.connection.execute(sql, params)
+        return list(await cursor.fetchall())
+
+    async def execute(self, sql: str, params: tuple = ()) -> int:
+        async with self.transaction() as connection:
+            cursor = await connection.execute(sql, params)
+            return int(cursor.lastrowid or 0)

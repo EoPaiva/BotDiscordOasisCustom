@@ -1,12 +1,24 @@
-# Ignorar arquivos de ambiente com segredos
 .env
+.env.*
+!.env.example
 
-# Ignorar pastas de ambiente virtual do Python
-venv/
-.venv/
-
-# Ignorar caches do Python
 __pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
 
-# Ignorar arquivos de banco de dados
+data/
 *.db
+*.db-*
+*.db.*
+
+config.json
+ranking_config.json
+
+.venv/
+venv/
+.uv-cache/
+htmlcov/
+.coverage
+logs/
+artifacts/

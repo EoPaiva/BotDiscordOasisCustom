@@ -1,0 +1,119 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from choque.config import Branding
+from cogs.medals_system import MEDALS, MedalsPanelView, build_medals_embed
+from cogs.member_commands import (
+    RegistrationPanelView,
+    build_registration_panel_embed,
+    should_open_registration_form,
+)
+from cogs.shift_commands import PointPanelView, build_point_panel_embed
+from cogs.ticket_commands import (
+    PartnershipLandingView,
+    TransferLandingView,
+    build_partnership_landing_embed,
+    build_partnership_links,
+    build_terms_landing_embed,
+    build_transfer_landing_embed,
+)
+
+
+def bot_stub():
+    return SimpleNamespace(config=SimpleNamespace(branding=Branding()))
+
+
+def custom_ids(view) -> set[str]:
+    return {str(item.custom_id) for item in view.children if item.custom_id}
+
+
+def test_unregistered_registration_button_always_opens_the_form() -> None:
+    assert should_open_registration_form(
+        {
+            "mode": "STATUS",
+            "kind": "UNREGISTERED",
+            "current": {"status": "UNREGISTERED"},
+        }
+    )
+    assert should_open_registration_form(
+        {
+            "mode": "CONFIRM_EXISTING",
+            "kind": "MEMBER",
+            "current": {"status": "UNREGISTERED"},
+        }
+    )
+    assert should_open_registration_form({"mode": "FORM", "kind": "VISITOR", "current": None})
+    assert not should_open_registration_form(
+        {
+            "mode": "STATUS",
+            "kind": "REQUIRES_REVIEW",
+            "current": {"status": "REQUIRES_REVIEW"},
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_registration_and_point_panels_are_detailed_and_keep_persistent_actions() -> None:
+    registration = build_registration_panel_embed(bot_stub())
+    point = build_point_panel_embed(bot_stub())
+
+    assert registration.title == "🛡️ PORTARIA DIGITAL • CHOQUE - BGR"
+    assert len(registration.fields) == 4
+    assert "nível de acesso correspondente" in (registration.description or "")
+    assert custom_ids(RegistrationPanelView()) == {
+        "choque:member:register:v1",
+        "choque:registration:status:v1",
+        "choque:registration:help:v1",
+    }
+
+    assert point.title == "⏱️ CONTROLE OPERACIONAL DE SERVIÇO"
+    assert len(point.fields) == 6
+    assert any(field.name == "🎯 Validação mínima de patrulha" for field in point.fields)
+    assert "fora da call nunca é contabilizado" in point.fields[1].value
+    assert custom_ids(PointPanelView()) == {
+        "choque:shift:start:v1",
+        "choque:shift:stop:v1",
+        "choque:shift:hours:v1",
+        "choque:shift:history:v1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_medals_panel_preserves_all_seven_historical_decorations() -> None:
+    embed = build_medals_embed(bot_stub())
+    view = MedalsPanelView()
+
+    assert len(MEDALS) == 7
+    assert len({medal.role_id for medal in MEDALS}) == 7
+    assert len(embed.fields) == 9
+    assert len(view.children) == 1
+    assert len(view.children[0].options) == 7
+    assert view.children[0].custom_id == "choque:medals:select:v1"
+
+
+@pytest.mark.asyncio
+async def test_partnership_category_has_three_distinct_landing_surfaces() -> None:
+    transfer = build_transfer_landing_embed(bot_stub())
+    partnership = build_partnership_landing_embed(bot_stub())
+    terms = build_terms_landing_embed(bot_stub())
+    links = build_partnership_links(1, 2, 3, 4)
+
+    assert "TRANSFERÊNCIA" in (transfer.title or "")
+    assert "RELAÇÕES INSTITUCIONAIS" in (partnership.title or "")
+    assert "TERMOS INSTITUCIONAIS" in (terms.title or "")
+    assert custom_ids(TransferLandingView()) == {
+        "choque:partnerships:transfer:v1",
+        "choque:partnerships:transfer:mine:v1",
+    }
+    assert custom_ids(PartnershipLandingView()) == {
+        "choque:partnerships:proposal:v1",
+        "choque:partnerships:proposal:mine:v1",
+    }
+    assert len(links.children) == 3
+    assert all(
+        item.url and item.url.startswith("https://discord.com/channels/1/")
+        for item in links.children
+    )

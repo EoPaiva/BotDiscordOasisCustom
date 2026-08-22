@@ -1,229 +1,269 @@
-# Bot de Gerenciamento Multifuncional OasisCustom
-
-<p align="center">
-  <img src="https://img.shields.io/badge/status-ativo-brightgreen" alt="Status do Projeto">
-  <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python">
-  <img src="https://img.shields.io/badge/discord.py-2.3.2-7289DA" alt="discord.py">
-  <img src="https://img.shields.io/badge/licença-MIT-lightgrey" alt="Licença">
-</p>
-
-<p align="center">
-  Uma solução de automação robusta e modular para servidores Discord, projetada para gerenciar membros, atividades e moderação de forma eficiente e profissional.
-</p>
-
----
-
-## 📜 Sobre o Projeto
-
-Este bot foi desenvolvido para ser a espinha dorsal administrativa de comunidades complexas, como servidores de **Roleplay (RP)** ou **guilds de jogos**. Ele centraliza funcionalidades essenciais, substituindo múltiplos bots com uma solução modular, com gerenciamento via banco de dados e automação completa.
-
-Cada módulo foi projetado para ser intuitivo, utilizando interações do Discord como **botões** e **formulários** para facilitar a experiência tanto para membros quanto para administradores.
-
----
-
-### **🛠️ Tecnologias e Ferramentas Utilizadas**
-
-Este projeto foi construído com foco em desempenho, modularidade e confiabilidade, utilizando as seguintes tecnologias:
-
-<p align="left">
-  <a href="https://skillicons.dev">
-    <img src="https://skillicons.dev/icons?i=python,sqlite,git,discord,vscode" />
-  </a>
-</p>
-
-* **Linguagem Principal: Python**
-    * Todo o bot foi desenvolvido em Python, uma linguagem poderosa e versátil, ideal para projetos de automação e back-end.
-
-* **Biblioteca Principal: `discord.py`**
-    * Utilizamos a biblioteca `discord.py` para toda a interação com a API do Discord. Sua natureza assíncrona garante que o bot possa lidar com múltiplas ações simultaneamente sem travar, oferecendo uma experiência fluida para os usuários.
-
-* **Banco de Dados: SQLite (via `aiosqlite`)**
-    * Para persistência de dados (registros de farm, ausências, caixa, etc.), foi escolhido o SQLite.
-    * **Por quê?** É um banco de dados leve, rápido e que não requer um servidor separado, sendo armazenado em um único arquivo (`.db`) junto com o bot.
-    * A biblioteca `aiosqlite` foi usada para garantir que todas as operações de banco de dados sejam assíncronas, mantendo o bot responsivo.
-
-* **Ferramentas de Desenvolvimento e Configuração**
-    * **Git & GitHub:** Para controle de versão e gerenciamento do código-fonte.
-    * **JSON:** Utilizado para os arquivos de configuração (`config.json`, etc.), permitindo uma personalização fácil de todos os IDs e parâmetros do bot sem precisar alterar o código Python.
-    * **`.env`:** Para o armazenamento seguro de informações sensíveis, como o token do bot.
-
----
-
-## ✨ Funcionalidades Principais
-
-### 📝 Sistema de Registro com Aprovação
-
-- **Auto-Role na Entrada**: Novos membros recebem um cargo temporário ao entrar.
-- **Painel Interativo**: Um comando `/painel_registro` cria um painel com um botão para iniciar o registro.
-- **Formulário Modal**: Coleta informações detalhadas do novo membro (Nome, ID, etc.).
-- **Aprovação da Staff**: A staff pode aprovar ou negar o registro com um clique.
-- **Automação Completa**: Após aprovação, o bot altera o apelido do membro e atribui os cargos finais.
-
-### ✈️ Sistema de Ausência
-
-- **Solicitação Formal**: Membros solicitam ausência informando o motivo e data de retorno.
-- **Cargo Automático**: O membro recebe o cargo "Ausente".
-- **Retorno Agendado**: O bot monitora o retorno e remove o cargo automaticamente.
-
-### 🌾 Sistema de Tickets de Farm
-
-- **Canais Privados**: Membros criam tickets individuais para registrar entregas.
-- **Entrega com Provas**: Formulário para solicitar detalhes da entrega e envio de imagem como prova.
-- **Aprovação da Staff**: Cada entrega é enviada para análise da staff.
-- **Ranking Automático**: Um ranking das entregas aprovadas é mantido e atualizado automaticamente.
-
-### 👮 Sistema de Gestão de RH
-
-- **Painel Centralizado**: Um painel único para ações como "Desligamento", "Promoção" e "Rebaixamento".
-- **Hierarquia Configurável**: Defina uma cadeia de cargos e prefixos no arquivo de configuração.
-- **Automação de Ações**: Demissão, promoções e rebaixamentos são automáticos.
-- **Logs Detalhados**: Registra todas as ações em um canal privado para a staff.
-
-### 🆘 Sistema de Resgate
-
-- **Pedido de Ajuda**: Membros podem solicitar ajuda de emergência.
-- **Coleta de Informações**: Formulário para coletar dados de localização e problema, seguido de uma imagem.
-- **Alerta @everyone**: Envia um alerta com todos os detalhes no canal de resgate.
-
----
-
-## 🚀 Começando
-
-### Pré-requisitos
-
-- Python 3.10 ou superior
-- Conta de Bot no [Portal de Desenvolvedores do Discord](https://discord.com/developers/docs/intro) com as Privileged Gateway Intents ativadas
-
-### Guia de Instalação
-
-1. Clone o repositório:
-
-    git clone [URL_DO_SEU_REPOSITORIO]
-    cd [NOME_DA_PASTA]
-
-2. Crie um ambiente virtual (recomendado):
-
-    python -m venv venv
-    # Windows
-    .\venv\Scripts\activate
-    # Linux/macOS
-    source venv/bin/activate
-
-3. Instale as dependências:
-
-    pip install -r requirements.txt
-
-4. Configure o Token do Bot:
-
-- Crie um arquivo chamado `.env` na pasta principal.
-- Dentro dele, adicione a linha:
-
-    TOKEN="SEU_TOKEN_AQUI"
-
-5. Configure os IDs do Servidor:
-
-- Abra o arquivo `config.json` e preencha os IDs dos canais, categorias e cargos.
-- Abra o arquivo `ranking_config.json` (ele pode estar vazio, o bot irá gerenciá-lo).
-
-6. Convide o Bot para o seu servidor com as permissões necessárias.
-
----
-
-## ⚙️ Uso
-
-### Iniciar o bot
-
-Para iniciar o bot, execute o seguinte comando:
-
-    python main.py
-
-### Enviar os Painéis (Comandos de Admin)
-
-Vá para os canais de texto correspondentes configurados no `config.json` e use os comandos para implantar os painéis de interação:
-
-    /painel_registro
-    /painel_ausencia
-    /painel_farm
-    /painel_rh
-    /painel_resgate
-
-### Gerenciar o Ranking de Farm (Comandos de Admin)
-
-    /ranking_iniciar  # Inicia o ranking no canal configurado.
-    /ranking_parar    # Desativa o ranking.
-
----
-
-
-
-
-
-
-### **Histórico de Versões e Atualizações**
-
-*Atualizações implementadas em 18-19 de Setembro de 2025.*
-
-### ✨ Novas Funcionalidades
-
-* **Sistema de Hierarquia Dinâmica**
-    * Adicionado um novo módulo para exibir a estrutura hierárquica completa da equipe em um canal dedicado.
-    * O painel é esteticamente formatado, mostrando cada cargo (com título e emoji customizados) e a lista de membros correspondente.
-    * A hierarquia é atualizada automaticamente sempre que um membro é registrado, promovido, rebaixado ou demitido.
-    * Comandos de admin disponíveis: `/hierarquia` para postar ou forçar uma atualização.
-
-* **Sistema de Controle de Caixa**
-    * Criado um novo módulo para registrar transações financeiras com provas.
-    * Implementado um painel interativo com botões de "Depositar" e "Sacar" que exibe o saldo em tempo real.
-    * A staff preenche um formulário com valor/motivo e anexa uma imagem como prova.
-    * Todas as transações são salvas em banco de dados e um resumo é postado em um canal de logs.
-    * Comandos disponíveis: `/painel_caixa` (admin), `/saldo` (staff).
-
-* **Módulo de Comandos Utilitários**
-    * Adicionado um novo conjunto de comandos gerais e de moderação, incluindo:
-        * **Gerais**: `/ajuda`, `/sobre`, `/status`, `/version`, `/erro` (com formulário), `/enquete`.
-        * **Moderação (Staff)**: `/limpar`, `/banir`, `/desbanir`, `/notificar`.
-        * **Administrativo**: `/relatorio` (gera um resumo das atividades de Farm e Caixa).
-
-### ⚙️ Melhorias e Alterações
-
-* **Atualização Automática de Apelidos (Sistema de RH)**
-    * O sistema de Promoção e Rebaixamento agora altera automaticamente o prefixo no apelido do membro para refletir seu novo cargo na hierarquia.
-    * A configuração da hierarquia foi unificada em uma estrutura mais robusta no `config.json`.
-
-* **Comando de Verificação de Apelidos (Sistema de RH)**
-    * Adicionado o comando de administrador `/verificar_apelidos`.
-    * Esta ferramenta varre todos os membros do servidor e corrige automaticamente qualquer apelido que não esteja alinhado com o cargo mais alto do membro na hierarquia.
-
-* **Múltiplas Mensagens para Hierarquia**
-    * O sistema de hierarquia foi otimizado para lidar com um grande número de membros. Se a lista de membros for muito longa para uma única mensagem, o bot agora a divide em várias mensagens para garantir que toda a equipe seja exibida.
-
-### 🐛 Correções de Bugs
-
-* **Corrigido Erro de 'Módulo não Encontrado' (`ModuleNotFoundError`)**: Resolvido um problema de importação que impedia os módulos (`Cogs`) de carregarem corretamente.
-* **Corrigido Erro de 'Tamanho do Embed' (`Embed Size Exceeds Limit`)**: Resolvido o erro crítico que ocorria ao tentar exibir uma hierarquia com muitos membros.
-* **Corrigido Erro de Codificação (`Charmap Codec Error`)**: Solucionado um problema de codificação de caracteres no `config.json` que impedia o bot de iniciar.
-* **Corrigido Erro de 'Coluna não Encontrada' (`No Such Column`)**: Corrigido um problema de dessincronização entre o código e o banco de dados.
-* **Corrigido Erro de Imagens Quebradas**: A lógica de anexo de imagens nos sistemas de Resgate e Caixa foi reescrita para usar arquivos permanentes em vez de links temporários do Discord, garantindo que as imagens nunca expirem.
-
-
-## 📁 Estrutura do Projeto
+# CHOQUE - BGR • Sistema de Gestão
+
+> Segurança: a implementação local possui hardening e testes, porém o gate público permanece
+> **FAIL** até rotação do token Discord e validação da infraestrutura externa. Consulte
+> `SECURITY.md` e `docs/SECURITY_CONTROL_MATRIX.md` antes de qualquer deploy.
+
+Bot Discord em Python para cadastro do efetivo e bate-ponto por presença em calls autorizadas.
+A operação no servidor é feita exclusivamente por mensagens fixas, botões, seletores e modais.
+
+## Escopo desta entrega
+
+- Cadastro pendente com aprovação ou negação, patente inicial, cargo, apelido e auditoria.
+- RBAC central com os perfis `MEMBRO`, `GRADUADO`, `INSTRUTOR`, `COMANDO` e `ADMINISTRADOR`.
+- Central administrativa visual para cadastros, solicitações, promoções, rebaixamentos, punições,
+  históricos e ranking, sem exigir comandos para a operação.
+- Central de Solicitações persistente para ausência/retorno, reserva, correção de horas, alteração
+  cadastral e desligamento voluntário.
+- Gestão de Carreira visual com escolha da patente, motivo, confirmação obrigatória, sincronização
+  de cargo/apelido e histórico paginado.
+- Gestão Disciplinar visual com ocorrências sem punição automática, advertências, suspensões
+  agendáveis, confirmação humana e histórico imutável.
+- Treinamentos visuais com criação, vagas, inscrições, presença, resultados, cursos e histórico.
+- Atividade semanal com meta, isenções, snapshots append-only, monitoramento e relatórios visuais.
+- Recrutamento público completo com Discord OAuth, formulário versionado, 24 questões balanceadas,
+  autosave, timer server-side, integridade apenas evidencial e decisão final humana.
+- Analista opcional de candidaturas, somente leitura, com rubrica/contexto versionados, evidências,
+  histórico e decisão humana separada; permanece desativado até configuração explícita do provider.
+- Transferência, denúncias e outros assuntos por painéis privados, com fila de análise e auditoria.
+- Layout visual v2 com 19 categorias, nomes Mathematical Italic e registro interno por ID.
+- Ponto por voz com estados `ACTIVE`, `GRACE`, `REVIEW_REQUIRED` e `CLOSED`.
+- Segmentos por call, tolerância configurável, recuperação após restart e ajustes append-only.
+- Painéis persistentes de ponto e cadastro, além de uma única mensagem de efetivo.
+- Auditoria transacional com outbox, tentativa após commit e retry a cada minuto.
+- SQLite em WAL, foreign keys, busy timeout, migrations versionadas e backup pré-migration.
+
+Farm, Caixa, Resgate, RH e Ausência antigos estão em [`legacy/`](legacy/README.md) e não são
+carregados. O Centro de Comando Web está em [`web/`](web/README.md) e sua API FastAPI em
+[`command_center/`](command_center/app.py). Integração MTA fica para entrega futura.
+
+## Instalação
+
+Requer Python 3.12.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
-.
-├── 📄 .env                   # Guarda o token secreto do seu bot.
-├── 📄 config.json             # O "painel de controle" principal, com todos os IDs e configurações.
-├── 📄 database.py             # Gerencia o banco de dados (SQLite) para todos os sistemas.
-├── 📄 main.py                 # O arquivo principal que você executa para iniciar o bot.
-├── 📄 ranking_config.json     # Salva o ID da mensagem do ranking de farm para atualização automática.
-├── 📄 requirements.txt       # Lista de bibliotecas que o bot precisa para funcionar.
-└── 📁 cogs/                   # Pasta onde cada sistema do bot é organizado como um módulo.
-    ├── 📄 absence_system.py       # Lógica para o sistema de ausência.
-    ├── 📄 cash_control.py       # Lógica para o controle de caixa.
-    ├── 📄 farm_system.py        # Lógica para os tickets e ranking de farm.
-    ├── 📄 hierarchy_system.py     # Lógica para o painel de hierarquia dinâmico.
-    ├── 📄 hr_system.py            # Lógica para demissão, promoção e verificação de apelidos.
-    ├── 📄 registration_system.py  # Lógica para o registro e aprovação de novos membros.
-    ├── 📄 rescue_system.py        # Lógica para o sistema de pedido de ajuda.
-    └── 📄 utility_commands.py     # Contém todos os comandos gerais e de moderação (/ajuda, /limpar, etc).
 
-    
+Configure o `.env` local:
 
+```dotenv
+DISCORD_TOKEN=token_regenerado_no_portal
+DATABASE_PATH=data/choque_bgr.db
+DEFAULT_GUILD_ID=123456789012345678
+LOG_LEVEL=INFO
+BRANDING_LOGO_URL=
+RECRUITMENT_AI_PROVIDER=disabled
+RECRUITMENT_AI_API_KEY=
+RECRUITMENT_AI_BASE_URL=
+RECRUITMENT_AI_MODEL=
+RECRUITMENT_AI_TIMEOUT_SECONDS=45
+```
+
+Nunca versione `.env`, bancos ou configurações reais. O token encontrado no histórico antigo deve
+ser considerado comprometido e revogado no Portal de Desenvolvedores do Discord.
+
+## Validação e execução
+
+Valide migrations, configuração, cogs, comandos e views sem conectar ao Discord:
+
+```powershell
+python main.py --check
+```
+
+Execute os controles locais:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m ruff check .
+python -m pytest -q
+python -m compileall -q choque cogs main.py
+```
+
+Inicie o bot:
+
+```powershell
+python main.py
+```
+
+Na primeira abertura, se `data/choque_bgr.db` ainda não existir e houver
+`oasis_custom_data.db`, o arquivo legado será copiado, o original ficará intacto e um backup
+`*.migration-backup` será criado antes das migrations. Um `config.json` local válido é importado
+uma única vez; depois, as configurações são mantidas no banco pelo painel administrativo.
+
+## Interface no Discord
+
+Nenhum slash command, prefix command ou comando de texto é publicado na guild. Os handlers legados
+permanecem carregados internamente apenas durante a migração das últimas funções para componentes.
+
+- `🏠・Central do membro`: navegação para os serviços disponíveis.
+- `📝・Cadastro`: solicitação de ingresso por modal.
+- `⏱️・Bate ponto`: início, encerramento, horas e histórico.
+- `👥・Efetivo em serviço`: mensagem atualizada automaticamente.
+- `📥・Solicitações`: ausência/retorno, reserva, correção de horas, dados e desligamento.
+- `📈・Carreira`: ficha funcional, histórico e hierarquia.
+- `⚖️・Disciplina`: situação pessoal e histórico disciplinar.
+- `🎯・Treinamentos`: inscrições, treinamentos pessoais e cursos concluídos.
+- `📊・Atividade semanal`: meta, quadro semanal e histórico pessoal.
+- `📝・Recrutamento`: candidatura, requisitos e acompanhamento pessoal.
+- `🎫・Atendimento`: candidatura, transferência, denúncia privada, outro assunto e histórico.
+- `🏆・Ranking de horas`: ranking por período.
+- `🛡️・Central administrativa`: gestão do efetivo por botões e seletores.
+- `⚙️・Configurações do bot`: canais, calls, cargos, RBAC, patentes, regras e painéis.
+
+Os nomes reais usam Mathematical Italic e um separador invisível centralizado; os exemplos acima
+usam texto simples apenas para facilitar leitura e busca na documentação.
+
+Respostas pessoais são ephemeral. O histórico do botão do painel usa páginas de dez sessões.
+
+### Menu visual de configuração
+
+O canal `⚙️│configurações-do-bot` contém uma central persistente com oito áreas:
+
+- Vinte e um destinos operacionais de canal. O navegador mostra todos os canais de texto em páginas
+  de 25, com categoria e busca por nome/ID.
+- Calls autorizadas com adicionar/remover e navegador paginado de todas as calls do servidor.
+- Cargos de membro, serviço, ausente, reserva e suspenso, além de vínculos RBAC com todos os cargos
+  em páginas de 25 e busca por nome/ID.
+- Patentes por formulários de criação, edição e desativação, incluindo importação
+  idempotente dos cargos militares já existentes no Discord.
+- Tolerância, meta semanal e timezone.
+- Publicação guiada dos painéis de ponto, cadastro, efetivo, hierarquia, solicitações, carreira,
+  disciplina, treinamentos, atividade semanal, ranking, recrutamento, atendimento e administração.
+- Controle dos módulos principais, com estados ativos/desativados, persistência e auditoria.
+- Status e progresso da configuração.
+
+Somente owner, Administrator humano ou perfil RBAC autorizado pode operar esse painel. Todas as
+alterações geram auditoria. O painel é restaurado no startup e reutiliza a mensagem armazenada.
+
+### Gestão administrativa visual
+
+A operação da Fase 4 é feita integralmente por mensagens com botões, seletores e formulários:
+
+- `🛡️│central-administrativa`: canal privado com análise de cadastros, movimentação de patentes,
+  punições, aprovação de solicitações, histórico e ranking.
+- `📥│solicitações`: painel somente leitura com sete controles pessoais e respostas ephemeral.
+- `🏆│ranking-de-horas`: painel somente leitura com ranking de hoje, semana, mês e total.
+
+Promoções e rebaixamentos seguem a ordem das patentes no banco e sincronizam cargo e apelido.
+Suspensão, desligamento e afastamento vigente encerram qualquer ponto ativo. Toda ação gera
+histórico append-only e auditoria na mesma transação.
+
+### Central de Solicitações — Fase 5
+
+O membro pode solicitar ausência, retorno antecipado, entrada/saída da reserva, correção de uma
+sessão, alteração de dados ou desligamento. O Comando recebe uma fila única com perfil, detalhes,
+aprovação/negação e histórico. Correções de horas geram ajustes append-only; segmentos originais
+nunca são alterados. Reserva e desligamento encerram o ponto ativo na mesma transação da decisão.
+
+Os cargos `🟠 Ausente`, `🟡 Reserva` e `🔴 Suspenso` são sincronizados automaticamente. Retornos de
+ausência e suspensão sobrevivem a restart pelo job idempotente de estados. Veja
+[`docs/PHASE5.md`](docs/PHASE5.md).
+
+### Gestão de Carreira — Fase 6
+
+O Comando seleciona o membro e a patente de destino, informa o motivo e confirma em uma segunda
+etapa. A decisão grava patente anterior/nova, responsável, motivo e auditoria na mesma transação.
+Tempo na patente, horas do mês e advertências são apenas indicadores; nenhuma promoção é automática.
+Veja [`docs/PHASE6.md`](docs/PHASE6.md).
+
+### Gestão Disciplinar — Fase 7
+
+Ocorrências podem ser registradas e arquivadas sem gerar punição. Advertências exigem tipo, motivo
+e confirmação; podem ser cumpridas ou revogadas, mas nunca apagadas. Suspensões podem iniciar no dia
+atual ou ficar agendadas, fecham o ponto ao entrar em vigor, bloqueiam novo serviço e sincronizam o
+cargo de suspenso. Ativação, encerramento e restauração de status sobrevivem a restart.
+Veja [`docs/PHASE7.md`](docs/PHASE7.md).
+
+### Treinamentos e Cursos — Fase 8
+
+Instrutores e Comando criam treinamentos por painel, selecionam o responsável, definem agenda,
+vagas e qualificação e publicam uma mensagem atualizada após cada inscrição. Na finalização, cada
+participante recebe presença e resultado; cursos aprovados ou reprovados permanecem no histórico
+do membro. Veja [`docs/PHASE8.md`](docs/PHASE8.md).
+
+### Atividade Semanal e Relatórios — Fase 9
+
+O painel semanal mostra horas, meta, progresso e situação, com isenção por reserva ou afastamento.
+Cada semana concluída gera snapshots append-only e idempotentes. A Central Administrativa oferece
+monitoramento de inatividade e relatórios diário, semanal, mensal, por membro, pontos, ausências e
+treinamentos. Nenhum indicador aplica punição ou desligamento automaticamente.
+Veja [`docs/PHASE9.md`](docs/PHASE9.md).
+
+### Configurações e Módulos — Fase 10
+
+A Central de Configuração permite ativar ou desativar cadastros, ponto, solicitações, carreira,
+disciplina, treinamentos, atividade e ranking. O bloqueio é aplicado no backend, não apaga dados e
+mantém jobs de recuperação necessários para ações existentes. Veja
+[`docs/PHASE10.md`](docs/PHASE10.md).
+
+### Recrutamento e Atendimento — Fase 11
+
+Candidaturas e transferências usam formulários privados, histórico pessoal e uma fila persistente
+para recrutadores. Denúncias escolhem o membro por seletor e ficam restritas ao Comando. O botão
+**Outro assunto** abre um atendimento privado com assunto, descrição e referência opcional. Aprovar uma
+candidatura cria atomicamente a solicitação pendente no cadastro existente, preservando uma única
+regra de ingresso. Veja [`docs/PHASE11.md`](docs/PHASE11.md).
+
+### Remodelação Visual — Fase 12
+
+A guild possui 19 categorias ordenadas e 97 canais mapeados por identificador interno. Canais
+existentes mantiveram IDs, mensagens e permissões específicas; nomes visuais nunca são usados como
+chaves do sistema. Veja [`docs/PHASE12.md`](docs/PHASE12.md) e o
+[`mapa interno`](docs/DISCORD_LAYOUT_MAP.md).
+
+### Manter o bot online localmente
+
+Em Windows, os scripts abaixo evitam iniciar duas instâncias e mantêm o processo oculto:
+
+O startup usa primeiro `.venv\Scripts\python.exe` quando o ambiente virtual existe e recorre ao
+`python` do `PATH` somente como fallback.
+
+```powershell
+.\scripts\start_bot.ps1
+.\scripts\status_bot.ps1
+.\scripts\stop_bot.ps1
+```
+
+Logs locais ficam em `logs/bot.out.log` e `logs/bot.err.log`. Na operação definitiva, a Discloud
+substitui esse processo local.
+
+## Permissões do bot
+
+Conceda somente: visualizar/enviar mensagens, embeds, histórico, anexos, gerenciar cargos e
+gerenciar apelidos. O cargo do bot precisa ficar acima dos cargos que ele gerenciará. Não conceda
+`Administrator` ao bot.
+
+Usuários owner da guild ou com permissão Discord `Administrator` fazem o bootstrap controlado do
+RBAC. Depois, vincule cargos aos perfis pelo botão **Cargos e RBAC** do painel de configuração.
+
+## Provisionamento do servidor
+
+O layout oficial pode ser auditado ou reaplicado de forma idempotente:
+
+```powershell
+python -m scripts.provision_discord_layout
+python -m scripts.provision_discord_layout --apply
+```
+
+Sem `--apply`, o script apenas salva o inventário. Antes de toda execução, um snapshot de canais,
+cargos e permissões é gravado em `data/server_layout_backups/`. Canais com histórico são movidos
+para `99・ARQUIVO LEGADO`; somente canais confirmadamente vazios são excluídos.
+
+O comando público usa o remodelador visual v2. A entrada explícita equivalente é
+`python -m scripts.remodel_discord_layout --apply`.
+
+## Operação e rollback
+
+SQLite pressupõe uma única instância do bot. Não execute duas instâncias usando o mesmo arquivo.
+No rollout oficial, use canais/calls/cargos isolados de QA, valide os dez cenários de ponto e só
+então publique os painéis definitivos. Em caso de rollback, pare o bot, preserve o banco atual para
+análise e restaure a cópia `choque_bgr.db.migration-backup`.
+
+Decisões técnicas estão em [`docs/adr/`](docs/adr/) e o estado da entrega em
+[`docs/IMPLEMENTATION_REPORT.md`](docs/IMPLEMENTATION_REPORT.md). Para continuidade, consulte o
+[`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md), a [`fila oficial`](docs/PHASE_QUEUE.md) e o
+[`registro de cobertura dos pedidos`](docs/REQUEST_LEDGER.md).
