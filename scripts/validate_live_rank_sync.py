@@ -66,7 +66,7 @@ def database_state(path: Path, guild_id: int) -> dict[str, Any]:
             dict(row)
             for row in connection.execute(
                 """
-                SELECT m.discord_id, m.mta_nick, m.character_id, m.rank_id,
+                SELECT m.discord_id, m.mta_nick, m.character_id, m.rank_id, m.status,
                        m.rank_sync_status, r.prefix, r.discord_role_id
                 FROM members m LEFT JOIN ranks r ON r.id=m.rank_id
                 WHERE m.guild_id=?
@@ -98,6 +98,14 @@ def database_state(path: Path, guild_id: int) -> dict[str, Any]:
                 "SELECT COUNT(*) FROM rank_sync_events WHERE guild_id=?", (guild_id,)
             ).fetchone()[0]
         )
+        companion_row = connection.execute(
+            """
+            SELECT value_json FROM guild_settings
+            WHERE guild_id=? AND setting_key='companion_role_id'
+            """,
+            (guild_id,),
+        ).fetchone()
+        companion_role_id = int(str(companion_row[0]).strip('"')) if companion_row else None
     finally:
         connection.close()
     return {
@@ -107,6 +115,7 @@ def database_state(path: Path, guild_id: int) -> dict[str, Any]:
         "panel": dict(panel) if panel else None,
         "nickname_errors": nickname_errors,
         "event_count": event_count,
+        "companion_role_id": companion_role_id,
     }
 
 
@@ -136,6 +145,9 @@ async def main() -> int:
         if not live:
             warnings.append(f"membro {discord_id} não retornou na listagem da guild")
             continue
+        if str(record["status"]) == "DISMISSED":
+            continue
+        live_role_ids = {int(role_id) for role_id in live["roles"]}
         live_ranks = sorted(
             (
                 rank_by_role[int(role_id)]
@@ -146,10 +158,15 @@ async def main() -> int:
             reverse=True,
         )
         expected_rank_id = int(live_ranks[0]["id"]) if live_ranks else None
-        if expected_rank_id != record["rank_id"]:
+        # KEEP_LAST intentionally preserves the historical rank when the
+        # current Discord role is absent; only a present live rank must win.
+        if expected_rank_id is not None and expected_rank_id != record["rank_id"]:
             failures.append(f"membro {discord_id}: banco não corresponde ao maior cargo Discord")
+        nickname_prefix = str(record["prefix"] or "")
+        if state["companion_role_id"] in live_role_ids:
+            nickname_prefix = "COMP.F"
         expected_nick = format_member_nickname(
-            str(record["prefix"] or ""),
+            nickname_prefix,
             str(record["mta_nick"]),
             str(record["character_id"] or ""),
         )

@@ -56,11 +56,11 @@ def main() -> int:
     failures: list[str] = []
     if expected - training_ids:
         failures.append(f"training_missing={sorted(expected - training_ids)}")
-    if "choque:personnel:training:v1" not in admin_ids:
+    if "choque:personnel:area:processes:v1" not in admin_ids:
         failures.append("admin_training_button_missing")
     if "Treinamentos" not in central_labels:
         failures.append("member_central_link_missing")
-    if int(migration) != 6:
+    if int(migration) < 6:
         failures.append(f"migration={migration}")
     if not configured or int(configured[0]) != training[0]:
         failures.append("training_channel_setting_invalid")
@@ -70,7 +70,7 @@ def main() -> int:
     print("LIVE_PHASE8_OK" if not failures else "LIVE_PHASE8_INVALID")
     print(f"channel={training_channel['id']}:{training_channel['name']}")
     print(f"message={training_message['id']} components={len(components(training_message))}")
-    print(f"admin_button={'choque:personnel:training:v1' in admin_ids}")
+    print(f"admin_button={'choque:personnel:area:processes:v1' in admin_ids}")
     print(f"member_link={'Treinamentos' in central_labels}")
     print(f"migration={migration}")
     print(f"commands={len(commands)}")

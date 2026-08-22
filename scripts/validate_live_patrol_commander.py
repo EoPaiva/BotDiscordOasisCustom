@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import sys
 
@@ -26,7 +27,7 @@ EXPECTED_CONTROLS = {
 }
 
 
-def main() -> int:
+async def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     config = AppConfig.load()
     if not config.token or not config.default_guild_id:
@@ -101,4 +102,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(asyncio.run(main()))

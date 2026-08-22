@@ -11,7 +11,7 @@ from scripts.validate_live_phase6 import components
 EXPECTED = {
     "MEMBER": (
         "registration.panel",
-        "🛡️ ALISTAMENTO • CHOQUE - BGR",
+        "🛡️ PORTARIA DIGITAL • CHOQUE - BGR",
         {"choque:member:register:v1"},
     ),
     "POINT": (
@@ -138,4 +138,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

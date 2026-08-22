@@ -1,5 +1,14 @@
 # PROJECT HANDOFF
 
+## Verificação Discloud e funcional — 2026-08-22
+
+- bot publicado na Discloud Diamond e conectado à guild oficial; instância local confirmada offline;
+- alocação atual de 900 MB, com consumo observado abaixo de 70 MB, portanto sem necessidade técnica de aumento;
+- backup remoto conferido: SQLite íntegro, zero violações de foreign key e migration 24;
+- 15 validadores Discord ao vivo aprovados, além da sincronização de patentes contra o banco remoto;
+- suíte final: 292 testes aprovados, Ruff e compilação aprovados; auditoria com zero callback ausente e zero `custom_id` duplicado;
+- item 29 continua parcial: o bot está na Discloud, mas o runtime combinado de site/API e seu healthcheck ainda não foram publicados.
+
 > Fotografia técnica gerada em 2026-08-22 a partir da inspeção do código real.
 > Este é um documento vivo: atualize as seções 27, 31, 39, 40, 41, 42, 46 e 47 ao concluir cada fase.
 > Não inclua tokens, conteúdo da `.env`, dados pessoais de membros ou valores reais de configuração.

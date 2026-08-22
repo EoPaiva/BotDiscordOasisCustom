@@ -56,13 +56,13 @@ def main() -> int:
     failures: list[str] = []
     if "choque:config:modules:v1" not in custom_ids:
         failures.append("modules_button_missing")
-    if "22/22" not in description:
+    if "31/31" not in description:
         failures.append("configuration_progress_invalid")
     if not module_field:
         failures.append("module_status_field_missing")
     if set(states) != set(MODULE_DEFAULTS):
         failures.append("module_registry_invalid")
-    if int(migration) != 7:
+    if int(migration) < 7:
         failures.append(f"migration={migration}")
     if commands:
         failures.append(f"commands={len(commands)}")

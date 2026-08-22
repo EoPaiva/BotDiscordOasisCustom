@@ -57,7 +57,7 @@ def main() -> int:
     failures = []
     if expected - career_ids:
         failures.append(f"career_missing={sorted(expected - career_ids)}")
-    if "choque:personnel:career:v1" not in admin_ids:
+    if "choque:personnel:area:effective:v1" not in admin_ids:
         failures.append("admin_career_button_missing")
     if "Carreira" not in central_labels:
         failures.append("member_central_link_missing")
@@ -67,7 +67,7 @@ def main() -> int:
     print("LIVE_PHASE6_OK" if not failures else "LIVE_PHASE6_INVALID")
     print(f"channel={career_channel['id']}:{career_channel['name']}")
     print(f"message={career_message['id']} components={len(components(career_message))}")
-    print(f"admin_button={'choque:personnel:career:v1' in admin_ids}")
+    print(f"admin_button={'choque:personnel:area:effective:v1' in admin_ids}")
     print(f"member_link={'Carreira' in central_labels}")
     print(f"commands={len(commands)}")
     if failures:

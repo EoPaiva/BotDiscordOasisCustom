@@ -1,5 +1,15 @@
 # Relatório vivo — Primeira entrega CHOQUE - BGR
 
+## 2026-08-22 — Smoke funcional na Discloud
+
+A instância Diamond foi confirmada online e conectada ao Discord, com a instância local desligada.
+O banco recuperado diretamente do backup remoto passou em integridade, foreign keys e migration 24.
+Foram aprovados 15 validadores ao vivo, o validador de sincronização de patentes contra o banco remoto,
+292 testes, Ruff, compilação e a auditoria de rotas de interação. Validadores históricos foram atualizados
+para a Central Administrativa categorizada e para as regras atuais de `KEEP_LAST`, exoneração e
+Companheiro de Farda. O deploy atual cobre o bot; site/API combinado permanece como parte não concluída
+do item 29.
+
 Atualizado em 2026-08-22.
 
 ## Estado

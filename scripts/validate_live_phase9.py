@@ -56,11 +56,11 @@ def main() -> int:
     failures: list[str] = []
     if expected - activity_ids:
         failures.append(f"activity_missing={sorted(expected - activity_ids)}")
-    if "choque:personnel:activity:v1" not in admin_ids:
+    if "choque:personnel:area:effective:v1" not in admin_ids:
         failures.append("admin_activity_button_missing")
     if "Atividade" not in central_labels:
         failures.append("member_central_link_missing")
-    if int(migration) != 7:
+    if int(migration) < 7:
         failures.append(f"migration={migration}")
     if not configured or int(configured[0]) != activity[0]:
         failures.append("activity_channel_setting_invalid")
@@ -70,7 +70,7 @@ def main() -> int:
     print("LIVE_PHASE9_OK" if not failures else "LIVE_PHASE9_INVALID")
     print(f"channel={activity_channel['id']}:{activity_channel['name']}")
     print(f"message={activity_message['id']} components={len(components(activity_message))}")
-    print(f"admin_button={'choque:personnel:activity:v1' in admin_ids}")
+    print(f"admin_button={'choque:personnel:area:effective:v1' in admin_ids}")
     print(f"member_link={'Atividade' in central_labels}")
     print(f"migration={migration}")
     print(f"commands={len(commands)}")

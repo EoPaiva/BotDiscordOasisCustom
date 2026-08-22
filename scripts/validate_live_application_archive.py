@@ -110,7 +110,7 @@ def main() -> int:
         failures.append("history-visible-to-everyone")
     if undelivered:
         failures.append(f"undelivered={undelivered}")
-    if "choque:personnel:applications:v1" not in custom_ids:
+    if "choque:personnel:area:effective:v1" not in custom_ids:
         failures.append("applications-button-missing")
 
     print("APPLICATION_ARCHIVE_LIVE_PASS" if not failures else "APPLICATION_ARCHIVE_LIVE_INVALID")
@@ -121,7 +121,7 @@ def main() -> int:
         f"{default_overwrite is not None and bool(int(default_overwrite['deny']) & VIEW_CHANNEL)}"
     )
     print(f"legacy_reviews={legacy_reviews} undelivered={undelivered}")
-    print(f"applications_button={'true' if 'choque:personnel:applications:v1' in custom_ids else 'false'}")
+    print(f"applications_button={'true' if 'choque:personnel:area:effective:v1' in custom_ids else 'false'}")
     if failures:
         print(f"failures={failures}")
     return 0 if not failures else 1

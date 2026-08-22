@@ -501,7 +501,8 @@ async def test_phase_four_and_five_panels_are_persistent_and_have_stable_custom_
     assert "choque:ticket:other:v1" in {item.custom_id for item in ticket_panel.children}
 
 
-def test_personnel_admin_is_grouped_without_hiding_existing_areas():
+@pytest.mark.asyncio
+async def test_personnel_admin_is_grouped_without_hiding_existing_areas():
     root_labels = {item.label for item in PersonnelAdminView().children}
     assert root_labels == {
         "Efetivo",
@@ -544,7 +545,8 @@ def test_personnel_admin_is_grouped_without_hiding_existing_areas():
     ]
 
 
-def test_high_command_registration_manager_exposes_safe_complete_controls():
+@pytest.mark.asyncio
+async def test_high_command_registration_manager_exposes_safe_complete_controls():
     permission = "registration.directory.manage"
     assert permission in PROFILE_PERMISSIONS[RbacProfile.HIGH_COMMAND.value]
     assert permission not in PROFILE_PERMISSIONS[RbacProfile.COMMAND.value]
@@ -594,7 +596,8 @@ def test_high_command_registration_manager_exposes_safe_complete_controls():
     assert reopen.confirmation.placeholder == "REABRIR"
 
 
-def test_rank_without_registration_has_visible_high_command_panel():
+@pytest.mark.asyncio
+async def test_rank_without_registration_has_visible_high_command_panel():
     assert "Sem cadastro • 72h" in {item.label for item in RegistrationAdminView().children}
     view = RankRegistrationComplianceView(
         {

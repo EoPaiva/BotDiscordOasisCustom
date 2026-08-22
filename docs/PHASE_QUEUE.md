@@ -305,7 +305,9 @@ Regras obrigatórias:
 
 ## Empacotamento e publicação na Discloud
 
-29. ⏳ **Preparar o pacote final para Discloud Diamond — pendente e obrigatoriamente último.**
+29. 🟡 **Preparar o pacote final para Discloud Diamond — parcial.** O bot já está online na
+    Discloud, conectado à guild, com banco remoto íntegro e smoke funcional aprovado. Ainda faltam
+    o runtime combinado `TYPE=site`, API/healthcheck e a validação do frontend antes do fechamento.
     Depois que todos os itens funcionais, correções de produção e gates anteriores estiverem
     concluídos, gerar o ZIP final exatamente no formato aceito pela Discloud e validar o pacote
     antes do upload. Esta etapa não pode ser antecipada enquanto o conteúdo do deploy ainda estiver

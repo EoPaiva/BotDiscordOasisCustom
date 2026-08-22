@@ -27,7 +27,7 @@ EXPECTED_COMPONENTS = {
         "choque:recruitment:admin:transfers:v1",
         "choque:recruitment:admin:refresh:v1",
     },
-    "PERSONNEL_ADMIN": {"choque:personnel:tickets:v1"},
+    "PERSONNEL_ADMIN": {"choque:personnel:area:processes:v1"},
 }
 
 EXPECTED_SETTINGS = {
