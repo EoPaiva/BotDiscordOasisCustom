@@ -1,9 +1,8 @@
 import { ArrowRight, BadgeCheck, Clock3, FileText, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
-import { loginForRecruitment } from "@/app/login/actions";
 import { CommandCenterApiError, recruitmentCandidateFetch, recruitmentPublicFetch } from "@/lib/api";
-import { getDiscordSessionIdentity } from "@/lib/identity";
+import { getRecruitmentCandidateIdentity } from "@/lib/identity";
 
 import { startRecruitmentApplication } from "./actions";
 
@@ -35,7 +34,7 @@ const reasonLabels: Record<string, string> = {
 };
 
 export default async function RecruitmentLandingPage() {
-  const identity = await getDiscordSessionIdentity();
+  const identity = await getRecruitmentCandidateIdentity();
   let campaign: Campaign | null = null;
   let eligibility: Eligibility | null = null;
   let unavailable = "";
@@ -63,7 +62,7 @@ export default async function RecruitmentLandingPage() {
           <span className="technical-index">DIRETRIZ / 01</span>
           <h2>Antes de iniciar</h2>
           <ul>
-            <li><ShieldCheck /> Identidade validada pelo Discord</li>
+            <li><ShieldCheck /> Identificação declarada e protegida por protocolo</li>
             <li><FileText /> Aproximadamente 24 questões individuais</li>
             <li><Clock3 /> Cronômetro e autosave controlados pelo servidor</li>
             <li><BadgeCheck /> Decisão final realizada por pessoa autorizada</li>
@@ -72,13 +71,13 @@ export default async function RecruitmentLandingPage() {
         </aside>
       </section>
       <section className="recruitment-intake">
-        <div className="intake-heading"><span>02</span><div><h2>Apresentação do candidato</h2><p>Seus dados básicos serão vinculados à identidade Discord autenticada.</p></div></div>
-        {unavailable ? <div className="candidate-blocked"><strong>Portal indisponível</strong><p>{unavailable}</p></div> : !identity ? (
-          <div className="candidate-login"><h3>Identificação obrigatória</h3><p>Entre com o Discord para validar sua identidade e verificar os requisitos desta campanha.</p><form action={loginForRecruitment}><button className="button button-primary" type="submit">Entrar com Discord <ArrowRight size={16} /></button></form></div>
-        ) : eligibility?.active_application ? (
+        <div className="intake-heading"><span>02</span><div><h2>Apresentação do candidato</h2><p>Informe seus dados. Não é necessário entrar com o Discord.</p></div></div>
+        {unavailable ? <div className="candidate-blocked"><strong>Portal indisponível</strong><p>{unavailable}</p></div> : eligibility?.active_application ? (
           <div className="candidate-login"><h3>Candidatura em andamento</h3><p>Protocolo <strong>{eligibility.active_application.protocol}</strong> • {eligibility.active_application.status}</p><Link className="button button-primary" href={eligibility.active_application.status === "DRAFT" ? "/recrutamento/avaliacao" : "/minha-candidatura"}>Continuar acompanhamento <ArrowRight size={16} /></Link></div>
-        ) : eligibility?.eligible ? (
+        ) : open ? (
           <form action={startRecruitmentApplication} className="candidate-start-form">
+            <label>ID do Discord<input autoComplete="off" inputMode="numeric" name="discordId" pattern="[0-9]{15,22}" required /></label>
+            <label>Usuário no Discord<input autoComplete="username" name="discordUsername" placeholder="usuario" required minLength={2} maxLength={100} /></label>
             <label>Nick no servidor BGR<input autoComplete="nickname" name="candidateNick" required minLength={2} maxLength={80} /></label>
             <label>ID no servidor BGR<input inputMode="numeric" name="bgrId" required maxLength={40} /></label>
             <label>Idade<input inputMode="numeric" name="age" required min={13} max={100} type="number" /></label>

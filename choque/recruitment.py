@@ -509,8 +509,6 @@ class RecruitmentService:
             raise ValidationError("Nick, ID BGR e chave de idempotência são obrigatórios.")
         if not consent_accepted:
             raise ValidationError("É necessário aceitar os termos e o aviso de privacidade.")
-        if not guild_membership_verified:
-            raise ValidationError("Sua participação no servidor Discord não foi confirmada.")
         existing = await self.database.fetchone(
             "SELECT * FROM recruitment_applications WHERE guild_id=? AND idempotency_key=?",
             (guild_id, key),

@@ -416,7 +416,18 @@ class RecruitmentPanelView(ErrorView):
         custom_id="choque:recruitment:apply:v1",
     )
     async def apply(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await interaction.response.send_modal(CandidacyModal())
+        public_url = await get_bot(interaction).services.settings.get(
+            interaction.guild.id, "recruitment_public_url"
+        )
+        if not isinstance(public_url, str) or not public_url.startswith("https://"):
+            raise ValidationError("O portal de recrutamento ainda não foi publicado.")
+        view = discord.ui.View(timeout=300)
+        view.add_item(discord.ui.Button(label="Abrir alistamento", emoji="📝", url=f"{public_url.rstrip('/')}/recrutamento"))
+        await interaction.response.send_message(
+            "Abra o portal oficial para iniciar ou continuar sua candidatura.",
+            view=view,
+            ephemeral=True,
+        )
 
     @discord.ui.button(
         label="Minha candidatura",
@@ -425,7 +436,18 @@ class RecruitmentPanelView(ErrorView):
         custom_id="choque:recruitment:mine:v1",
     )
     async def mine(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await send_my_tickets(interaction)
+        public_url = await get_bot(interaction).services.settings.get(
+            interaction.guild.id, "recruitment_public_url"
+        )
+        if not isinstance(public_url, str) or not public_url.startswith("https://"):
+            raise ValidationError("O portal de recrutamento ainda não foi publicado.")
+        view = discord.ui.View(timeout=300)
+        view.add_item(discord.ui.Button(label="Consultar candidatura", emoji="📋", url=f"{public_url.rstrip('/')}/minha-candidatura"))
+        await interaction.response.send_message(
+            "Consulte seu protocolo, progresso e situação atual no portal.",
+            view=view,
+            ephemeral=True,
+        )
 
     @discord.ui.button(
         label="Requisitos",

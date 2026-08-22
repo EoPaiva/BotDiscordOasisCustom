@@ -7,8 +7,11 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { recruitmentCandidateFetch } from "@/lib/api";
+import { setRecruitmentGuestIdentity } from "@/lib/identity";
 
 const startSchema = z.object({
+  discordId: z.string().trim().regex(/^\d{15,22}$/),
+  discordUsername: z.string().trim().min(2).max(100),
   candidateNick: z.string().trim().min(2).max(80),
   bgrId: z.string().trim().min(1).max(40),
   age: z.coerce.number().int().min(13).max(100),
@@ -17,6 +20,7 @@ const startSchema = z.object({
 
 export async function startRecruitmentApplication(formData: FormData) {
   const input = startSchema.parse(Object.fromEntries(formData));
+  await setRecruitmentGuestIdentity(input.discordId, input.discordUsername);
   await recruitmentCandidateFetch("/v1/recruitment/applications/start", {
     method: "POST",
     body: JSON.stringify({

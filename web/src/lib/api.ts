@@ -3,7 +3,7 @@ import "server-only";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 
 import { normalizeAccessContext, type AccessContext } from "@/lib/access";
-import { getDiscordSessionIdentity } from "@/lib/identity";
+import { getDiscordSessionIdentity, getRecruitmentCandidateIdentity } from "@/lib/identity";
 export type { AccessContext } from "@/lib/access";
 
 export class CommandCenterApiError extends Error {
@@ -186,9 +186,9 @@ export async function recruitmentCandidateFetch<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const identity = await getDiscordSessionIdentity();
+  const identity = await getRecruitmentCandidateIdentity();
   if (!identity) {
-    throw new CommandCenterApiError("Sessão Discord necessária.", 401, "auth");
+    throw new CommandCenterApiError("Identificação da candidatura necessária.", 401, "auth");
   }
   const { apiUrl, internalSecret, guildId } = integrationConfiguration();
   const correlationId = randomUUID();

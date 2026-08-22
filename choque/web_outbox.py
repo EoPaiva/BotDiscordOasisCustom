@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 from contextlib import suppress
@@ -709,8 +710,7 @@ class WebActionWorker:
             )
         stale = event_type == "RECRUITMENT_APPLICATION_STALE"
         analysis_completed = event_type == "RECRUITMENT_ANALYSIS_COMPLETED"
-        message = await channel.send(
-            embed=self._recruitment_embed(
+        embed = self._recruitment_embed(
                 (
                     "Análise automatizada disponível"
                     if analysis_completed
@@ -726,9 +726,59 @@ class WebActionWorker:
                     if analysis_completed
                     else "Conteúdo completo disponível somente no Centro de Comando."
                 ),
-            ),
-            view=view,
-        )
+            )
+        attachment = None
+        if event_type == "RECRUITMENT_APPLICATION_SUBMITTED":
+            answers = await self.database.fetchall(
+                """
+                SELECT question_snapshot_json, final_answer_json
+                FROM recruitment_application_questions
+                WHERE application_id=? ORDER BY ordinal
+                """,
+                (int(application["id"]),),
+            )
+            lines = [f"CANDIDATURA {application['protocol']}", ""]
+            for index, answer in enumerate(answers, 1):
+                question = json.loads(answer["question_snapshot_json"])
+                value = json.loads(answer["final_answer_json"]) if answer["final_answer_json"] else "Sem resposta"
+                rendered = ", ".join(map(str, value)) if isinstance(value, list) else str(value)
+                lines.extend((f"Q{index:02d} — {question.get('title', 'Questão')}", rendered, ""))
+            attachment = discord.File(
+                io.BytesIO("\n".join(lines).encode("utf-8")),
+                filename=f"{application['protocol']}-respostas.txt",
+            )
+            embed.add_field(
+                name="Dossiê recebido",
+                value=f"{len(answers)} respostas completas anexadas para análise do recrutador.",
+                inline=False,
+            )
+        elif analysis_completed:
+            analysis = await self.database.fetchone(
+                """
+                SELECT recommendation, overall_score, summary
+                FROM recruitment_analysis_results
+                WHERE guild_id=? AND application_id=?
+                ORDER BY created_at DESC, id DESC LIMIT 1
+                """,
+                (int(row["guild_id"]), int(application["id"])),
+            )
+            if analysis:
+                labels = {
+                    "RECOMMENDED": "Recomendado para análise",
+                    "REVIEW": "Revisão recomendada",
+                    "NOT_RECOMMENDED": "Pontos relevantes para revisão",
+                }
+                embed.add_field(
+                    name="Classificação consultiva",
+                    value=f"{labels.get(str(analysis['recommendation']), 'Revisão humana')} • índice {int(analysis['overall_score'])}/100",
+                    inline=False,
+                )
+                embed.add_field(
+                    name="Resumo automatizado",
+                    value=str(analysis["summary"])[:1024] or "Resumo indisponível.",
+                    inline=False,
+                )
+        message = await channel.send(embed=embed, view=view, file=attachment)
         return message.channel.id, message.id
 
     def _recruitment_embed(

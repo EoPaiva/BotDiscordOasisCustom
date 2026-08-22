@@ -43,7 +43,6 @@ from .security import (
     authenticate_internal_request,
     authenticate_request,
     require_permission,
-    verify_candidate_guild_membership,
 )
 from .services import CommandCenterServices
 
@@ -3017,9 +3016,6 @@ async def recruitment_eligibility(request: Request, candidate: Candidate) -> Any
 async def recruitment_start_application(
     request: Request, body: RecruitmentStartBody, candidate: Candidate
 ) -> Any:
-    membership = await verify_candidate_guild_membership(candidate)
-    if not membership:
-        raise HTTPException(403, "Entre no servidor Discord oficial antes de se alistar.")
     await request.app.state.services.recruitment.ensure_defaults(candidate.guild_id)
     await request.app.state.services.recruitment_analysis.ensure_defaults(candidate.guild_id)
     return plain(
@@ -3034,7 +3030,7 @@ async def recruitment_start_application(
             age=body.age,
             idempotency_key=body.idempotency_key,
             consent_accepted=body.consent_accepted,
-            guild_membership_verified=True,
+            guild_membership_verified=candidate.guild_verified,
         )
     )
 

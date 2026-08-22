@@ -3,12 +3,12 @@ import { redirect } from "next/navigation";
 
 import { CandidateQuestion, type ReadyQuestion } from "@/components/candidate-question";
 import { recruitmentCandidateFetch } from "@/lib/api";
-import { getDiscordSessionIdentity } from "@/lib/identity";
+import { getRecruitmentCandidateIdentity } from "@/lib/identity";
 
 type Application = { id: number; protocol: string; status: string };
 
 export default async function RecruitmentAssessmentPage() {
-  const identity = await getDiscordSessionIdentity();
+  const identity = await getRecruitmentCandidateIdentity();
   if (!identity) redirect("/recrutamento");
   const current = await recruitmentCandidateFetch<{ application: Application } | null>(
     "/v1/me/recruitment/application",
