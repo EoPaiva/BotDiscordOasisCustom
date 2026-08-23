@@ -11,9 +11,8 @@
   RP, nível 10, Nick/ID BGR e dez questões de RP policial/códigos Q.
 - `/status` deixou de informar Railway pausada/v23. A publicação agora mostra Discloud Diamond
   online, instância única, Gateway ativo e banco v27; o alias público respondeu 200 sem texto antigo.
-- A fila ganhou uma decisão preservada: o usuário disse que a gestão de qualificações deveria ser
-  “só eu”, enquanto o RBAC publicado concede a ação ao Alto Comando. Nada foi restringido por
-  suposição; a escolha foi colocada no fim da fila, sem bloquear trabalhos seguros.
+- O proprietário confirmou que **todo o Alto Comando** pode gerenciar qualificações. Isso coincide
+  com o RBAC `qualification.manage` já publicado; nenhum cargo ou acesso precisou ser alterado.
 - Gates desta correção: **309 pytest**, **32 Vitest**, Ruff, compileall, `main.py --check`, scanner
   de segredos, ESLint, TypeScript e build. Discloud e Vercel voltaram online após o rollout.
 - O estado consolidado foi enviado somente ao repositório privado `EoPaiva/CHOQUE-BGR`, commit

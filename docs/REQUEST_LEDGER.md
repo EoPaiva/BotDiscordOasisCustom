@@ -23,7 +23,7 @@ somente mencionados ou resumidos genericamente. A fila detalhada está nos itens
 | Requisito real de 15 anos | CONCLUÍDO em produção com migration 27 e auditoria 16 → 15 | item 43 |
 | Remover CNH B e porte de arma dos requisitos | CONCLUÍDO; ausentes do fluxo ativo | item 43 |
 | Página pública de andamento coerente | CONCLUÍDO; Discloud online/Gateway/v27 | item 43 |
-| Qualificações disponíveis “só para mim” | AGUARDA escolha: proprietário ou Alto Comando | item 44 |
+| Escopo de gestão das qualificações | CONFIRMADO para todo o Alto Comando | item 44 |
 | Checkpoint atual no GitHub privado | CONCLUÍDO e sanitizado no commit `1fa51db` | item 45 |
 
 Itens dependentes de resposta humana recuam temporariamente; nenhum pedido é descartado ou marcado
@@ -39,6 +39,8 @@ como concluído apenas porque foi anotado ou implementado localmente.
   sem a antiga mensagem de Railway pausada.
 - **Checkpoint privado:** o estado consolidado foi publicado apenas em `EoPaiva/CHOQUE-BGR`, após
   scanner de segredos e revisão do conjunto; o remoto público permaneceu intocado.
+- **Escopo das qualificações:** o proprietário confirmou todo o Alto Comando; o RBAC vigente já
+  corresponde à decisão e não exigiu mudança de acesso.
 
 - **Portaria sem atalho de ingresso:** o botão público agora identifica vínculo. Visitante sem
   candidatura ou role reconhecida não pode ser aprovado como membro por esse caminho.

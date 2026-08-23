@@ -476,10 +476,10 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     parte do fluxo ativo. O `/status` foi corrigido de Railway/v23/pausado para Discloud Diamond,
     Gateway ativo e banco v27, publicado no alias principal e validado com HTTP 200.
 
-44. 🟠 **Escopo exclusivo da gestão de qualificações — decisão humana adiada.** O estado publicado
-    permite `qualification.manage` ao Alto Comando, mas o proprietário também disse “só eu vou
-    poder fazer isso”. Confirmar se a intenção é **somente a conta proprietária** ou **todo o Alto
-    Comando**. Até a resposta, preservar o RBAC atual e não adivinhar Discord ID nem retirar acesso.
+44. ✅ **Escopo da gestão de qualificações — confirmado em 2026-08-23.** O proprietário definiu que
+    **todo o Alto Comando** pode conceder e revogar qualificações. O RBAC publicado já usa
+    `qualification.manage` nesse perfil, portanto a decisão foi registrada sem alterar cargos,
+    membros ou permissões em produção.
 
 45. ✅ **Checkpoint sanitizado no repositório privado — concluído em 2026-08-23.** O remoto foi
     verificado como privado antes da operação. Após `SECRET_SCAN_OK`, revisão dos 38 arquivos e gates

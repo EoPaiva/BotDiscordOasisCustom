@@ -19,6 +19,9 @@
 - O remoto `EoPaiva/CHOQUE-BGR` foi confirmado como privado. Trinta e oito arquivos de fonte,
   testes e documentação foram revisados e publicados em `private/main` no commit `1fa51db`; dados,
   logs, backups e segredos permaneceram ignorados, e nenhum push foi feito para `origin`.
+- A decisão de acesso pendente foi fechada pelo proprietário: `qualification.manage` pertence a
+  todo o Alto Comando. Como a matriz de produção já implementava esse escopo, não houve mutation de
+  cargos, membros ou banco; somente a documentação autoritativa foi reconciliada.
 
 ## 2026-08-23 — Remoção intencional de Medalhas
 
