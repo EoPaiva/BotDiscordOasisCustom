@@ -35,11 +35,58 @@ async def test_migration_copies_legacy_and_creates_pre_migration_backup(tmp_path
         row = await database.fetchone("SELECT value FROM legacy_value")
         version = await database.fetchone("SELECT MAX(version) AS version FROM schema_migrations")
         assert row["value"] == "preserved"
-        assert version["version"] == 25
+        assert version["version"] == 27
         assert target.with_suffix(".db.migration-backup").exists()
         assert legacy.exists()
     finally:
         await database.close()
+
+
+@pytest.mark.asyncio
+async def test_reads_observe_writes_from_second_runtime_connection(tmp_path):
+    """Bot and API must converge while using separate SQLite connections."""
+    target = tmp_path / "shared-runtime.db"
+    api_database = Database(target)
+    await api_database.open()
+    bot_database = Database(target)
+    await bot_database.open()
+    try:
+        await api_database.execute(
+            "CREATE TABLE visibility_probe(id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        await api_database.execute(
+            "INSERT INTO visibility_probe(value) VALUES ('initial'), ('cursor-tail')"
+        )
+
+        first = await api_database.fetchone(
+            "SELECT value FROM visibility_probe ORDER BY id"
+        )
+        assert first["value"] == "initial"
+
+        await bot_database.execute(
+            "INSERT INTO visibility_probe(value) VALUES ('discord-live')"
+        )
+
+        rows = await api_database.fetchall(
+            "SELECT value FROM visibility_probe ORDER BY id"
+        )
+        assert [row["value"] for row in rows] == [
+            "initial",
+            "cursor-tail",
+            "discord-live",
+        ]
+
+        fresh_rows = await api_database.fetchall_fresh(
+            "SELECT value FROM visibility_probe ORDER BY id"
+        )
+        assert [row["value"] for row in fresh_rows] == [
+            "initial",
+            "cursor-tail",
+            "discord-live",
+        ]
+    finally:
+        await bot_database.close()
+        await api_database.close()
 
 
 @pytest.mark.asyncio
@@ -394,7 +441,7 @@ async def test_migration_nine_preserves_existing_tickets_and_allows_other_subjec
             """,
             (1, 3, '{"subject":"Dúvida","details":"Preciso de ajuda"}', 4, 4),
         )
-        assert version["version"] == 25
+        assert version["version"] == 27
         assert preserved["ticket_type"] == "REPORT"
         assert json.loads(preserved["payload_json"])["details"] == "legado"
         assert new_id > int(preserved["id"])

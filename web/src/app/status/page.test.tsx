@@ -4,12 +4,12 @@ import { describe, expect, it } from "vitest";
 import ProjectStatusPage from "./page";
 
 describe("project status page", () => {
-  it("shows the production exception without hiding the security debt", () => {
+  it("shows the current Discloud production state without hiding external debt", () => {
     render(<ProjectStatusPage />);
 
-    expect(screen.getByText("21 / 24")).toBeInTheDocument();
-    expect(screen.getByText("PAUSADO")).toBeInTheDocument();
-    expect(screen.getByText("MANUTENÇÃO DE DEPLOY")).toBeInTheDocument();
-    expect(screen.getByText("Rotação de credenciais e permissões mínimas")).toBeInTheDocument();
+    expect(screen.getByText("OPERAÇÃO ONLINE")).toBeInTheDocument();
+    expect(screen.getByText("Discloud Diamond · instância única")).toBeInTheDocument();
+    expect(screen.getByText("V27")).toBeInTheDocument();
+    expect(screen.getByText("Rotação de credenciais e menor privilégio")).toBeInTheDocument();
   });
 });

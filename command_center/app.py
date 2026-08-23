@@ -396,6 +396,13 @@ class IdentityReconciliationApplyBody(StrictBody):
     preview_job_id: int = Field(gt=0)
 
 
+class QualificationChangeBody(StrictBody):
+    discord_id: int = Field(gt=0)
+    course_id: int = Field(gt=0)
+    granted: bool
+    reason: str = Field(min_length=3, max_length=500)
+
+
 class RecruitmentStartBody(StrictBody):
     candidate_nick: str = Field(min_length=2, max_length=80)
     bgr_id: str = Field(min_length=1, max_length=40)
@@ -938,6 +945,12 @@ async def member_detail(request: Request, discord_id: int, actor: Actor) -> Any:
     if identity is None:
         raise HTTPException(404, "Membro não encontrado.")
     return plain({"dossier": dossier, "eligibility": eligibility, "identity": identity})
+
+
+@app.get("/v1/career")
+async def career_overview(request: Request, actor: Actor) -> Any:
+    require_permission(actor, "career.manage")
+    return plain(await request.app.state.services.operations.career_overview(actor.guild_id))
 
 
 @app.post("/v1/members/{discord_id}/rank")
@@ -1932,6 +1945,25 @@ async def discord_identity_reconciliation(
 async def qualifications(request: Request, actor: Actor) -> Any:
     require_permission(actor, "qualification.view.all")
     result = await request.app.state.services.operations.qualification_matrix(actor.guild_id)
+    return plain(result)
+
+
+@app.post("/v1/qualifications/manage")
+async def manage_qualification(
+    body: QualificationChangeBody, request: Request, actor: Actor
+) -> Any:
+    require_permission(actor, "qualification.manage")
+    result = await request.app.state.services.operations.set_member_qualification(
+        actor.guild_id,
+        body.discord_id,
+        body.course_id,
+        granted=body.granted,
+        actor_id=actor.discord_id,
+        reason=body.reason,
+        source="WEB",
+        enqueue_discord_sync=True,
+        correlation_id=f"{actor.correlation_id}:qualification:{uuid.uuid4()}",
+    )
     return plain(result)
 
 

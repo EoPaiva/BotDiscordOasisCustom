@@ -51,7 +51,6 @@ COGS = (
     "cogs.operations_commands",
     "cogs.hierarchy_system",
     "cogs.rank_sync_system",
-    "cogs.medals_system",
     "cogs.utility_commands",
     "cogs.security_system",
 )

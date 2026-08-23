@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Callable, Iterable
 
 import aiosqlite
 
 from .audit import AuditService
+from .channel_names import normalize_stylized_label
 from .database import Database
 from .errors import ConflictError, NotFoundError, ValidationError
 from .settings import SettingsService
@@ -1387,7 +1389,7 @@ class OperationsService:
         )
 
     async def active_patrols(self, guild_id: int):
-        return await self.database.fetchall(
+        return await self.database.fetchall_fresh(
             """
             SELECT p.*,
                 COUNT(CASE WHEN pm.status='ACTIVE' THEN 1 END) AS member_count,
@@ -1468,7 +1470,7 @@ class OperationsService:
 
     async def live_patrol_calls(self, guild_id: int, *, max_age_ms: int = 180_000):
         threshold = self.clock() - max(30_000, int(max_age_ms))
-        return await self.database.fetchall(
+        return await self.database.fetchall_fresh(
             """
             SELECT pc.channel_id AS voice_channel_id, pc.label AS voice_channel_name,
                    pc.sort_order, MIN(pvp.joined_at) AS started_at,
@@ -2262,7 +2264,8 @@ class OperationsService:
         )
         courses = await self.database.fetchall(
             """
-            SELECT internal_code, name FROM course_catalog
+            SELECT id, internal_code, name, course_role_id, course_role_name
+            FROM course_catalog
             WHERE guild_id=? AND active=1 ORDER BY internal_code
             """,
             (guild_id,),
@@ -2275,23 +2278,292 @@ class OperationsService:
             """,
             (guild_id,),
         )
-        by_member: dict[int, dict[str, dict[str, object]]] = {}
+        changes = await self.database.fetchall(
+            """
+            SELECT member_id, course_id, action, source, actor_id, reason, recorded_at, id
+            FROM qualification_changes WHERE guild_id=?
+            ORDER BY recorded_at DESC, id DESC
+            """,
+            (guild_id,),
+        )
+        course_ids_by_name = {
+            str(course["name"]).casefold(): int(course["id"]) for course in courses
+        }
+        by_member: dict[int, dict[int, dict[str, object]]] = {}
         for row in qualifications:
+            course_id = course_ids_by_name.get(str(row["course_name"]).casefold())
+            if course_id is None:
+                continue
             entries = by_member.setdefault(int(row["member_id"]), {})
-            entries.setdefault(str(row["course_name"]).casefold(), dict(row))
+            if course_id not in entries:
+                entries[course_id] = {
+                    **dict(row),
+                    "course_id": course_id,
+                    "granted": str(row["result"]) == "APPROVED",
+                    "source": "TRAINING",
+                }
+        for row in changes:
+            member_id = int(row["member_id"])
+            course_id = int(row["course_id"])
+            entries = by_member.setdefault(member_id, {})
+            current = entries.get(course_id)
+            if current is not None and int(current.get("recorded_at") or 0) > int(
+                row["recorded_at"]
+            ):
+                continue
+            if current is not None and int(current.get("recorded_at") or 0) == int(
+                row["recorded_at"]
+            ) and str(current.get("source")) != "TRAINING":
+                continue
+            entries[course_id] = {
+                **dict(row),
+                "result": "APPROVED" if str(row["action"]) == "GRANT" else "REVOKED",
+                "granted": str(row["action"]) == "GRANT",
+            }
         matrix = []
         for member in members:
-            approved = by_member.get(int(member["id"]), {})
+            qualification_state = by_member.get(int(member["id"]), {})
             matrix.append(
                 {
                     "member": dict(member),
                     "courses": {
-                        str(course["internal_code"]): approved.get(str(course["name"]).casefold())
+                        str(course["internal_code"]): (
+                            qualification_state.get(int(course["id"]))
+                            if qualification_state.get(int(course["id"]), {}).get("granted")
+                            else None
+                        )
                         for course in courses
                     },
                 }
             )
         return {"courses": [dict(row) for row in courses], "members": matrix}
+
+    async def current_member_qualifications(
+        self, guild_id: int, discord_id: int
+    ) -> list[dict[str, object]]:
+        """Retorna a projeção atual, incluindo treinamento e mudanças manuais/Discord."""
+
+        matrix = await self.qualification_matrix(guild_id, discord_ids=(discord_id,))
+        members = list(matrix["members"])
+        if not members:
+            return []
+        state = dict(members[0]["courses"])
+        result: list[dict[str, object]] = []
+        for course in matrix["courses"]:
+            course_row = dict(course)
+            current = state.get(str(course_row["internal_code"]))
+            if current is None:
+                continue
+            current_row = dict(current)
+            result.append(
+                {
+                    **current_row,
+                    "course_id": int(course_row["id"]),
+                    "internal_code": str(course_row["internal_code"]),
+                    "course_name": str(course_row["name"]),
+                    "course_role_id": int(course_row["course_role_id"]),
+                    "result": "APPROVED",
+                }
+            )
+        return sorted(
+            result,
+            key=lambda row: (str(row["course_name"]).casefold(), int(row["course_id"])),
+        )
+
+    async def set_member_qualification(
+        self,
+        guild_id: int,
+        discord_id: int,
+        course_id: int,
+        *,
+        granted: bool,
+        actor_id: int | None,
+        reason: str,
+        source: str,
+        enqueue_discord_sync: bool,
+        correlation_id: str | None = None,
+    ) -> dict[str, object]:
+        normalized_reason = reason.strip()
+        if len(normalized_reason) < 3:
+            raise ValidationError("Informe um motivo com pelo menos 3 caracteres.")
+        normalized_source = source.strip().upper()
+        if normalized_source not in {"WEB", "DISCORD", "TRAINING", "SYSTEM"}:
+            raise ValidationError("Origem de qualificação inválida.")
+        operation_id = correlation_id or str(uuid.uuid4())
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT m.id, m.discord_id, m.mta_nick, m.status
+                FROM members m WHERE m.guild_id=? AND m.discord_id=?
+                """,
+                (guild_id, discord_id),
+            )
+            member = await cursor.fetchone()
+            if not member:
+                raise NotFoundError("Membro cadastrado não encontrado.")
+            if str(member["status"]) != "ACTIVE":
+                raise ValidationError("Somente membros ativos podem receber qualificações.")
+            cursor = await connection.execute(
+                """
+                SELECT id, internal_code, name, course_role_id, course_role_name
+                FROM course_catalog WHERE guild_id=? AND id=? AND active=1
+                """,
+                (guild_id, course_id),
+            )
+            course = await cursor.fetchone()
+            if not course:
+                raise NotFoundError("Curso ativo não encontrado.")
+
+            cursor = await connection.execute(
+                """
+                SELECT action, recorded_at FROM qualification_changes
+                WHERE guild_id=? AND member_id=? AND course_id=?
+                ORDER BY recorded_at DESC, id DESC LIMIT 1
+                """,
+                (guild_id, int(member["id"]), course_id),
+            )
+            latest_change = await cursor.fetchone()
+            cursor = await connection.execute(
+                """
+                SELECT result, recorded_at FROM member_qualifications
+                WHERE guild_id=? AND member_id=? AND lower(course_name)=lower(?)
+                ORDER BY recorded_at DESC, id DESC LIMIT 1
+                """,
+                (guild_id, int(member["id"]), str(course["name"])),
+            )
+            legacy = await cursor.fetchone()
+            if latest_change is not None and (
+                legacy is None
+                or int(latest_change["recorded_at"]) >= int(legacy["recorded_at"])
+            ):
+                current_granted = str(latest_change["action"]) == "GRANT"
+            else:
+                current_granted = bool(legacy and str(legacy["result"]) == "APPROVED")
+            if current_granted == granted:
+                return {
+                    "changed": False,
+                    "granted": granted,
+                    "discord_id": discord_id,
+                    "course_id": course_id,
+                    "course_name": str(course["name"]),
+                    "course_role_id": int(course["course_role_id"]),
+                }
+
+            action = "GRANT" if granted else "REVOKE"
+            cursor = await connection.execute(
+                """
+                INSERT INTO qualification_changes(
+                    guild_id, member_id, discord_id, course_id, action, source,
+                    actor_id, reason, correlation_id, recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    guild_id,
+                    int(member["id"]),
+                    discord_id,
+                    course_id,
+                    action,
+                    normalized_source,
+                    actor_id,
+                    normalized_reason,
+                    operation_id,
+                    now,
+                ),
+            )
+            change_id = int(cursor.lastrowid)
+            outbox_id: int | None = None
+            if enqueue_discord_sync:
+                cursor = await connection.execute(
+                    """
+                    INSERT INTO web_action_outbox(
+                        guild_id, action_type, target_discord_id, payload_json,
+                        requested_by, correlation_id, status, available_at, created_at
+                    ) VALUES (?, 'QUALIFICATION_SYNC', ?, ?, ?, ?, 'PENDING', ?, ?)
+                    """,
+                    (
+                        guild_id,
+                        discord_id,
+                        json.dumps(
+                            {"course_id": course_id, "granted": granted, "source": normalized_source},
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        actor_id or discord_id,
+                        f"{operation_id}:discord",
+                        now,
+                        now,
+                    ),
+                )
+                outbox_id = int(cursor.lastrowid)
+            await self.audit.record(
+                guild_id,
+                "MEMBER_QUALIFICATION_GRANTED" if granted else "MEMBER_QUALIFICATION_REVOKED",
+                actor_id=actor_id,
+                target_id=discord_id,
+                before={"granted": current_granted},
+                after={
+                    "granted": granted,
+                    "course_id": course_id,
+                    "course_name": str(course["name"]),
+                    "course_role_id": int(course["course_role_id"]),
+                    "source": normalized_source,
+                    "change_id": change_id,
+                    "outbox_id": outbox_id,
+                },
+                reason=normalized_reason,
+                correlation_id=f"{operation_id}:audit",
+                connection=connection,
+            )
+        return {
+            "changed": True,
+            "granted": granted,
+            "discord_id": discord_id,
+            "course_id": course_id,
+            "course_name": str(course["name"]),
+            "course_role_id": int(course["course_role_id"]),
+            "change_id": change_id,
+            "outbox_id": outbox_id,
+        }
+
+    async def record_discord_qualification_roles(
+        self,
+        guild_id: int,
+        discord_id: int,
+        *,
+        added_role_ids: Iterable[int],
+        removed_role_ids: Iterable[int],
+    ) -> list[dict[str, object]]:
+        added = {int(role_id) for role_id in added_role_ids}
+        removed = {int(role_id) for role_id in removed_role_ids}
+        role_ids = sorted(added | removed)
+        if not role_ids:
+            return []
+        rows = await self.database.fetchall(
+            f"""
+            SELECT id, course_role_id FROM course_catalog
+            WHERE guild_id=? AND active=1
+              AND course_role_id IN ({','.join('?' for _ in role_ids)})
+            """,
+            (guild_id, *role_ids),
+        )
+        results: list[dict[str, object]] = []
+        for row in rows:
+            role_id = int(row["course_role_id"])
+            granted = role_id in added
+            result = await self.set_member_qualification(
+                guild_id,
+                discord_id,
+                int(row["id"]),
+                granted=granted,
+                actor_id=None,
+                reason="Cargo de qualificação alterado diretamente no Discord.",
+                source="DISCORD",
+                enqueue_discord_sync=False,
+            )
+            if result["changed"]:
+                results.append(result)
+        return results
 
     async def course_requirement_status(
         self, guild_id: int, course_id: int, discord_id: int
@@ -2555,20 +2827,17 @@ class OperationsService:
             str(value)
             for value in await self.settings.get(guild_id, "recruit_required_courses", [])
         ]
-        qualifications = await self.database.fetchall(
-            """
-            SELECT course_name, result, recorded_at FROM member_qualifications
-            WHERE guild_id=? AND member_id=? ORDER BY recorded_at DESC
-            """,
-            (guild_id, member["id"]),
-        )
+        qualifications = await self.current_member_qualifications(guild_id, discord_id)
         approved = {
-            str(row["course_name"]).casefold()
+            normalize_stylized_label(str(value))
             for row in qualifications
             if row["result"] == "APPROVED"
+            for value in (row["course_name"], row["internal_code"])
         }
         missing_courses = [
-            course for course in required_courses if course.casefold() not in approved
+            course
+            for course in required_courses
+            if normalize_stylized_label(course) not in approved
         ]
         requirements = {
             "minimum_days": max(0, (now - int(member["joined_at"])) // DAY_MS)
@@ -2588,7 +2857,7 @@ class OperationsService:
             "valid_hours_ms": valid_hours_ms,
             "patrols": int(patrol_row["total"] if patrol_row else 0),
             "evaluations": int(evaluation_row["total"] if evaluation_row else 0),
-            "qualifications": [dict(row) for row in qualifications],
+            "qualifications": qualifications,
             "missing_courses": missing_courses,
             "requirements": requirements,
             "eligible_for_effective_review": all(requirements.values()),
@@ -2596,12 +2865,12 @@ class OperationsService:
 
     async def recruits(self, guild_id: int) -> list[dict[str, object]]:
         configured = {
-            str(value).casefold()
+            normalize_stylized_label(str(value))
             for value in await self.settings.get(guild_id, "recruit_rank_names", ["RECRUTA"])
         }
         rows = await self.database.fetchall(
             """
-            SELECT m.discord_id, r.name AS rank_name FROM members m
+            SELECT m.discord_id, r.name AS rank_name, r.prefix AS rank_prefix FROM members m
             LEFT JOIN ranks r ON r.id=m.rank_id
             WHERE m.guild_id=? AND m.status!='DISMISSED'
             ORDER BY m.joined_at
@@ -2610,9 +2879,85 @@ class OperationsService:
         )
         result: list[dict[str, object]] = []
         for row in rows:
-            if str(row["rank_name"] or "").casefold() in configured:
+            rank_keys = {
+                normalize_stylized_label(str(row["rank_name"] or "")),
+                normalize_stylized_label(str(row["rank_prefix"] or "")),
+            }
+            if configured.intersection(rank_keys):
                 result.append(await self.recruit_profile(guild_id, int(row["discord_id"])))
         return result
+
+    async def career_overview(self, guild_id: int) -> dict[str, object]:
+        members = await self.database.fetchall(
+            """
+            SELECT m.id, m.discord_id, m.mta_nick, m.character_id, m.status,
+                   m.joined_at, m.last_activity_at, r.id AS rank_id,
+                   r.name AS rank_name, r.prefix AS rank_prefix, r.level AS rank_level,
+                   COALESCE((
+                       SELECT MAX(changed_at) FROM (
+                           SELECT pa.created_at AS changed_at
+                           FROM personnel_actions pa
+                           WHERE pa.guild_id=m.guild_id AND pa.member_id=m.id
+                             AND pa.to_rank_id=m.rank_id
+                           UNION ALL
+                           SELECT rse.created_at AS changed_at
+                           FROM rank_sync_events rse
+                           WHERE rse.guild_id=m.guild_id AND rse.member_id=m.id
+                             AND rse.to_rank_id=m.rank_id
+                             AND rse.from_rank_id IS NOT rse.to_rank_id
+                       )
+                   ), m.joined_at) AS rank_since,
+                   COALESCE((SELECT COUNT(*) FROM punishments p
+                             WHERE p.guild_id=m.guild_id AND p.member_id=m.id
+                               AND p.punishment_type='WARNING' AND p.status='ACTIVE'), 0)
+                       AS active_warnings,
+                   COALESCE((SELECT COUNT(*) FROM patrol_members pm
+                             JOIN patrols p ON p.id=pm.patrol_id
+                             WHERE pm.member_id=m.id AND p.status='CLOSED'), 0) AS patrols,
+                   COALESCE((SELECT SUM(s.patrol_duration_ms + COALESCE((
+                                  SELECT SUM(sa.delta_ms) FROM shift_adjustments sa
+                                  WHERE sa.shift_id=s.id), 0))
+                             FROM shifts s WHERE s.member_id=m.id
+                               AND s.validation_status='VALID'), 0) AS valid_hours_ms
+            FROM members m LEFT JOIN ranks r ON r.id=m.rank_id
+            WHERE m.guild_id=? AND m.status!='DISMISSED'
+            ORDER BY COALESCE(r.level, -1) DESC, m.mta_nick
+            """,
+            (guild_id,),
+        )
+        movements = await self.database.fetchall(
+            """
+            SELECT * FROM (
+                SELECT 'P-' || pa.id AS id, pa.discord_id, m.mta_nick,
+                       pa.action_type, fr.name AS from_rank_name,
+                       tr.name AS to_rank_name, pa.actor_id, pa.reason,
+                       pa.created_at, 'FORMAL_PANEL' AS source
+                FROM personnel_actions pa
+                JOIN members m ON m.id=pa.member_id
+                LEFT JOIN ranks fr ON fr.id=pa.from_rank_id
+                LEFT JOIN ranks tr ON tr.id=pa.to_rank_id
+                WHERE pa.guild_id=?
+                UNION ALL
+                SELECT 'S-' || rse.id AS id, rse.discord_id, m.mta_nick,
+                       rse.event_type AS action_type, fr.name AS from_rank_name,
+                       tr.name AS to_rank_name, rse.actor_id,
+                       'Sincronização automática de patente' AS reason,
+                       rse.created_at, rse.source
+                FROM rank_sync_events rse
+                JOIN members m ON m.id=rse.member_id
+                LEFT JOIN ranks fr ON fr.id=rse.from_rank_id
+                LEFT JOIN ranks tr ON tr.id=rse.to_rank_id
+                WHERE rse.guild_id=? AND rse.from_rank_id IS NOT rse.to_rank_id
+            ) history
+            ORDER BY created_at DESC, id DESC LIMIT 50
+            """,
+            (guild_id, guild_id),
+        )
+        return {
+            "generated_at": self.clock(),
+            "members": [dict(row) for row in members],
+            "movements": [dict(row) for row in movements],
+        }
 
     async def add_recruit_evaluation(
         self,
@@ -2692,20 +3037,17 @@ class OperationsService:
             str(value)
             for value in await self.settings.get(guild_id, "promotion_required_courses", [])
         ]
-        qualifications = await self.database.fetchall(
-            """
-            SELECT course_name, result FROM member_qualifications
-            WHERE guild_id=? AND member_id=?
-            """,
-            (guild_id, member["id"]),
-        )
+        qualifications = await self.current_member_qualifications(guild_id, discord_id)
         approved = {
-            str(row["course_name"]).casefold()
+            normalize_stylized_label(str(value))
             for row in qualifications
             if row["result"] == "APPROVED"
+            for value in (row["course_name"], row["internal_code"])
         }
         missing_courses = [
-            course for course in required_courses if course.casefold() not in approved
+            course
+            for course in required_courses
+            if normalize_stylized_label(course) not in approved
         ]
         active_punishment = await self.database.fetchone(
             """
@@ -2760,10 +3102,6 @@ class OperationsService:
                 "SELECT * FROM absence_requests WHERE guild_id=? AND member_id=? ORDER BY id DESC LIMIT 10",
                 (guild_id, member_id),
             ),
-            "qualifications": (
-                "SELECT * FROM member_qualifications WHERE guild_id=? AND member_id=? ORDER BY id DESC LIMIT 20",
-                (guild_id, member_id),
-            ),
             "training_evaluations": (
                 "SELECT * FROM training_evaluations WHERE guild_id=? AND member_id=? ORDER BY id DESC LIMIT 10",
                 (guild_id, member_id),
@@ -2784,6 +3122,9 @@ class OperationsService:
         }
         for key, (sql, params) in queries.items():
             result[key] = [dict(row) for row in await self.database.fetchall(sql, params)]
+        result["qualifications"] = await self.current_member_qualifications(
+            guild_id, discord_id
+        )
         return result
 
     async def create_activity_swap(

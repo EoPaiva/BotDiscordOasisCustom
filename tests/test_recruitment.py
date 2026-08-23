@@ -41,6 +41,7 @@ async def recruitment_bundle(tmp_path):
     defaults = await service.ensure_defaults(GUILD_ID, ADMIN_ID)
     campaign = await service.current_campaign(GUILD_ID)
     assert campaign
+    assert int(campaign["minimum_age"]) == 15
     await service.update_campaign(
         GUILD_ID,
         int(campaign["id"]),
@@ -67,6 +68,49 @@ async def recruitment_bundle(tmp_path):
         "rank_id": rank_id,
     }
     await database.close()
+
+
+@pytest.mark.asyncio
+async def test_migration_27_aligns_existing_campaign_age_and_audits(tmp_path) -> None:
+    path = tmp_path / "recruitment-v26.db"
+    database = Database(path)
+    await database.open()
+    audit = AuditService(database, None, Branding())
+    service = RecruitmentService(
+        database,
+        audit,
+        token_secret="recruitment-test-secret-with-strong-entropy",
+    )
+    await service.ensure_defaults(GUILD_ID, ADMIN_ID)
+    campaign = await service.current_campaign(GUILD_ID)
+    assert campaign
+    await database.execute(
+        "UPDATE recruitment_campaigns SET minimum_age=16 WHERE id=?",
+        (int(campaign["id"]),),
+    )
+    await database.execute("DELETE FROM schema_migrations WHERE version=27")
+    await database.close()
+
+    migrated = Database(path)
+    await migrated.open()
+    try:
+        updated = await migrated.fetchone(
+            "SELECT minimum_age FROM recruitment_campaigns WHERE id=?",
+            (int(campaign["id"]),),
+        )
+        event = await migrated.fetchone(
+            """
+            SELECT action, before_json, after_json FROM audit_logs
+            WHERE correlation_id=?
+            """,
+            (f"migration-27-recruitment-minimum-age-{int(campaign['id'])}",),
+        )
+        assert int(updated["minimum_age"]) == 15
+        assert event["action"] == "RECRUITMENT_MINIMUM_AGE_ALIGNED"
+        assert json.loads(event["before_json"])["minimum_age"] == 16
+        assert json.loads(event["after_json"])["minimum_age"] == 15
+    finally:
+        await migrated.close()
 
 
 async def _start(

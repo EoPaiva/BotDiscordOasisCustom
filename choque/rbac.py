@@ -112,6 +112,7 @@ _HIGH_COMMAND_PERMISSIONS = {
     "identity.configure",
     "audit.read",
     "registration.directory.manage",
+    "qualification.manage",
 }
 
 

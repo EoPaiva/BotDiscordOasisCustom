@@ -2062,6 +2062,25 @@ class OperationsCommands(commands.Cog):
         if before_roles == after_roles:
             return
         try:
+            await self.services.operations.record_discord_qualification_roles(
+                after.guild.id,
+                after.id,
+                added_role_ids=after_roles - before_roles,
+                removed_role_ids=before_roles - after_roles,
+            )
+        except (NotFoundError, ValidationError):
+            LOGGER.info(
+                "Mudança de cargo de curso ignorada para membro não elegível %s na guild %s",
+                after.id,
+                after.guild.id,
+            )
+        except Exception:
+            LOGGER.exception(
+                "Falha ao registrar qualificação alterada no Discord para %s na guild %s",
+                after.id,
+                after.guild.id,
+            )
+        try:
             changed = await self.reconcile_patrol_commanders(
                 after.guild, reason="MEMBER_RANK_CHANGED"
             )

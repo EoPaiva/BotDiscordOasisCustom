@@ -3,21 +3,23 @@ import { Check, ExternalLink, LockKeyhole, Radio, ShieldAlert } from "lucide-rea
 const completedPhases = [
   "Base transacional, RBAC e cadastro",
   "Bate-ponto e tempo mínimo em patrulha",
-  "Hierarquia, carreira, cursos e medalhas",
+  "Hierarquia, carreira e cursos",
   "Operações inteligentes e comandante de patrulha",
   "Portaria Digital e recrutamento íntegro",
   "Tickets privados com operação completa",
   "Centro de Comando Web e hardening",
+  "Recrutamento público e análise privada",
+  "Patrulhas ao vivo e qualificações bidirecionais",
 ];
 
 const publicationChecks = [
-  { label: "Código privado publicado sem histórico legado", state: "done" },
-  { label: "Scanner de segredos e dependências", state: "done" },
-  { label: "Runtime Railway unificado para SQLite", state: "done" },
-  { label: "Publicação da migration V23 na Railway", state: "blocked" },
-  { label: "Reconciliação Discord, identidade e RBAC", state: "pending" },
-  { label: "Rotação de credenciais e permissões mínimas", state: "blocked" },
-  { label: "Login Discord em validação final", state: "pending" },
+  { label: "Runtime único na Discloud Diamond", state: "done" },
+  { label: "Banco íntegro na migration V27", state: "done" },
+  { label: "Gateway Discord, painéis e outbox", state: "done" },
+  { label: "Patrulhas ao vivo confirmadas pela API", state: "done" },
+  { label: "Domínio próprio do portal", state: "blocked" },
+  { label: "Provider protegido do Robô Analista", state: "blocked" },
+  { label: "Rotação de credenciais e menor privilégio", state: "blocked" },
 ];
 
 export default function ProjectStatusPage() {
@@ -30,14 +32,14 @@ export default function ProjectStatusPage() {
           <h1>CHOQUE <strong>— BGR</strong></h1>
           <p>Implantação do Sistema Integrado de Gestão</p>
         </div>
-        <div className="status-live-badge"><Radio size={14} /> MANUTENÇÃO DE DEPLOY</div>
+        <div className="status-live-badge"><Radio size={14} /> OPERAÇÃO ONLINE</div>
       </section>
 
       <section className="status-metrics" aria-label="Resumo da implantação">
-        <article><span>FASES CONCLUÍDAS</span><strong>21 / 24</strong><small>Fase 19 em validação final</small></article>
-        <article><span>TESTES AUTOMATIZADOS</span><strong>300+</strong><small>Python, UI e integração</small></article>
-        <article><span>MIGRATION PREPARADA</span><strong>V23</strong><small>Produção preservada em V22</small></article>
-        <article className="warning"><span>RUNTIME</span><strong>PAUSADO</strong><small>Railway bloqueou deploy no horário de pico</small></article>
+        <article><span>RUNTIME</span><strong>ONLINE</strong><small>Discloud Diamond · instância única</small></article>
+        <article><span>TESTES AUTOMATIZADOS</span><strong>307+</strong><small>Python, UI e integração</small></article>
+        <article><span>BANCO OPERACIONAL</span><strong>V27</strong><small>SQLite íntegro e transacional</small></article>
+        <article><span>GATEWAY</span><strong>ATIVO</strong><small>Bot e painéis conectados ao Discord</small></article>
       </section>
 
       <div className="status-grid">
@@ -63,7 +65,7 @@ export default function ProjectStatusPage() {
           </div>
           <aside className="status-security-note">
             <ShieldAlert size={22} />
-            <div><strong>Publicação temporariamente retida</strong><p>O código e a migration V23 passaram nos testes, mas o plano Railway recusou novos deployments durante a janela de pico. Serviço, volume e backup permanecem preservados; o bot está offline até a retomada segura.</p></div>
+            <div><strong>Pendências externas preservadas</strong><p>O núcleo está em produção. Domínio próprio, provider do Robô Analista e rotação de credenciais continuam registrados e dependem de decisão ou ação protegida do proprietário; nenhum deles bloqueia o bot atual.</p></div>
           </aside>
         </section>
       </div>
@@ -71,7 +73,7 @@ export default function ProjectStatusPage() {
       <footer className="status-page-footer">
         <span>CHOQUE - BGR · SISTEMA DE GESTÃO</span>
         <a href="https://github.com/EoPaiva/choque-bgr-gestao" target="_blank" rel="noreferrer">Repositório privado <ExternalLink size={13} /></a>
-        <time dateTime="2026-08-22">Atualizado em 22 AGO 2026</time>
+        <time dateTime="2026-08-23">Atualizado em 23 AGO 2026</time>
       </footer>
     </main>
   );

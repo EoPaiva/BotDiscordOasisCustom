@@ -12,6 +12,7 @@ from choque.embeds import branded_embed
 from choque.errors import NotFoundError, PermissionDenied, ValidationError
 from choque.models import MemberStatus
 from choque.time_utils import discord_timestamp, format_duration
+from choque.web_urls import recruitment_portal_url
 from cogs.config_ui import respond_error
 from cogs.member_sync import sync_registered_member
 
@@ -239,7 +240,7 @@ class RegistrationPanelView(discord.ui.View):
                     label="Candidatar-me agora",
                     emoji="🪖",
                     style=discord.ButtonStyle.link,
-                    url=f"{recruitment_public_url.rstrip('/')}/recrutamento",
+                    url=recruitment_portal_url(recruitment_public_url),
                     row=0,
                 )
             )

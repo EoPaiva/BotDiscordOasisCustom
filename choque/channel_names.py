@@ -60,6 +60,12 @@ _SMALL_CAPS_TRANSLATION = str.maketrans(
         **{key.upper(): value for key, value in _SMALL_CAPS_GLYPHS.items()},
     }
 )
+_SMALL_CAPS_ASCII_TRANSLATION = str.maketrans(
+    {
+        **{value: key for key, value in _SMALL_CAPS_GLYPHS.items()},
+        "ғ": "f",
+    }
+)
 
 
 def normalize_channel_label(value: str) -> str:
@@ -71,6 +77,19 @@ def normalize_channel_label(value: str) -> str:
     words = re.sub(r"[-_|]+", " ", without_accents)
     words = re.sub(r"\s+", " ", words).strip().lower()
     return words[:1].upper() + words[1:] if words else ""
+
+
+def normalize_stylized_label(value: str) -> str:
+    """Normaliza texto humano ou Small Caps para uma chave sem acentos."""
+
+    decoded = value.casefold().translate(_SMALL_CAPS_ASCII_TRANSLATION)
+    decomposed = unicodedata.normalize("NFKD", decoded)
+    without_accents = "".join(
+        character for character in decomposed if not unicodedata.combining(character)
+    )
+    words = re.sub(r"[^a-z0-9]+", " ", without_accents)
+    words = re.sub(r"\b(\d+)o\b", r"\1", words)
+    return " ".join(words.split())
 
 
 def format_legacy_italic_channel_name(value: str, emoji: str | None = None) -> str:

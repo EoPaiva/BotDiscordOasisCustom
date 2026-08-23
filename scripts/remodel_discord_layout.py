@@ -143,7 +143,6 @@ CHANNEL_SPECS = (
     ChannelSpec("info.binds", "info", "⌨️", "Binds operacionais", known_id=1146622065110171667),
     ChannelSpec("info.codes", "info", "📻", "Codigos q", known_id=1161810176718930071),
     ChannelSpec("info.hierarchy", "info", "📈", "Hierarquia", known_id=1146622065110171666),
-    ChannelSpec("info.medals", "info", "🏅", "Medalhas", known_id=1165940959318655037),
     ChannelSpec(
         "info.decorations", "info", "🎖️", "Condecoracoes", known_id=1165939530474475530
     ),

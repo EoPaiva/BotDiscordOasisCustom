@@ -1,5 +1,99 @@
 # PROJECT HANDOFF
 
+## Auditoria recuperada, requisito etário e status público — 2026-08-23
+
+- A releitura dos pedidos recentes encontrou divergência entre a mensagem de Requisitos, que já
+  dizia 15 anos, e a campanha real, que ainda exigia 16. A migration 27 alterou a campanha aberta
+  para **15 anos fora do personagem**, preservou o valor anterior em auditoria e mudou o default de
+  instalações novas. O backup pós-corte confirmou `quick_check=ok`, FK=0, v27 e 16 → 15.
+- Os itens desnecessários “CNH categoria B” e “porte de arma regularizado” não aparecem no fluxo
+  ativo. A mensagem vigente mantém somente idade, microfone, maturidade, disponibilidade, bases de
+  RP, nível 10, Nick/ID BGR e dez questões de RP policial/códigos Q.
+- `/status` deixou de informar Railway pausada/v23. A publicação agora mostra Discloud Diamond
+  online, instância única, Gateway ativo e banco v27; o alias público respondeu 200 sem texto antigo.
+- A fila ganhou uma decisão preservada: o usuário disse que a gestão de qualificações deveria ser
+  “só eu”, enquanto o RBAC publicado concede a ação ao Alto Comando. Nada foi restringido por
+  suposição; a escolha foi colocada no fim da fila, sem bloquear trabalhos seguros.
+- Gates desta correção: **309 pytest**, **32 Vitest**, Ruff, compileall, `main.py --check`, scanner
+  de segredos, ESLint, TypeScript e build. Discloud e Vercel voltaram online após o rollout.
+
+## Medalhas removidas por decisão do proprietário — 2026-08-23
+
+- O canal apagado não será recriado. `cogs.medals_system` saiu da lista explícita de cogs e os
+  validadores tratam a ausência como decisão intencional, não como falha operacional.
+- Os scripts de provisionamento e remodelação também deixaram de declarar o ID/chave de Medalhas,
+  impedindo uma recriação acidental em manutenção estrutural. O código histórico e as sete
+  definições permanecem apenas para consulta e rollback.
+- Após backup e restart, a Discloud carregou 16 cogs, 21 views e zero comandos publicados; não houve
+  novo alerta de canal de Medalhas nos logs. O validador vivo passou com o módulo desabilitado.
+
+## Acabamento editorial do Recrutamento validado — 2026-08-23
+
+- A direção visual final é **alistamento editorial militar contemporâneo**: grafite dominante,
+  vermelho institucional, Barlow Condensed como voz de comando e IBM Plex Mono somente para dados
+  operacionais. A diagonal vermelha atravessando o hero é a âncora visual reconhecível sem o logo.
+- DFII da revisão: **13/15**. A composição usa assimetria, escala tipográfica e linhas de processo em
+  vez de uma grade de cards genéricos; mantém animações mínimas, contraste textual e foco visível.
+- A publicação foi inspecionada integralmente em 1440 px e 390 px. O formulário permanece linear,
+  os requisitos e as três etapas são claros e não existe rolagem horizontal no mobile.
+- O E2E antigo foi atualizado para o conteúdo real e agora verifica headings, CTAs, dez questões,
+  privacidade, idioma, overflow e nome acessível em todos os controles visíveis. Chromium desktop,
+  Chromium mobile e Firefox passaram contra o alias público; ESLint, TypeScript, 32 Vitest e build
+  Next.js também permanecem verdes.
+- O Lovable não expôs ferramenta callable nesta sessão. Nenhum dado real foi enviado a terceiros;
+  a referência editorial já incorporada foi auditada pelos artefatos locais e pela publicação.
+
+## Recrutas e Gestão de Carreira com dados reais — 2026-08-23
+
+- A tela de Recrutas não reconhecia `ʀᴇᴄʀᴜᴛᴀ`, pois comparava a fonte Small Caps com o literal
+  `RECRUTA`. A normalização central agora reduz rótulos visuais Unicode ao identificador canônico e
+  funciona tanto com o nome quanto com o prefixo da patente.
+- `GET /v1/career` passou a entregar o efetivo ativo, patente e tempo na patente, horas válidas,
+  patrulhas, advertências e histórico real de movimentações formais ou sincronizadas. As páginas de
+  Recrutas e Carreira exibem estados vazios úteis e caminhos alcançáveis, sem fabricar registros.
+- A projeção de dossiê, elegibilidade e qualificações usa o estado bidirecional atual da migration
+  26, evitando que concessões feitas pelo site ou Discord apareçam apenas na matriz administrativa.
+- Produção: backup pré-corte preservado, Discloud online em instância única, migration 26,
+  `CHECK_OK`, Gateway conectado, health 200 e rota de Carreira protegida (`401` sem sessão). O alias
+  Vercel mantém Recrutamento público e redireciona Recrutas, Carreira e Patrulhas para login.
+- A leitura do banco remoto confirmou **12 membros ativos**, **4 recrutas** e **14 movimentações de
+  patente**. Gates finais: **307 pytest**, **32 Vitest**, Ruff, compileall, `main.py --check`, ESLint,
+  TypeScript, build Next.js e `git diff --check`.
+
+## Qualificações bidirecionais publicadas — 2026-08-23
+
+- A migration 26 criou `qualification_changes`, histórico append-only de concessão/revogação
+  com origem Web, Discord, treinamento ou sistema. A projeção combina o legado de treinamentos com
+  a decisão manual mais recente sem reescrever resultados anteriores.
+- O Alto Comando recebeu a permissão exclusiva `qualification.manage`. A matriz web agora permite
+  conceder/remover por membro e curso; a API valida cadastro ativo e mapping do catálogo antes de
+  gravar a decisão, auditoria e outbox na mesma transação.
+- A outbox `QUALIFICATION_SYNC` adiciona ou remove somente o cargo Discord associado ao curso e
+  revalida o estado mais recente antes da entrega. O listener de cargos registra alterações feitas
+  no Discord sem reenfileirar a mesma ação, evitando loops.
+- Produção: Discloud online em instância única, banco v26, rota protegida presente e health 200;
+  Vercel publicou a matriz no alias principal. O backup pré-corte está em
+  `data/backups/pre-qualifications-20260823/backup-choque-bgr-api.zip`.
+- Gates: **306 pytest**, **32 Vitest**, Ruff, compileall, `main.py --check`, ESLint, TypeScript e
+  build Next.js. Nenhum cargo de membro real foi alterado apenas para QA automatizado.
+
+## Hotfix de Patrulhas e fila recuperada — 2026-08-23
+
+- A presença na Patrulha Alfa era persistida corretamente, mas o `app.py` remoto ainda chamava a
+  consulta de patrulhas formais. A rota passou a usar `active_patrol_overview()` e retornou a call
+  ao vivo com um ocupante após reinício em instância única.
+- `Database.fetchall_fresh()` usa conexão SQLite nativa curta em thread para leituras operacionais
+  entre bot e API; escritas e demais serviços permanecem no `aiosqlite` central.
+- O incidente revelou drift entre árvore local e runtime: o commit incremental ignorou arquivos da
+  API. O backup remoto foi comparado com todos os Python/JSON ativos; `app.py` e `security.py` foram
+  alinhados, inclusive o gate exclusivo de Comando e as chaves de canais do Recrutamento. Os hashes
+  finais coincidem com a árvore local e o backup pré-paridade ficou fora do Git.
+- A conversa foi auditada. A fila 32–42 preserva qualificações bidirecionais, telas vazias do site,
+  acabamento visual, Robô Analista, domínio próprio, medalhas removidas, compactação adiada e dívida
+  de segurança. Dependências humanas recuam sem serem descartadas.
+- Evidência final: 302 testes, Ruff, compileall e `main.py --check` passaram; a rota assinada
+  retornou `VOICE_ACTIVE`, `DISCORD_LIVE`, Patrulha Alfa e um ocupante depois do corte.
+
 ## Portaria segura, recrutamento público e presença ao vivo — 2026-08-23
 
 - A Portaria deixou de oferecer `Realizar cadastro` e passou a exibir `Identificar vínculo`. Uma
@@ -20,8 +114,8 @@
   duas menções do protocolo.
 - A migration 25 persiste snapshots de ocupação das calls de patrulha. O painel web combina
   patrulhas formais com ocupação real do Discord e atualiza a cada dez segundos sem criar histórico
-  falso. Na validação final não havia usuário nas calls; tabela, listener, startup e composição
-  passaram nos testes, faltando apenas observar uma próxima ocupação real.
+  falso. A ocupação posterior da Patrulha Alfa foi observada no banco e no endpoint assinado,
+  fechando a validação real que estava pendente.
 - O Centro de Comando web passou a negar todo perfil abaixo de `COMANDO`; recrutamento público usa
   autenticação de candidato separada e não foi bloqueado. A Vercel publicou a versão no alias
   principal, `/recrutamento` respondeu 200 e `/patrols` permaneceu protegido por login.
@@ -481,9 +575,21 @@ registradas em `schema_migrations`. Nunca edite uma migration aplicada; adicione
 | 12 | entrega/arquivo idempotente de cadastros analisados |
 | 13 | catálogo, requisitos e solicitações de cursos |
 | 14 | mínimo de patrulha, classificação de calls/segmentos, validação e overrides append-only |
+| 15 | prontidão operacional, patrulhas e snapshots de estado |
+| 16 | outbox de ações originadas no Centro de Comando Web |
+| 17 | formulários, blocos e candidaturas versionadas de recrutamento |
+| 18 | contexto, execução e achados do Robô Analista |
+| 19 | eventos e controles persistentes de segurança |
+| 20 | comandante de patrulha e histórico de atribuições |
+| 21 | Portaria, gate de cadastro e conformidade de identidade |
+| 22 | controles, prioridade e histórico de tickets |
+| 23 | perfis RBAC, identidade e reconciliação Discord/Web |
+| 24 | conformidade de patente sem cadastro em 72 horas |
+| 25 | presença ao vivo nas calls de patrulha |
+| 26 | mudanças append-only e sincronização bidirecional de qualificações |
 
-Última versão encontrada e validada: **14**. A próxima migration pertence à Central de Patrulha
-Inteligente e deve ser adicionada sem editar as versões aplicadas.
+Última versão encontrada e validada localmente e na Discloud: **26**. A próxima migration deve
+ser adicionada sem editar as versões aplicadas.
 
 ## 14. Modelo de Permissões
 

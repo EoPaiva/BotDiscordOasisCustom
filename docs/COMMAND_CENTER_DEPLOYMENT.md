@@ -1,35 +1,26 @@
 # Implantação do Centro de Comando
 
-O status público está na Vercel e o runtime combinado está ativo na Railway por exceção expressa do
-proprietário. O gate de segurança continua `FAIL`; produção ativa não equivale a aprovação do gate:
+O status público está na Vercel e o runtime combinado está ativo na **Discloud Diamond** por decisão
+do proprietário. O gate de segurança continua `FAIL`; produção ativa não equivale a aprovação do gate:
 
 ```text
-Navegador -> Next.js/Vercel -> runtime combinado/Railway -> SQLite em volume único
+Navegador -> Next.js/Vercel -> runtime combinado/Discloud -> SQLite persistente único
                               (FastAPI + bot)             -> outbox -> Discord
 ```
 
-## Serviço Railway único
+## Aplicação Discloud única
 
-Enquanto SQLite for a fonte de verdade, use **um único serviço** apontando para o commit. O manifesto
-canônico para deploy pelo repositório é `railway.toml`; `deploy/railway.combined.toml` preserva a
-mesma configuração como referência explícita da topologia. `scripts/run_combined.py` executa o
+Enquanto SQLite for a fonte de verdade, use **uma única aplicação**. `discloud.config` define
+`TYPE=site`, `ID=choque-bgr-api`, 1024 MB e `scripts/run_combined.py` como entrada. O launcher executa
 check/migrations antes de iniciar FastAPI e bot, supervisiona os dois processos e encerra ambos se
-um deles falhar.
+um deles falhar. A instância local deve permanecer desligada enquanto a aplicação remota estiver
+online.
 
-O projeto `pure-connection`, ambiente `production`, reutiliza exclusivamente o serviço
-`beautiful-laughter` para o CHOQUE-BGR. Configurações e deployments removidos do sistema antigo não
-são reutilizados. O volume `beautiful-laughter-volume` possui 500 MB, está montado em `/data` e usa
-`DATABASE_PATH=/data/choque_bgr.db`. O serviço executa uma única réplica em
-`asia-southeast1-eqsg3a`, escolha operacional temporária porque as regiões mais próximas recusaram
-deploy gratuito em horário de pico. O deployment `5bae72f3-6540-4da4-a78a-470e9dcbdd6f` ficou
-`SUCCESS`, `/health` respondeu 200 e o bot conectou à guild oficial; a instância local permaneceu
-desligada.
-
-Monte um volume persistente somente nesse serviço, use `DATABASE_PATH=/data/choque_bgr.db`, mantenha
-uma réplica e a mesma região durante todo o ciclo SQLite. Railway associa o volume ao serviço e não
-permite réplicas com volume; por isso dois serviços não formam uma topologia SQLite compartilhada
-válida. Os arquivos `railway.bot.toml` e `railway.api.toml` ficam apenas como referência para o corte
-futuro PostgreSQL, quando processos separados poderão compartilhar a mesma fonte de verdade.
+O banco canônico é `/home/user_discloud/data/choque_bgr.db`. Antes de qualquer commit que altere
+migration ou domínio, execute `discloud app backup choque-bgr-api <diretorio> -s`, extraia uma cópia
+e valide `quick_check`, foreign keys e versão. O `.discloudignore` bloqueia `.env`, bancos, WAL/SHM,
+logs, backups e dados pessoais para que commits de código não substituam o volume persistente.
+`railway.toml` e `deploy/railway.*.toml` permanecem somente como histórico da topologia anterior.
 
 O runtime exige `DISCORD_TOKEN`, `DATABASE_PATH`, `DEFAULT_GUILD_ID`, `LOG_LEVEL`,
 `APP_ENV=production`, `COMMAND_CENTER_INTERNAL_SECRET`,
@@ -65,7 +56,7 @@ prova de guild. A API aceita o nonce apenas uma vez e rejeita assinatura expirad
 API daquele ambiente. `COMMAND_CENTER_ALLOW_LEGACY_AUTH` deve permanecer `false`; produção recusa
 o fallback mesmo se alguém tentar ativá-lo.
 
-O token Discord permanece restrito ao ambiente server-side do runtime Railway; nunca o cadastre na
+O token Discord permanece restrito ao ambiente server-side do runtime Discloud; nunca o cadastre na
 Vercel nem o exponha por endpoint/log.
 
 ## Corte futuro para Supabase PostgreSQL
@@ -91,10 +82,9 @@ COMANDO e o processamento real da outbox em canais isolados de QA. Execute tamb�
 dependency audits, SBOM, restore drill e a matriz em `docs/SECURITY_CONTROL_MATRIX.md`.
 
 Por padrão, o deploy operacional permanece bloqueado enquanto o veredito de `SECURITY.md` for FAIL.
-O corte de 2026-08-22 foi uma exceção pontual autorizada pelo proprietário e não deve ser reutilizado
-como precedente. O Vercel CLI 59.4.0 publicou o deployment
-`dpl_HdH2HSDYQrQUz3avDeppnDg35ZRr`; `/status`, `/login`, provider Discord e callback esperado foram
-validados, sem 5xx. Login/logout humano, revogação real de sessão, contas MEMBRO/COMANDO, os seis
-achados do audit Discord e a rotação de credenciais permanecem gates operacionais. Continue usando
-`vercel env pull`, `vercel deploy` e `vercel logs` sem copiar segredos e sem cadastrar token Discord
-ou credenciais de banco na Vercel.
+O corte Railway de 2026-08-22 é histórico e não deve ser reutilizado como precedente. A publicação
+vigente usa Discloud Diamond e o alias `https://web-plum-tau-82.vercel.app`; `/status`,
+`/recrutamento`, provider Discord e callback esperado devem ser validados após cada corte. Login/
+logout humano, revogação real de sessão, contas MEMBRO/COMANDO, achados do audit Discord e rotação
+de credenciais permanecem gates operacionais. Use `vercel env pull`, `vercel deploy` e `vercel logs`
+sem copiar segredos e sem cadastrar token Discord ou credenciais de banco na Vercel.

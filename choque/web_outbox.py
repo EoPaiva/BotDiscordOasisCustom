@@ -281,6 +281,7 @@ class WebActionWorker:
             "MEMBER_SYNC",
             "IDENTITY_SYNC",
             "IDENTITY_RECONCILE_BULK",
+            "QUALIFICATION_SYNC",
         }
         if action_type not in supported:
             raise ValueError(f"Ação web não suportada: {row['action_type']}")
@@ -327,6 +328,23 @@ class WebActionWorker:
                 return result
             except discord.DiscordException as exc:
                 raise RuntimeError("Membro indisponível no Discord") from exc
+        if action_type == "QUALIFICATION_SYNC":
+            await self._sync_qualification_role(row, payload, guild, member)
+            await self.audit.record(
+                int(row["guild_id"]),
+                "DISCORD_QUALIFICATION_SYNC_COMPLETED",
+                actor_id=_optional_actor_id(row["requested_by"]),
+                target_id=target_id,
+                after={
+                    "action_id": int(row["id"]),
+                    "course_id": int(payload.get("course_id") or 0),
+                    "operation_correlation_id": str(row["correlation_id"]),
+                },
+                correlation_id=_audit_correlation_id(
+                    row["correlation_id"], f"qualification-sync-completed-{row['id']}"
+                ),
+            )
+            return None
         if action_type == "IDENTITY_SYNC":
             result = await self.rank_sync.sync_from_member(
                 member,
@@ -371,6 +389,51 @@ class WebActionWorker:
                 correlation_id=str(row["correlation_id"]),
             )
         return result
+
+    async def _sync_qualification_role(
+        self,
+        row,
+        payload: dict[str, object],
+        guild: discord.Guild,
+        member: discord.Member,
+    ) -> None:
+        course_id = int(payload.get("course_id") or 0)
+        if course_id <= 0:
+            raise ValueError("Curso ausente na ação de qualificação")
+        course = await self.database.fetchone(
+            """
+            SELECT id, name, course_role_id FROM course_catalog
+            WHERE guild_id=? AND id=? AND active=1
+            """,
+            (int(row["guild_id"]), course_id),
+        )
+        if not course:
+            raise RuntimeError("Curso ativo não encontrado")
+        latest = await self.database.fetchone(
+            """
+            SELECT qc.action FROM qualification_changes qc
+            JOIN members m ON m.id=qc.member_id
+            WHERE qc.guild_id=? AND qc.course_id=? AND m.discord_id=?
+            ORDER BY qc.recorded_at DESC, qc.id DESC LIMIT 1
+            """,
+            (int(row["guild_id"]), course_id, int(member.id)),
+        )
+        if not latest:
+            raise RuntimeError("Estado de qualificação não encontrado")
+        should_have_role = str(latest["action"]) == "GRANT"
+        role_id = int(course["course_role_id"])
+        role = guild.get_role(role_id)
+        if role is None:
+            roles = await guild.fetch_roles()
+            role = next((item for item in roles if int(item.id) == role_id), None)
+        if role is None:
+            raise RuntimeError("Cargo do curso não foi encontrado no Discord")
+        has_role = any(int(item.id) == role_id for item in member.roles)
+        reason = f"CHOQUE - BGR • qualificação {course['name']} via Centro de Comando"
+        if should_have_role and not has_role:
+            await member.add_roles(role, reason=reason)
+        elif not should_have_role and has_role:
+            await member.remove_roles(role, reason=reason)
 
     async def _registration_remove_roles(self, guild_id: int, action_type: str) -> set[int]:
         if action_type != "MEMBER_SYNC" or not self.audit.settings:

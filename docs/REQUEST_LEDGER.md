@@ -2,7 +2,41 @@
 
 Atualizado em 2026-08-23.
 
+## Auditoria complementar da conversa — 2026-08-23
+
+A releitura dos pedidos, incluindo a conversa de voz recente, recuperou itens que haviam sido
+somente mencionados ou resumidos genericamente. A fila detalhada está nos itens 32–42.
+
+| Pedido | Estado verificado | Destino |
+|---|---|---|
+| Patrulha ocupada aparecer no site | CONCLUÍDO com Patrulha Alfa real | item 32 |
+| Link sem `/recrutamento/recrutamento` | CONCLUÍDO e validado pelo usuário | hotfix web |
+| Gestão site ↔ Discord de qualificações | CONCLUÍDO e publicado | item 34 |
+| Recrutas e Gestão de Carreira sem conteúdo útil | CONCLUÍDO e publicado | item 35 |
+| Redesign autoral do recrutamento | CONCLUÍDO e validado responsivamente | item 36 |
+| Robô Analista | IMPLEMENTADO, DESATIVADO sem provider | item 37 |
+| Domínio/subdomínio sem marca Vercel | NÃO EXECUTADO; depende de escolha | item 38 |
+| Medalhas apagadas intencionalmente | CONCLUÍDO; módulo e recriação estrutural desabilitados | item 39 |
+| Compactação detalhada do servidor | ADIADA; plano preservado | item 40 |
+| Rotação de segredos/menor privilégio | PENDÊNCIA externa obrigatória | item 41 |
+| Paridade fonte local ↔ Discloud | URGÊNCIA descoberta no hotfix | item 33 |
+| Requisito real de 15 anos | CONCLUÍDO em produção com migration 27 e auditoria 16 → 15 | item 43 |
+| Remover CNH B e porte de arma dos requisitos | CONCLUÍDO; ausentes do fluxo ativo | item 43 |
+| Página pública de andamento coerente | CONCLUÍDO; Discloud online/Gateway/v27 | item 43 |
+| Qualificações disponíveis “só para mim” | AGUARDA escolha: proprietário ou Alto Comando | item 44 |
+| Checkpoint atual no GitHub privado | PENDENTE seguro após consolidação | item 45 |
+
+Itens dependentes de resposta humana recuam temporariamente; nenhum pedido é descartado ou marcado
+como concluído apenas porque foi anotado ou implementado localmente.
+
 ## Pedidos concluídos nesta continuidade
+
+- **Medalhas intencionalmente removidas:** o canal não é exigido pelo runtime, validadores ou
+  scripts estruturais. O módulo histórico permanece somente para rollback e não é carregado.
+- **Idade do alistamento:** mensagem e regra real agora exigem 15 anos fora do personagem; a
+  migration 27 registrou o valor anterior e o banco remoto confirmou a alteração.
+- **Acompanhamento público:** `/status` reflete Discloud Diamond online, Gateway ativo e banco v27,
+  sem a antiga mensagem de Railway pausada.
 
 - **Portaria sem atalho de ingresso:** o botão público agora identifica vínculo. Visitante sem
   candidatura ou role reconhecida não pode ser aprovado como membro por esse caminho.
@@ -12,11 +46,18 @@ Atualizado em 2026-08-23.
   `Setar tag`, menção do aprovado, DM e fallback administrativo foram aplicados e validados.
 - **Protocolo anterior:** `AL-00005` foi atualizado no quadro e no resultado sem duplicar mensagens.
 - **Patrulha no site:** ocupação real das calls passou a alimentar API e frontend, mesmo sem uma
-  patrulha formal aberta; nenhuma call estava ocupada no instante da validação real.
+  patrulha formal aberta; a Patrulha Alfa foi retornada com um ocupante no endpoint real.
 - **Acesso ao site:** Centro de Comando restrito a Comando/Alto Comando; jornada pública de
   candidatura não depende desse perfil.
-- **Pendências preservadas:** gestão bidirecional de qualificações e compactação estrutural do
-  servidor continuam como trabalhos futuros, sem alterações destrutivas nesta rodada.
+- **Qualificações bidirecionais:** matriz web, RBAC exclusivo, histórico append-only, outbox e
+  listener de cargos foram publicados. Site e Discord reconciliam por IDs sem loop de eventos.
+- **Recrutas e Carreira:** patentes Small Caps são normalizadas pelo identificador canônico; a API
+  e as páginas mostram efetivo, prontidão, cursos e movimentações reais com estados vazios úteis.
+  O banco remoto confirmou 4 recrutas entre 12 membros ativos e 14 mudanças de patente.
+- **Recrutamento autoral:** a composição editorial grafite/vermelho foi validada em desktop e
+  mobile, sem overflow ou controles visíveis sem nome. O E2E passou em Chromium e Firefox.
+- **Pendência preservada:** a compactação estrutural do servidor continua como trabalho futuro,
+  sem alterações destrutivas nesta rodada.
 
 Este arquivo é o índice de cobertura dos pedidos. Ele não substitui as especificações e não declara
 como concluído aquilo que apenas entrou na fila. A ordem operacional oficial está em

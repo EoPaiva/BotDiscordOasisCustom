@@ -24,7 +24,6 @@ EXPECTED = {
             "choque:shift:history:v1",
         },
     ),
-    "MEDALS": ("info.medals", "🏅 QUADRO DE CONDECORAÇÕES • CHOQUE - BGR", {"choque:medals:select:v1"}),
     "TRANSFER": (
         "partnerships.transfers",
         "🔄 TRANSFERÊNCIA INSTITUCIONAL • CHOQUE - BGR",
@@ -46,7 +45,6 @@ PARTNERSHIP_CHANNEL_IDS = {
     "partnerships.partners": 1540590814839967784,
     "partnerships.terms": 1540590816383336520,
 }
-HISTORICAL_MEDALS_MESSAGE_ID = 1248833920917573745
 
 
 def main() -> int:
@@ -109,15 +107,6 @@ def main() -> int:
         if int(channel.get("parent_id") or 0) != 1540589594691772477:
             failures.append(f"category-changed:{key}")
 
-    medals_channel_id = int(registry["channels"]["info.medals"])
-    try:
-        discord_get(
-            f"/channels/{medals_channel_id}/messages/{HISTORICAL_MEDALS_MESSAGE_ID}",
-            config.token,
-        )
-    except Exception:
-        failures.append("historical-medals-message-missing")
-
     bot_user = discord_get("/users/@me", config.token)
     commands = discord_get(
         f"/applications/{bot_user['id']}/guilds/{config.default_guild_id}/commands",
@@ -129,7 +118,7 @@ def main() -> int:
     print("PRESENTATION_LIVE_PASS" if not failures else "PRESENTATION_LIVE_INVALID")
     print(f"panels={len(panels)}/{len(EXPECTED)}")
     print(f"partnership_channels={len(PARTNERSHIP_CHANNEL_IDS)}/{len(PARTNERSHIP_CHANNEL_IDS)}")
-    print("historical_medals_preserved=true")
+    print("medals_module=INTENTIONALLY_DISABLED")
     print(f"commands={len(commands)}")
     if failures:
         print(f"failures={failures}")

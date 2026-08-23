@@ -522,7 +522,7 @@ async def test_course_extended_requirements_are_enforced(service_bundle):
 async def test_recruit_promotion_dossier_and_nonautomatic_decision(service_bundle):
     member_id = await prepare_ranked_member(service_bundle, DISCORD_ID)
     await service_bundle["database"].execute(
-        "UPDATE ranks SET name='RECRUTA' WHERE guild_id=? AND discord_role_id=?",
+        "UPDATE ranks SET name='ʀᴇᴄʀᴜᴛᴀ' WHERE guild_id=? AND discord_role_id=?",
         (GUILD_ID, RANK_ROLE),
     )
     await service_bundle["database"].execute(
@@ -534,6 +534,8 @@ async def test_recruit_promotion_dossier_and_nonautomatic_decision(service_bundl
     )
     profile = await service_bundle["operations"].recruit_profile(GUILD_ID, DISCORD_ID)
     assert profile["member"]["id"] == member_id
+    recruits = await service_bundle["operations"].recruits(GUILD_ID)
+    assert [row["member"]["discord_id"] for row in recruits] == [DISCORD_ID]
     evaluation_id = await service_bundle["operations"].add_recruit_evaluation(
         GUILD_ID, DISCORD_ID, 900, "POSITIVE", "Boa evolução"
     )
@@ -550,6 +552,9 @@ async def test_recruit_promotion_dossier_and_nonautomatic_decision(service_bundl
     dossier = await service_bundle["operations"].dossier(GUILD_ID, DISCORD_ID)
     assert dossier["member"]["discord_id"] == DISCORD_ID
     assert len(dossier["recruit_evaluations"]) == 1
+    career = await service_bundle["operations"].career_overview(GUILD_ID)
+    assert any(row["discord_id"] == DISCORD_ID for row in career["members"])
+    assert career["movements"] == []
 
 
 @pytest.mark.asyncio

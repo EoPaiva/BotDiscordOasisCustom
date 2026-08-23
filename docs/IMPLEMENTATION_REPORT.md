@@ -1,5 +1,80 @@
 # Relatório vivo — Primeira entrega CHOQUE - BGR
 
+## 2026-08-23 — Auditoria recuperada, migration 27 e status público
+
+- A mensagem de Requisitos já publicava idade mínima de 15 anos, mas o backup remoto revelou a
+  campanha `OPEN` em 16. A migration 27 registra a divergência em `audit_logs`, atualiza campanhas
+  não arquivadas para 15 e torna 15 o default de campanhas criadas em bancos novos.
+- Antes do corte, o backup remoto estava íntegro em v26 e mostrava `OPEN/16`. Depois do rollout, o
+  novo backup retornou `quick_check=ok`, zero violações de foreign key, v27, `OPEN/15` e auditoria
+  `RECRUITMENT_MINIMUM_AGE_ALIGNED` com `{"minimum_age":16}` → `{"minimum_age":15}`.
+- A auditoria textual confirmou que CNH categoria B e porte de arma regularizado não existem no
+  código ativo dos requisitos. A publicação conserva os requisitos institucionais e as dez questões
+  de RP policial/códigos Q solicitadas.
+- O status público foi refeito para a topologia vigente: Discloud Diamond, instância única,
+  Gateway ativo e migration 27. O alias Vercel respondeu 200, contém o estado novo e não contém
+  `Railway bloqueou`, `PAUSADO` ou `V23`.
+- QA: **309 pytest**, **32 Vitest**, Ruff, compileall, `main.py --check`, `SECRET_SCAN_OK`, ESLint,
+  TypeScript, build Next.js e `git diff --check`.
+
+## 2026-08-23 — Remoção intencional de Medalhas
+
+- `cogs.medals_system` não integra mais a lista explícita de cogs. A ausência do canal foi removida
+  dos requisitos do validador vivo, que agora reporta `medals_module=INTENTIONALLY_DISABLED`.
+- Os scripts `provision_discord_layout.py` e `remodel_discord_layout.py` não contêm mais a chave
+  `info.medals`, o nome visual ou o ID removido; um teste impede regressão e recriação acidental.
+- O fonte legado e o catálogo histórico continuam versionados para consulta/rollback, sem comandos,
+  painel persistente ou alertas ativos. A Discloud reiniciou com 16 cogs, Gateway conectado e logs
+  sem nova mensagem “Canal de medalhas não encontrado”.
+
+## 2026-08-23 — Acabamento visual do Recrutamento
+
+- A skill de frontend design foi aplicada sobre a publicação existente. A direção foi formalizada
+  como alistamento editorial militar contemporâneo, com DFII 13/15 e uma única âncora memorável:
+  a diagonal vermelha que separa ordem operacional e chamada para ação.
+- O layout evita a aparência de template usando tipografia condensada em grande escala, etapas em
+  trilho vertical, formulário por linhas e assimetria controlada no lugar de cards repetidos.
+  Barlow Condensed, Source Sans 3 e IBM Plex Mono mantêm a hierarquia tipográfica já carregada.
+- Capturas full-page do alias público em 1440 × 1200 e 390 × 844 foram inspecionadas. Não houve
+  corte, sobreposição ou rolagem horizontal; CTA, requisitos, etapas e formulário permanecem claros.
+- O cenário Playwright foi atualizado para o texto vigente e ganhou verificações de idioma,
+  overflow e nome acessível de controles. Passou em Chromium desktop/mobile e Firefox diretamente
+  contra produção. ESLint, TypeScript, **32 Vitest**, build Next.js e `git diff --check` passaram.
+- O Lovable não ofereceu capacidade callable nesta sessão; a referência editorial já incorporada
+  foi comparada pelos registros existentes. Nenhum candidato, resposta ou segredo saiu do ambiente.
+
+## 2026-08-23 — Recrutas e Gestão de Carreira
+
+- A auditoria provou que havia quatro recrutas no banco remoto, mas todos usavam a patente visual
+  Small Caps `ʀᴇᴄʀᴜᴛᴀ`. A comparação literal anterior foi substituída por normalização central de
+  rótulos estilizados, preservando nomes visuais e identificadores internos separados.
+- A nova visão de Carreira consulta membros ativos, patente e tempo na patente, horas válidas,
+  patrulhas encerradas, advertências e mudanças formais ou recebidas pelo RankSync. Quando não há
+  histórico, a interface explica o estado em vez de simular conteúdo.
+- Recrutas ganharam progresso de requisitos, acesso ao dossiê e navegação para recrutamento/efetivo.
+  Dossiê e elegibilidade passaram a consumir a projeção atual das qualificações bidirecionais.
+- Rollout: backup remoto pré-corte preservado; os fontes ativos de Operações e normalização têm os
+  mesmos hashes da cópia remota, e `command_center/app.py` difere somente por duas linhas em branco.
+  Após reinício, `/health` respondeu 200 e `/v1/career` respondeu 401 sem autenticação, provando que
+  a rota existe e continua protegida. Discloud v26 e Gateway estão online; Recrutamento público
+  responde 200 e Recrutas/Carreira/Patrulhas redirecionam para login no alias Vercel.
+- Evidência de dados: 12 membros ativos, 4 recrutas e 14 mudanças reais de patente. QA: **307 testes
+  Python**, **32 testes web**, Ruff, compileall, `main.py --check`, ESLint, TypeScript, build Next.js
+  e `git diff --check`.
+
+## 2026-08-23 — Hotfix de presença real em Patrulhas
+
+- A prova real mostrou que o listener atualizava `patrol_voice_presence`, mas a rota remota ainda
+  executava `active_patrols()` e exibia vazio sem patrulha formal aberta.
+- Leituras operacionais ganharam conexão SQLite nativa curta entre bot e API. A rota passou a usar
+  `active_patrol_overview()`, combinando presença real e operação formal sem criar histórico falso.
+- Após reinício em instância única, a chamada assinada retornou Patrulha Alfa, um ocupante,
+  `VOICE_ACTIVE` e `DISCORD_LIVE`.
+- QA final: 302 testes, Ruff, compileall e `main.py --check` passaram.
+- O rollout revelou que o commit incremental ignorou fonte da API. Um backup remoto foi comparado
+  com todos os Python/JSON ativos; somente `app.py` e `security.py` divergiam. Ambos foram alinhados,
+  os hashes finais coincidem com a árvore local e o backup pré-paridade foi preservado fora do Git.
+
 ## 2026-08-23 — Portaria, resultado de recrutamento e patrulhas ao vivo
 
 - Corrigido o timeout de decisões da Portaria: a interação é reconhecida antes de RBAC, banco,
@@ -13,7 +88,8 @@
   restrito aos responsáveis. `AL-00005` foi atualizado editando as mensagens existentes.
 - A migration 25 criou `patrol_voice_presence`; o listener observa calls na entrada, em eventos de
   voz e a cada minuto. API e frontend unem presença real e patrulha formal e atualizam a tela a cada
-  dez segundos. Nenhuma pessoa estava em call durante o corte, portanto não foi fabricada amostra.
+  dez segundos. A validação real posterior confirmou uma pessoa na Patrulha Alfa, sem fabricar
+  amostra nem criar patrulha formal.
 - Todo endpoint interno do Centro de Comando exige `COMANDO`, `ALTO_COMANDO` ou bootstrap técnico.
   A autenticação pública das candidaturas permanece separada.
 - Publicação validada: Discloud online, migration 25, Gateway conectado; Vercel no alias principal,
@@ -849,3 +925,19 @@ Fora do escopo atual: eventos, API e integração MTA.
 - Auditoria estática: 20 módulos, 229 classes de interface, 331 componentes, 87 IDs explícitos,
   zero duplicidade, zero callback ausente e zero interface ativa órfã.
 - QA: 292 testes, Ruff, compile e `main.py --check`; migration v24 e bot local online.
+
+## Gestão bidirecional de qualificações — 2026-08-23
+
+- A migration 26 adicionou `qualification_changes` como ledger append-only e ampliou a outbox web
+  com `QUALIFICATION_SYNC`, preservando `member_qualifications` e os resultados de treinamento.
+- `OperationsService` passou a projetar a decisão mais recente por membro/curso, registrar
+  concessão ou revogação web na mesma transação da auditoria/outbox e absorver alterações de
+  cargos Discord sem eco. O dispatcher revalida o estado atual antes de tocar no cargo.
+- A API expõe `POST /v1/qualifications/manage` sob `qualification.manage`, exclusivo do Alto
+  Comando. A matriz Next.js oferece ações acessíveis para quem possui a permissão e permanece
+  somente leitura para os demais perfis autorizados ao Centro de Comando.
+- Rollout: backup consistente da Discloud preservado, banco remoto migrado para v26, rota protegida
+  confirmada, Gateway conectado, health 200 e frontend publicado no alias Vercel principal. O teste
+  automatizado não concedeu/revogou curso de uma pessoa real apenas para gerar evidência.
+- QA: **306 testes Python**, **32 testes web**, Ruff, compileall, `main.py --check`, ESLint,
+  TypeScript e build Next.js; `git diff --check` sem erro.

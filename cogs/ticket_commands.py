@@ -18,6 +18,7 @@ from choque.tickets import (
     build_minimized_transcript,
 )
 from choque.time_utils import discord_timestamp
+from choque.web_urls import recruitment_portal_url, recruitment_status_url
 from cogs.config_ui import respond_error
 
 STATUS_LABELS = {
@@ -437,13 +438,12 @@ class RecruitmentPanelView(ErrorView):
                     "choque:recruitment:mine:v1",
                 }:
                     self.remove_item(item)
-            root = public_url.rstrip("/")
             self.add_item(
                 discord.ui.Button(
                     label="Candidatar-me agora",
                     emoji="🪖",
                     style=discord.ButtonStyle.link,
-                    url=f"{root}/recrutamento",
+                    url=recruitment_portal_url(public_url),
                     row=0,
                 )
             )
@@ -452,7 +452,7 @@ class RecruitmentPanelView(ErrorView):
                     label="Acompanhar candidatura",
                     emoji="📋",
                     style=discord.ButtonStyle.link,
-                    url=f"{root}/minha-candidatura",
+                    url=recruitment_status_url(public_url),
                     row=0,
                 )
             )
@@ -482,7 +482,13 @@ class RecruitmentPanelView(ErrorView):
         if not isinstance(public_url, str) or not public_url.startswith("https://"):
             raise ValidationError("O portal de recrutamento ainda não foi publicado.")
         view = discord.ui.View(timeout=300)
-        view.add_item(discord.ui.Button(label="Abrir alistamento", emoji="📝", url=f"{public_url.rstrip('/')}/recrutamento"))
+        view.add_item(
+            discord.ui.Button(
+                label="Abrir alistamento",
+                emoji="📝",
+                url=recruitment_portal_url(public_url),
+            )
+        )
         await interaction.response.send_message(
             "Abra o portal oficial para iniciar ou continuar sua candidatura.",
             view=view,
@@ -503,7 +509,13 @@ class RecruitmentPanelView(ErrorView):
         if not isinstance(public_url, str) or not public_url.startswith("https://"):
             raise ValidationError("O portal de recrutamento ainda não foi publicado.")
         view = discord.ui.View(timeout=300)
-        view.add_item(discord.ui.Button(label="Consultar candidatura", emoji="📋", url=f"{public_url.rstrip('/')}/minha-candidatura"))
+        view.add_item(
+            discord.ui.Button(
+                label="Consultar candidatura",
+                emoji="📋",
+                url=recruitment_status_url(public_url),
+            )
+        )
         await interaction.response.send_message(
             "Consulte seu protocolo, progresso e situação atual no portal.",
             view=view,

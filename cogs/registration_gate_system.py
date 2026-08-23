@@ -11,6 +11,7 @@ from choque.embeds import branded_embed
 from choque.errors import PermissionDenied, ValidationError
 from choque.registration_gate import ACCESS_CLASSES
 from choque.time_utils import discord_timestamp
+from choque.web_urls import recruitment_portal_url
 
 LOGGER = logging.getLogger(__name__)
 
@@ -651,7 +652,7 @@ class RegistrationGateSystem(commands.Cog):
                     label="Candidatar-me agora",
                     emoji="🪖",
                     style=discord.ButtonStyle.link,
-                    url=f"{public_url.rstrip('/')}/recrutamento",
+                    url=recruitment_portal_url(public_url),
                 )
             )
         if isinstance(registration_channel, discord.TextChannel):

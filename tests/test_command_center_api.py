@@ -638,6 +638,86 @@ def test_command_can_view_inbox_and_rank_change_creates_outbox_atomically(api_cl
     assert audit_count == 1
 
 
+def test_high_command_can_manage_qualification_and_member_cannot(api_client) -> None:
+    client, database_path, _ = api_client
+    connection = sqlite3.connect(database_path)
+    try:
+        now = 1_700_000_250_000
+        cursor = connection.execute(
+            """
+            INSERT INTO course_catalog(
+                guild_id, internal_code, name, description, course_role_id,
+                course_role_name, passing_score, cooldown_days, enrollment_status,
+                source_channel_id, source_message_id, source_content_sha256,
+                active, created_at, updated_at
+            ) VALUES (?, 'abordagem_avancada', 'Abordagem Avançada', 'Curso API', 97701,
+                      'Abordagem Avançada', 80, 14, 'OPEN', 10, 11, 'api-test', 1, ?, ?)
+            """,
+            (GUILD_ID, now, now),
+        )
+        course_id = int(cursor.lastrowid)
+        connection.commit()
+    finally:
+        connection.close()
+
+    payload = {
+        "discord_id": MEMBER_DISCORD_ID,
+        "course_id": course_id,
+        "granted": True,
+        "reason": "Concessão pelo painel de teste.",
+    }
+    denied = client.post(
+        "/v1/qualifications/manage",
+        headers=_headers(MEMBER_DISCORD_ID),
+        json=payload,
+    )
+    granted = client.post(
+        "/v1/qualifications/manage",
+        headers=_headers(ADMIN_DISCORD_ID),
+        json=payload,
+    )
+    matrix = client.get("/v1/qualifications", headers=_headers(ADMIN_DISCORD_ID))
+
+    assert denied.status_code == 403
+    assert granted.status_code == 200, granted.text
+    assert granted.json()["changed"] is True
+    assert matrix.status_code == 200
+    member = next(
+        item
+        for item in matrix.json()["members"]
+        if item["member"]["discord_id"] == MEMBER_DISCORD_ID
+    )
+    assert member["courses"]["abordagem_avancada"]["granted"] is True
+    connection = sqlite3.connect(database_path)
+    try:
+        action = connection.execute(
+            """
+            SELECT action_type, target_discord_id, status
+            FROM web_action_outbox ORDER BY id DESC LIMIT 1
+            """
+        ).fetchone()
+        assert action == ("QUALIFICATION_SYNC", MEMBER_DISCORD_ID, "PENDING")
+    finally:
+        connection.close()
+
+
+def test_career_overview_is_real_and_command_only(api_client) -> None:
+    client, _database_path, _seeded = api_client
+
+    denied = client.get("/v1/career", headers=_headers(MEMBER_DISCORD_ID))
+    allowed = client.get("/v1/career", headers=_headers(ADMIN_DISCORD_ID))
+
+    assert denied.status_code == 403
+    assert allowed.status_code == 200
+    payload = allowed.json()
+    assert {row["discord_id"] for row in payload["members"]} == {
+        MEMBER_DISCORD_ID,
+        ADMIN_DISCORD_ID,
+        INSTRUCTOR_DISCORD_ID,
+    }
+    assert payload["movements"] == []
+
+
 def test_member_cannot_open_admin_settings(api_client) -> None:
     client, _, _ = api_client
     response = client.get("/v1/settings", headers=_headers(MEMBER_DISCORD_ID))

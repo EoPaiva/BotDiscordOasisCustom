@@ -388,3 +388,99 @@ combinado com o `.env` privado mantido fora do Git; ele nunca deve receber segre
     a próxima ocupação real ainda deve ser observada no painel; isso não bloqueia o mecanismo já
     testado. Gestão bidirecional de qualificações e compactação do servidor permanecem na fila
     futura e não foram executadas nesta entrega.
+
+## Fila consolidada após auditoria da conversa — prioridade operacional
+
+Regra de andamento: item dependente de decisão, credencial ou validação humana permanece registrado
+e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia o próximo item seguro.
+
+32. ✅ **Hotfix real de Patrulhas — concluído em produção em 2026-08-23.** A Patrulha Alfa estava
+    no SQLite remoto, mas a rota publicada ainda chamava `active_patrols()` e ignorava ocupação ao
+    vivo. A rota passou a usar `active_patrol_overview()`; leituras operacionais usam conexão SQLite
+    nativa curta entre bot/API. O endpoint assinado retornou Patrulha Alfa, um ocupante e
+    `presence_source=DISCORD_LIVE` após reinício em instância única.
+
+33. ✅ **Paridade integral entre fonte local e Discloud — concluída em 2026-08-23.** O backup remoto
+    foi comparado por conteúdo com todos os Python/JSON ativos. As únicas divergências eram
+    `command_center/app.py` e `command_center/security.py`: rotas de presença/recrutamento e o gate
+    exclusivo de Comando estavam antigos. Os arquivos foram alinhados, caches removidos e a
+    aplicação reiniciada. Hashes finais dos dois arquivos coincidem com a árvore local; 302 testes,
+    Ruff, compileall e `main.py --check` passaram. O endpoint real continuou retornando Patrulha
+    Alfa ao vivo após o corte. O backup pré-paridade foi preservado fora do Git.
+
+34. ✅ **Gestão bidirecional de qualificações — implementada e publicada em 2026-08-23.** A
+    matriz web permite ao Alto Comando conceder ou revogar um curso; a decisão é append-only,
+    auditada e envia uma ação idempotente para adicionar/remover somente o cargo mapeado no
+    Discord. Alterações feitas diretamente nos cargos do Discord alimentam a mesma projeção sem
+    criar eco na outbox. A migration 26, o RBAC `qualification.manage`, a rota protegida e a página
+    foram publicados na Discloud/Vercel. Evidências: backup pré-corte íntegro, banco remoto v26,
+    rota publicada, health 200, Gateway online, **306 pytest**, **32 Vitest**, Ruff, compileall,
+    `main.py --check`, ESLint, TypeScript e build. A automação não alterou o curso de um membro real
+    apenas para produzir evidência; o primeiro clique humano continua sujeito à confirmação e
+    auditoria normais, sem reabrir a implementação.
+
+35. ✅ **Superfícies vazias do dashboard — concluídas em produção em 2026-08-23.** A causa de
+    Recrutas vazio era a comparação literal de `RECRUTA` com a patente visual `ʀᴇᴄʀᴜᴛᴀ`; a
+    normalização canônica agora reconhece nome e prefixo Small Caps. Gestão de Carreira passou a
+    expor efetivo, patente/tempo na patente, horas válidas, patrulhas, advertências e movimentações
+    reais, com estados vazios úteis e links alcançáveis. O dossiê e a elegibilidade usam a projeção
+    bidirecional atual de qualificações. Produção confirmou 12 membros ativos, 4 recrutas e 14
+    mudanças de patente no banco remoto; `/v1/career` está publicada e protegida, Discloud v26 e
+    Gateway estão online e o alias Vercel preserva o gate de Comando. Evidências: backup pré-corte,
+    health 200, **307 pytest**, **32 Vitest**, Ruff, compileall, `main.py --check`, ESLint,
+    TypeScript e build.
+
+36. ✅ **Acabamento visual humano do recrutamento — concluído em produção em 2026-08-23.** A
+    publicação adota o alistamento editorial militar contemporâneo definido na referência CHOQUE:
+    grafite/vermelho, Barlow Condensed, composição assimétrica, processo em linha e diagonal
+    institucional como âncora, sem cards genéricos. DFII 13/15. Capturas integrais em 1440 px e
+    390 px confirmaram hierarquia, legibilidade e adaptação sem overflow. O E2E passou contra o
+    alias público em Chromium desktop, Chromium mobile e Firefox, validando CTAs, dez questões,
+    idioma, privacidade e nomes acessíveis; ESLint, TypeScript, **32 Vitest** e build continuam
+    verdes. O Lovable não disponibilizou ferramenta callable nesta sessão e nenhum dado real foi
+    reenviado; a referência já incorporada foi conferida nos artefatos e na publicação.
+
+37. 🟠 **Robô Analista em produção — aguardando integração externa.** O módulo existe, mas
+    `provider_ready=false`. Ativar somente após provider OpenAI-compatible/NVIDIA configurado por
+    mecanismo protegido e aprovação de privacidade/custo. Enquanto aguarda, seguir outros itens.
+
+38. 🟡 **Domínio próprio do portal — aguardando escolha/registro.** Trocar a divulgação do alias
+    Vercel por domínio/subdomínio próprio, configurar DNS/TLS, callbacks e redirects sem quebrar as
+    rotas públicas. O domínio ainda não foi escolhido; manter na fila e instalar/autenticar a Vercel
+    CLI quando a execução for retomada.
+
+39. ✅ **Remoção intencional do módulo de medalhas — concluída em produção em 2026-08-23.** O canal
+    apagado pelo proprietário não é mais exigido nem recriado: o cog saiu de `COGS`, o validador
+    vivo registra o módulo como intencionalmente desabilitado e os scripts estruturais perderam o
+    ID/chave de Medalhas. O fonte histórico e as sete definições ficam somente para consulta e
+    rollback. Backup pré-corte, **309 pytest**, Ruff, check v27, logs sem novo alerta e validador
+    vivo verde comprovam a entrega.
+
+40. 🟡 **Compactação estrutural do Discord — adiada pelo proprietário.** Antes de excluir, capturar
+    snapshot e pedir confirmação final. Plano preservado: remover Atendimento 2/3; Manual do Comando
+    e Área de QA; Doutrina ROCAM/Águia; Eventos; Ausentes; Reunião; Arquivos Legados. Mover
+    Bate-ponto/Efetivo para Patrulhas, Configurações do bot para Administração e Transferências/
+    Parcerias para o fim. Manter Centrais, Auditoria, Recrutamento em destaque e Cursos intactos.
+
+41. 🔒 **Dívida obrigatória de segurança — depende do proprietário.** Rotacionar credenciais
+    divulgadas, revisar menor privilégio do bot e repetir login/logout/revogação com contas reais.
+    Nunca colocar os novos valores em chat, Git, ZIP, logs ou handoff.
+
+42. 🟢 **Auditoria contínua de pedidos e documentação.** Ao concluir cada item, reconciliar evidência
+    em `PROJECT_HANDOFF.md`, fila, ledger e relatório; corrigir contradições sem apagar histórico e
+    continuar automaticamente para o próximo item seguro.
+
+43. ✅ **Correções recuperadas da conversa — concluídas em produção em 2026-08-23.** A campanha
+    ainda bloqueava candidatos de 15 anos embora a mensagem pública dissesse 15. A migration 27
+    alinhou 16 → 15 com auditoria, backup e integridade comprovada. CNH B e porte de arma não fazem
+    parte do fluxo ativo. O `/status` foi corrigido de Railway/v23/pausado para Discloud Diamond,
+    Gateway ativo e banco v27, publicado no alias principal e validado com HTTP 200.
+
+44. 🟠 **Escopo exclusivo da gestão de qualificações — decisão humana adiada.** O estado publicado
+    permite `qualification.manage` ao Alto Comando, mas o proprietário também disse “só eu vou
+    poder fazer isso”. Confirmar se a intenção é **somente a conta proprietária** ou **todo o Alto
+    Comando**. Até a resposta, preservar o RBAC atual e não adivinhar Discord ID nem retirar acesso.
+
+45. 🟢 **Checkpoint sanitizado no repositório privado.** Publicar o estado consolidado atual apenas
+    no remoto privado, depois de secret scan e revisão do diff; nunca enviar `.env`, token, bancos,
+    backups, logs ou dados pessoais e nunca empurrar estas mudanças para o remoto público.

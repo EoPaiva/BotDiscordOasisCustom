@@ -97,7 +97,6 @@ CHANNEL_LAYOUT: dict[int, tuple[str, str]] = {
     1146622065110171665: ("info", "🚓│viaturas"),
     1146622065110171667: ("info", "⌨️│binds-operacionais"),
     1161810176718930071: ("info", "📻│códigos-q"),
-    1165940959318655037: ("info", "🏅│medalhas"),
     1165939530474475530: ("info", "🎖️│condecorações"),
     1146622065110171666: ("info", "📈│hierarquia"),
     # Operacoes
@@ -205,7 +204,6 @@ MEMBER_ONLY_INFO_IDS = {
     1146622065110171665,
     1146622065110171667,
     1161810176718930071,
-    1165940959318655037,
     1165939530474475530,
 }
 
@@ -229,7 +227,6 @@ CHANNEL_ORDER = {
         "⌨️│binds-operacionais",
         "📻│códigos-q",
         "📈│hierarquia",
-        "🏅│medalhas",
         "🎖️│condecorações",
     ),
     "member": (

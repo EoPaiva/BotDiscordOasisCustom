@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import logging
 import shutil
+import sqlite3
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -1221,7 +1222,7 @@ CREATE TABLE recruitment_campaigns (
     closes_at INTEGER,
     form_version_id INTEGER REFERENCES recruitment_form_versions(id) ON DELETE RESTRICT,
     cooldown_days INTEGER NOT NULL DEFAULT 30 CHECK (cooldown_days BETWEEN 0 AND 365),
-    minimum_age INTEGER NOT NULL DEFAULT 16 CHECK (minimum_age BETWEEN 13 AND 100),
+    minimum_age INTEGER NOT NULL DEFAULT 15 CHECK (minimum_age BETWEEN 13 AND 100),
     maximum_applications INTEGER,
     initial_rank_id INTEGER REFERENCES ranks(id) ON DELETE RESTRICT,
     candidate_role_id INTEGER,
@@ -2578,6 +2579,111 @@ CREATE INDEX ix_patrol_voice_presence_observed
 ON patrol_voice_presence(guild_id, observed_at, voice_channel_id);
 """
 
+MIGRATION_026 = """
+CREATE TABLE qualification_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    course_id INTEGER NOT NULL REFERENCES course_catalog(id) ON DELETE RESTRICT,
+    action TEXT NOT NULL CHECK (action IN ('GRANT','REVOKE')),
+    source TEXT NOT NULL CHECK (source IN ('WEB','DISCORD','TRAINING','SYSTEM')),
+    actor_id INTEGER,
+    reason TEXT NOT NULL,
+    correlation_id TEXT NOT NULL UNIQUE,
+    recorded_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_qualification_changes_member_course
+ON qualification_changes(guild_id, member_id, course_id, recorded_at DESC, id DESC);
+
+CREATE INDEX ix_qualification_changes_discord
+ON qualification_changes(guild_id, discord_id, recorded_at DESC, id DESC);
+
+ALTER TABLE web_action_outbox RENAME TO web_action_outbox_v26;
+DROP INDEX IF EXISTS ix_web_action_outbox_delivery;
+
+CREATE TABLE web_action_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    action_type TEXT NOT NULL CHECK (
+        action_type IN (
+            'RANK_SYNC','MEMBER_SYNC','PANEL_REFRESH',
+            'IDENTITY_SYNC','IDENTITY_RECONCILE_BULK','QUALIFICATION_SYNC'
+        )
+    ),
+    target_discord_id INTEGER,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    requested_by INTEGER NOT NULL,
+    correlation_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','PROCESSING','COMPLETED','FAILED')
+    ),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    available_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    processed_at INTEGER,
+    last_error TEXT
+);
+
+INSERT INTO web_action_outbox(
+    id, guild_id, action_type, target_discord_id, payload_json,
+    requested_by, correlation_id, status, attempts, available_at,
+    created_at, processed_at, last_error
+)
+SELECT id, guild_id, action_type, target_discord_id, payload_json,
+       requested_by, correlation_id, status, attempts, available_at,
+       created_at, processed_at, last_error
+FROM web_action_outbox_v26;
+
+DROP TABLE web_action_outbox_v26;
+
+CREATE INDEX ix_web_action_outbox_delivery
+ON web_action_outbox(status, available_at, created_at);
+"""
+
+MIGRATION_027 = """
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    correlation_id TEXT NOT NULL UNIQUE,
+    guild_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    actor_id INTEGER,
+    target_id INTEGER,
+    before_json TEXT,
+    after_json TEXT,
+    reason TEXT,
+    created_at INTEGER NOT NULL,
+    delivery_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        delivery_status IN ('PENDING','DELIVERED','FAILED')
+    ),
+    delivery_attempts INTEGER NOT NULL DEFAULT 0,
+    delivered_at INTEGER,
+    last_error TEXT
+);
+
+INSERT OR IGNORE INTO audit_logs(
+    correlation_id, guild_id, action, before_json, after_json,
+    reason, created_at, delivery_status
+)
+SELECT
+    'migration-27-recruitment-minimum-age-' || id,
+    guild_id,
+    'RECRUITMENT_MINIMUM_AGE_ALIGNED',
+    '{"minimum_age":' || minimum_age || '}',
+    '{"minimum_age":15}',
+    'Alinhamento do requisito público de alistamento para 15 anos fora do personagem',
+    CAST(strftime('%s', 'now') AS INTEGER) * 1000,
+    'PENDING'
+FROM recruitment_campaigns
+WHERE status != 'ARCHIVED' AND minimum_age != 15;
+
+UPDATE recruitment_campaigns
+SET minimum_age=15,
+    updated_at=CAST(strftime('%s', 'now') AS INTEGER) * 1000
+WHERE status != 'ARCHIVED' AND minimum_age != 15;
+"""
+
 MIGRATIONS = (
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -2604,6 +2710,8 @@ MIGRATIONS = (
     (23, MIGRATION_023),
     (24, MIGRATION_024),
     (25, MIGRATION_025),
+    (26, MIGRATION_026),
+    (27, MIGRATION_027),
 )
 
 
@@ -2625,6 +2733,11 @@ class Database:
         await self.connection.execute("PRAGMA foreign_keys=ON")
         await self.connection.execute("PRAGMA busy_timeout=5000")
         await self._migrate()
+        # PRAGMAs e leituras de bootstrap nao podem deixar uma transacao de
+        # leitura aberta. Em producao, bot e API sao processos distintos sobre
+        # o mesmo SQLite; um snapshot preso aqui impede a API de enxergar
+        # presencas de voz gravadas pelo bot ate o proximo restart.
+        await self.connection.commit()
 
     def _prepare_files(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -2702,14 +2815,36 @@ class Database:
     async def fetchone(self, sql: str, params: tuple = ()) -> aiosqlite.Row | None:
         if not self.connection:
             raise RuntimeError("Banco nao inicializado")
-        cursor = await self.connection.execute(sql, params)
-        return await cursor.fetchone()
+        async with self.connection.execute(sql, params) as cursor:
+            return await cursor.fetchone()
 
     async def fetchall(self, sql: str, params: tuple = ()) -> list[aiosqlite.Row]:
         if not self.connection:
             raise RuntimeError("Banco nao inicializado")
-        cursor = await self.connection.execute(sql, params)
-        return list(await cursor.fetchall())
+        async with self.connection.execute(sql, params) as cursor:
+            return list(await cursor.fetchall())
+
+    async def fetchall_fresh(self, sql: str, params: tuple = ()) -> list[aiosqlite.Row]:
+        """Read through a short-lived connection for cross-process live views.
+
+        The combined runtime intentionally runs the Discord bot and FastAPI in
+        separate processes. Operational dashboards must not depend on the read
+        snapshot held by either process' long-lived connection.
+        """
+        def read_snapshot() -> list[sqlite3.Row]:
+            # Do not reuse aiosqlite's worker/connection state here. The bot
+            # and FastAPI run in separate processes and SQLite WAL visibility
+            # for live voice presence must come from a completely independent
+            # native connection on every request.
+            connection = sqlite3.connect(self.path, timeout=5)
+            connection.row_factory = sqlite3.Row
+            try:
+                connection.execute("PRAGMA busy_timeout=5000")
+                return list(connection.execute(sql, params).fetchall())
+            finally:
+                connection.close()
+
+        return await asyncio.to_thread(read_snapshot)
 
     async def execute(self, sql: str, params: tuple = ()) -> int:
         async with self.transaction() as connection:

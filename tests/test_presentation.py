@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from choque.bot import COGS
 from choque.config import Branding
+from choque.web_urls import recruitment_portal_url, recruitment_status_url
 from cogs.medals_system import MEDALS, MedalsPanelView, build_medals_embed
 from cogs.member_commands import (
     RegistrationPanelView,
@@ -84,6 +87,13 @@ async def test_registration_and_point_panels_are_detailed_and_keep_persistent_ac
     recruitment_links = [item.url for item in public_registration.children if item.url]
     assert recruitment_links == ["https://example.test/recrutamento"]
 
+    already_scoped_registration = RegistrationPanelView(
+        "https://example.test/recrutamento"
+    )
+    assert [item.url for item in already_scoped_registration.children if item.url] == [
+        "https://example.test/recrutamento"
+    ]
+
     public_recruitment = RecruitmentPanelView("https://example.test")
     assert {item.label for item in public_recruitment.children} == {
         "Candidatar-me agora",
@@ -98,6 +108,12 @@ async def test_registration_and_point_panels_are_detailed_and_keep_persistent_ac
         "choque:recruitment:requirements:v1",
     }
 
+    scoped_recruitment = RecruitmentPanelView("https://example.test/recrutamento")
+    assert {item.url for item in scoped_recruitment.children if item.url} == {
+        "https://example.test/recrutamento",
+        "https://example.test/minha-candidatura",
+    }
+
     assert point.title == "⏱️ CONTROLE OPERACIONAL DE SERVIÇO"
     assert len(point.fields) == 6
     assert any(field.name == "🎯 Validação mínima de patrulha" for field in point.fields)
@@ -108,6 +124,21 @@ async def test_registration_and_point_panels_are_detailed_and_keep_persistent_ac
         "choque:shift:hours:v1",
         "choque:shift:history:v1",
     }
+
+
+def test_recruitment_urls_accept_root_or_already_scoped_configuration() -> None:
+    assert recruitment_portal_url("https://example.test") == (
+        "https://example.test/recrutamento"
+    )
+    assert recruitment_portal_url("https://example.test/recrutamento/") == (
+        "https://example.test/recrutamento"
+    )
+    assert recruitment_status_url("https://example.test") == (
+        "https://example.test/minha-candidatura"
+    )
+    assert recruitment_status_url("https://example.test/recrutamento") == (
+        "https://example.test/minha-candidatura"
+    )
 
 
 @pytest.mark.asyncio
@@ -136,6 +167,18 @@ async def test_medals_panel_preserves_all_seven_historical_decorations() -> None
     assert len(view.children) == 1
     assert len(view.children[0].options) == 7
     assert view.children[0].custom_id == "choque:medals:select:v1"
+    assert "cogs.medals_system" not in COGS
+
+
+def test_structural_scripts_do_not_recreate_intentionally_removed_medals() -> None:
+    root = Path(__file__).parents[1]
+    for relative_path in (
+        "scripts/provision_discord_layout.py",
+        "scripts/remodel_discord_layout.py",
+    ):
+        content = (root / relative_path).read_text(encoding="utf-8")
+        assert "info.medals" not in content
+        assert "🏅│medalhas" not in content
 
 
 @pytest.mark.asyncio
