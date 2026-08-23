@@ -105,7 +105,7 @@ para a decisão arquitetural do Programa Web.
 | Exoneração mantém usuário no Discord e aplica cargo Exonerado | IMPLEMENTADO e validado ao vivo; cargo, patentes e apelido conferidos pela API | `docs/PHASE_QUEUE.md`, `cogs/member_sync.py` |
 | Simplificar Central Administrativa por categorias e explicar cada área | IMPLEMENTADO e validado ao vivo; cinco ações raiz e doze funções preservadas | `docs/PHASE_QUEUE.md`, `cogs/personnel_commands.py` |
 | Auditar botões e ações implementadas sem caminho visível | CONCLUÍDO; item 28 | `docs/INTERACTION_ROUTE_AUDIT.md` |
-| Empacotamento e publicação Discloud Diamond | ROLLOUT ATIVO; falta ZIP final sanitizado/reproduzível e rotação de credenciais; item 29 | `docs/PHASE_QUEUE.md` |
+| Empacotamento e publicação Discloud Diamond | CONCLUÍDO operacionalmente; ZIP sanitizado validado e runtime ativo. Rotação de credenciais continua dívida do gate de segurança | `docs/PHASE_QUEUE.md` |
 
 ## Recrutamento público ativado — 2026-08-23
 

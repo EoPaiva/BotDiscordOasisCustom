@@ -20,6 +20,11 @@
   de segurança.
 - O Robô Analista continua deliberadamente desativado: a API confirmou provider ausente. Sua
   ativação depende de credencial externa e nova validação; nenhuma recomendação foi simulada.
+- O pacote final pós-hotfix foi gerado do commit com 107 entradas e 450.193 bytes. O inventário
+  confirmou zero `.env` real, banco, log, cache, teste, frontend ou segredo; SHA-256
+  `a453152690b8c183710ea4266c50da12857bf8f795507e40f465a9e75657d3cf`. O `.env` de produção
+  permanece somente no armazenamento privado da Discloud, que documenta esse arquivo como seu
+  método principal de variáveis. A rotação das credenciais expostas segue obrigatória.
 
 ## 2026-08-22 — Smoke funcional na Discloud
 

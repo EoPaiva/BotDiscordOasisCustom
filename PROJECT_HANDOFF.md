@@ -13,8 +13,10 @@
   ESLint, TypeScript e build aprovados;
 - bloqueio restante do recrutamento: o Robô Analista está implementado, mas `provider_ready=false`.
   É necessária credencial externa de um provider OpenAI-compatible/NVIDIA antes de ativá-lo;
-- item 29 permanece parcial apenas pelo ZIP sanitizado/reproduzível pós-hotfix e pela rotação das
-  credenciais divulgadas. O rollout operacional já está ativo.
+- item 29 concluído operacionalmente. O ZIP sanitizado pós-hotfix contém 107 entradas, 450.193
+  bytes, zero caminho proibido e SHA-256
+  `a453152690b8c183710ea4266c50da12857bf8f795507e40f465a9e75657d3cf`. A rotação das credenciais
+  divulgadas continua obrigatória e o gate geral de segurança permanece `FAIL`.
 
 ## Verificação Discloud e funcional — 2026-08-22
 
@@ -23,7 +25,7 @@
 - backup remoto conferido: SQLite íntegro, zero violações de foreign key e migration 24;
 - 15 validadores Discord ao vivo aprovados, além da sincronização de patentes contra o banco remoto;
 - suíte final atual: 293 testes aprovados, Ruff e compilação aprovados; auditoria com zero callback ausente e zero `custom_id` duplicado;
-- runtime combinado de site/API e healthcheck já publicados; item 29 resta aberto somente pelo artefato sanitizado final e rotação de credenciais.
+- runtime combinado de site/API, healthcheck e pacote sanitizado final concluídos; a rotação de credenciais continua dívida de segurança.
 
 > Fotografia técnica gerada em 2026-08-22 a partir da inspeção do código real.
 > Este é um documento vivo: atualize as seções 27, 31, 39, 40, 41, 42, 46 e 47 ao concluir cada fase.

@@ -313,16 +313,17 @@ Regras obrigatórias:
 
 ## Empacotamento e publicação na Discloud
 
-29. 🟡 **Preparar o pacote final para Discloud Diamond — rollout operacional concluído; artefato
-    final pendente.** A aplicação combinada `choque-bgr-api` está online como `TYPE=site`, com 1 GB,
+29. ✅ **Pacote final e publicação Discloud Diamond — concluídos operacionalmente em 2026-08-23
+    sob a exceção de segurança já registrada.** A aplicação combinada `choque-bgr-api` está online
+    como `TYPE=site`, com 1 GB,
     bot Discord, API/healthcheck e banco SQLite v24 no mesmo runtime. O frontend Vercel e o fluxo
-    público de recrutamento responderam 200, e a instância local está desligada. Ainda falta gerar
-    um ZIP sanitizado e reproduzível do estado pós-hotfix, sem `.env`, banco ou segredo, validar seu
-    inventário/SHA-256 e rotacionar as credenciais anteriormente divulgadas antes de encerrar o item.
-    Depois que todos os itens funcionais, correções de produção e gates anteriores estiverem
-    concluídos, gerar o ZIP final exatamente no formato aceito pela Discloud e validar o pacote
-    antes do upload. Esta etapa não pode ser antecipada enquanto o conteúdo do deploy ainda estiver
-    mudando.
+    público de recrutamento responderam 200, e a instância local está desligada. O ZIP pós-hotfix
+    `CHOQUE-BGR-Discloud-FINAL-20260823-041504.zip` foi gerado diretamente do commit, possui 107
+    entradas, 450.193 bytes, zero caminho proibido e SHA-256
+    `a453152690b8c183710ea4266c50da12857bf8f795507e40f465a9e75657d3cf`. `.env`, banco e segredos
+    não estão no artefato. A Discloud mantém o `.env` privado fora do Git, conforme seu método
+    oficial. A rotação das credenciais divulgadas continua dívida obrigatória e mantém o gate de
+    segurança em `FAIL`, mas não há pendência funcional ou de hospedagem neste item.
 
 Regras obrigatórias para o pacote Discloud:
 
@@ -350,5 +351,6 @@ Regras obrigatórias para o pacote Discloud:
   `PROJECT_HANDOFF.md`, `docs/PHASE_QUEUE.md`, `docs/REQUEST_LEDGER.md` e
   `docs/IMPLEMENTATION_REPORT.md` com evidências reais.
 
-O item 29 será considerado concluído somente quando o ZIP passar por todas as validações, a
-restauração segura do banco for comprovada e a aplicação estiver operacional na Discloud Diamond.
+O item 29 foi concluído após o ZIP passar pelas validações, a restauração segura do banco ser
+comprovada e a aplicação permanecer operacional na Discloud Diamond. O pacote sanitizado deve ser
+combinado com o `.env` privado mantido fora do Git; ele nunca deve receber segredos versionados.
