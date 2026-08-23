@@ -11,7 +11,7 @@ from scripts.validate_live_phase6 import components, panel
 
 EXPECTED_COMPONENTS = {
     "MEMBER": {
-        "choque:member:register:v1",
+        "choque:member:identify:v2",
         "choque:registration:status:v1",
         "choque:registration:help:v1",
     },

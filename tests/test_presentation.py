@@ -75,7 +75,7 @@ async def test_registration_and_point_panels_are_detailed_and_keep_persistent_ac
     assert len(registration.fields) == 5
     assert "Candidatar-me agora" in (registration.description or "")
     assert custom_ids(RegistrationPanelView()) == {
-        "choque:member:register:v1",
+        "choque:member:identify:v2",
         "choque:registration:status:v1",
         "choque:registration:help:v1",
     }

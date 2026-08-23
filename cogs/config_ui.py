@@ -41,6 +41,8 @@ CHANNEL_SETTINGS = (
     ("recruitment_panel_channel_id", "Canal de recrutamento", "🧑‍💼"),
     ("ticket_panel_channel_id", "Canal de atendimento", "🎫"),
     ("recruitment_queue_channel_id", "Canal da fila de candidatos", "📥"),
+    ("recruitment_review_channel_id", "Mesa privada de análise", "🛡️"),
+    ("recruitment_public_status_channel_id", "Acompanhamento público de candidaturas", "📨"),
     ("transfer_results_channel_id", "Canal de transferências", "🔄"),
     ("recruitment_approved_channel_id", "Canal de aprovados", "✅"),
     ("recruitment_rejected_channel_id", "Canal de reprovados", "❌"),

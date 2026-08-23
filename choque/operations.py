@@ -1405,6 +1405,133 @@ class OperationsService:
             (guild_id,),
         )
 
+    async def sync_patrol_voice_presence(
+        self,
+        guild_id: int,
+        occupants: dict[int, list[tuple[int, str]]],
+    ) -> int:
+        """Persist the current Discord voice snapshot without creating patrol history."""
+        now = self.clock()
+        normalized = {
+            (int(channel_id), int(discord_id)): str(display_name).strip()[:100]
+            for channel_id, members in occupants.items()
+            for discord_id, display_name in members
+        }
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT voice_channel_id, discord_id
+                FROM patrol_voice_presence WHERE guild_id=?
+                """,
+                (guild_id,),
+            )
+            existing = {
+                (int(row["voice_channel_id"]), int(row["discord_id"]))
+                for row in await cursor.fetchall()
+            }
+            for channel_id, discord_id in existing - set(normalized):
+                await connection.execute(
+                    """
+                    DELETE FROM patrol_voice_presence
+                    WHERE guild_id=? AND voice_channel_id=? AND discord_id=?
+                    """,
+                    (guild_id, channel_id, discord_id),
+                )
+            for (channel_id, discord_id), display_name in normalized.items():
+                await connection.execute(
+                    """
+                    INSERT INTO patrol_voice_presence(
+                        guild_id, voice_channel_id, discord_id, member_id,
+                        display_name, joined_at, observed_at
+                    ) VALUES (
+                        ?, ?, ?,
+                        (SELECT id FROM members WHERE guild_id=? AND discord_id=?),
+                        ?, ?, ?
+                    )
+                    ON CONFLICT(guild_id, voice_channel_id, discord_id) DO UPDATE SET
+                        member_id=excluded.member_id,
+                        display_name=excluded.display_name,
+                        observed_at=excluded.observed_at
+                    """,
+                    (
+                        guild_id,
+                        channel_id,
+                        discord_id,
+                        guild_id,
+                        discord_id,
+                        display_name or f"Discord {discord_id}",
+                        now,
+                        now,
+                    ),
+                )
+        return len(normalized)
+
+    async def live_patrol_calls(self, guild_id: int, *, max_age_ms: int = 180_000):
+        threshold = self.clock() - max(30_000, int(max_age_ms))
+        return await self.database.fetchall(
+            """
+            SELECT pc.channel_id AS voice_channel_id, pc.label AS voice_channel_name,
+                   pc.sort_order, MIN(pvp.joined_at) AS started_at,
+                   COUNT(pvp.discord_id) AS member_count,
+                   GROUP_CONCAT(pvp.discord_id) AS member_ids,
+                   GROUP_CONCAT(COALESCE(m.mta_nick, pvp.display_name), ' | ') AS member_names
+            FROM patrol_channels pc
+            JOIN patrol_voice_presence pvp
+              ON pvp.guild_id=pc.guild_id AND pvp.voice_channel_id=pc.channel_id
+            LEFT JOIN members m
+              ON m.guild_id=pvp.guild_id AND m.discord_id=pvp.discord_id
+            WHERE pc.guild_id=? AND pc.channel_type='ACTIVE' AND pc.enabled=1
+              AND pvp.observed_at>=?
+            GROUP BY pc.channel_id, pc.label, pc.sort_order
+            HAVING COUNT(pvp.discord_id)>0
+            ORDER BY pc.sort_order, pc.channel_id
+            """,
+            (guild_id, threshold),
+        )
+
+    async def active_patrol_overview(self, guild_id: int) -> list[dict[str, object]]:
+        """Combine formal patrols with live call occupancy for command dashboards."""
+        formal_rows = [dict(row) for row in await self.active_patrols(guild_id)]
+        formal_by_channel = {
+            int(row["voice_channel_id"]): row for row in formal_rows
+        }
+        overview: list[dict[str, object]] = []
+        for live_row in await self.live_patrol_calls(guild_id):
+            live = dict(live_row)
+            channel_id = int(live["voice_channel_id"])
+            formal = formal_by_channel.pop(channel_id, None)
+            if formal:
+                formal.update(
+                    member_count=int(live["member_count"]),
+                    member_ids=live["member_ids"],
+                    member_names=live["member_names"],
+                    voice_channel_name=live["voice_channel_name"],
+                    presence_source="DISCORD_LIVE",
+                )
+                overview.append(formal)
+            else:
+                overview.append(
+                    {
+                        "id": f"voice:{channel_id}",
+                        "sequence_number": int(live["sort_order"]),
+                        "voice_channel_id": channel_id,
+                        "voice_channel_name": live["voice_channel_name"],
+                        "status": "VOICE_ACTIVE",
+                        "origin": "DISCORD_LIVE",
+                        "started_at": live["started_at"],
+                        "member_count": int(live["member_count"]),
+                        "member_ids": live["member_ids"],
+                        "member_names": live["member_names"],
+                        "commander_discord_id": None,
+                        "commander_mta_nick": None,
+                        "commander_rank_name": None,
+                        "commander_rank_prefix": None,
+                        "presence_source": "DISCORD_LIVE",
+                    }
+                )
+        overview.extend(formal_by_channel.values())
+        return overview
+
     async def current_patrol(self, guild_id: int, discord_id: int):
         return await self.database.fetchone(
             """

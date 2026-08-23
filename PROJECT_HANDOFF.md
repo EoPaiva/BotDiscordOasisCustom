@@ -1,5 +1,34 @@
 # PROJECT HANDOFF
 
+## Portaria segura, recrutamento público e presença ao vivo — 2026-08-23
+
+- A Portaria deixou de oferecer `Realizar cadastro` e passou a exibir `Identificar vínculo`. Uma
+  conta sem membro, candidatura ou cargo funcional reconhecido registra somente identidade de
+  visitante; ela não cria `members`, não recebe patente e não entra na fila de aprovação de membro.
+  Candidatura, membro legado e conformidade de patente/Companheiro continuam sujeitos às decisões
+  humanas existentes.
+- Os modais de decisão, correção de ID e vínculo agora confirmam a interação antes de permissão,
+  consulta, sincronização e arquivamento. Um teste dedicado prova a ordem `defer -> permissão ->
+  banco`, eliminando o timeout visual do Discord sem antecipar a decisão.
+- Requisitos, painel, acompanhamento, aprovados e reprovados foram liberados para leitura pública;
+  a Mesa de Análise continua privada. O canal privado `Setar tag` foi criado abaixo do Chat CHOQUE,
+  com acesso do candidato aprovado e responsáveis. A aprovação entrega DM com as instruções e usa
+  fallback privado quando a DM estiver bloqueada.
+- O protocolo `AL-00005` foi reprocessado sem duplicação: quadro público e resultado aprovado
+  reutilizaram as mensagens existentes, passaram a mencionar o candidato e a nova orientação foi
+  entregue. O validador REST confirmou cinco canais públicos, Mesa privada, canal de setagem e as
+  duas menções do protocolo.
+- A migration 25 persiste snapshots de ocupação das calls de patrulha. O painel web combina
+  patrulhas formais com ocupação real do Discord e atualiza a cada dez segundos sem criar histórico
+  falso. Na validação final não havia usuário nas calls; tabela, listener, startup e composição
+  passaram nos testes, faltando apenas observar uma próxima ocupação real.
+- O Centro de Comando web passou a negar todo perfil abaixo de `COMANDO`; recrutamento público usa
+  autenticação de candidato separada e não foi bloqueado. A Vercel publicou a versão no alias
+  principal, `/recrutamento` respondeu 200 e `/patrols` permaneceu protegido por login.
+- Produção: Discloud online em instância única, banco v25, Gateway conectado. Gates finais desta
+  rodada: **300 pytest**, **32 Vitest**, Ruff, compileall, `main.py --check`, ESLint, TypeScript e
+  build Next.js. Backups remotos e snapshots de overwrites foram preservados para rollback.
+
 ## Jornada intuitiva de recrutamento e recuperação preventiva — 2026-08-23
 
 - O visitante encontra **Candidatar-me agora** diretamente na mensagem persistente `MEMBER`, na

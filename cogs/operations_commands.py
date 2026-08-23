@@ -1925,6 +1925,24 @@ class OperationsCommands(commands.Cog):
             changed += int(bool(result["changed"]))
         return changed
 
+    async def sync_live_patrol_presence(self, guild: discord.Guild) -> int:
+        active_rows = await self.services.operations.patrol_channels(guild.id, "ACTIVE")
+        occupants: dict[int, list[tuple[int, str]]] = {}
+        for row in active_rows:
+            if not row["enabled"]:
+                continue
+            channel = guild.get_channel(int(row["channel_id"]))
+            if not isinstance(channel, discord.VoiceChannel):
+                continue
+            occupants[channel.id] = [
+                (member.id, member.display_name)
+                for member in channel.members
+                if not member.bot
+            ]
+        return await self.services.operations.sync_patrol_voice_presence(
+            guild.id, occupants
+        )
+
     async def reconcile_patrols(self, guild: discord.Guild) -> None:
         lock = self._formation_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
@@ -2029,6 +2047,7 @@ class OperationsCommands(commands.Cog):
         except (NotFoundError, ValidationError, ConflictError):
             pass
         try:
+            await self.sync_live_patrol_presence(member.guild)
             await self.reconcile_patrols(member.guild)
             await self.refresh_panels(member.guild)
         except Exception:
@@ -2063,6 +2082,7 @@ class OperationsCommands(commands.Cog):
                 continue
             try:
                 await self.configure_patrol_channels(guild)
+                await self.sync_live_patrol_presence(guild)
                 await self.reconcile_patrols(guild)
                 await self.refresh_panels(guild)
             except Exception:
@@ -2092,6 +2112,7 @@ class OperationsCommands(commands.Cog):
     async def commander_reconciliation_loop(self) -> None:
         for guild in self.bot.guilds:
             try:
+                await self.sync_live_patrol_presence(guild)
                 changed = await self.reconcile_patrol_commanders(
                     guild, reason="ELIGIBILITY_RECONCILIATION"
                 )

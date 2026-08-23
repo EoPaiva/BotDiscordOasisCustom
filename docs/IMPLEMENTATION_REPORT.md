@@ -1,5 +1,25 @@
 # Relatório vivo — Primeira entrega CHOQUE - BGR
 
+## 2026-08-23 — Portaria, resultado de recrutamento e patrulhas ao vivo
+
+- Corrigido o timeout de decisões da Portaria: a interação é reconhecida antes de RBAC, banco,
+  sincronização e arquivamento. O fluxo mantém respostas ephemeral e o handler global usa follow-up
+  quando a resposta já foi confirmada.
+- `Identificar vínculo` substituiu o convite ambíguo para cadastro. Visitante comum recebe apenas
+  identidade de visitante; criação de membro exige candidatura aprovada, membro já existente ou
+  conformidade funcional por role ID. Companheiro de Farda continua sem patente hierárquica.
+- Aplicada, com snapshot, a matriz pública do Recrutamento e criado o posto privado `Setar tag`.
+  Aprovados recebem menção pública, DM operacional e acesso individual; falhas de DM geram aviso
+  restrito aos responsáveis. `AL-00005` foi atualizado editando as mensagens existentes.
+- A migration 25 criou `patrol_voice_presence`; o listener observa calls na entrada, em eventos de
+  voz e a cada minuto. API e frontend unem presença real e patrulha formal e atualizam a tela a cada
+  dez segundos. Nenhuma pessoa estava em call durante o corte, portanto não foi fabricada amostra.
+- Todo endpoint interno do Centro de Comando exige `COMANDO`, `ALTO_COMANDO` ou bootstrap técnico.
+  A autenticação pública das candidaturas permanece separada.
+- Publicação validada: Discloud online, migration 25, Gateway conectado; Vercel no alias principal,
+  Recrutamento HTTP 200 e Patrulhas redirecionando para login. QA: **300 testes Python**, **32 web**,
+  Ruff, compileall, `--check`, ESLint, TypeScript e build aprovados.
+
 ## 2026-08-23 — Entrada de recrutamento em um clique
 
 - A Recepção passou a ser também o ponto de entrada do candidato: a mensagem `MEMBER` existente foi

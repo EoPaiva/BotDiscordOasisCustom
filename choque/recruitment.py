@@ -49,19 +49,29 @@ QUESTION_TYPES = {
     "MULTI_SELECT",
 }
 
+DEFAULT_FORM_REVISION = 2
+LEGACY_DEFAULT_GROUP_CODES = (
+    "IDENTIFICATION",
+    "AVAILABILITY",
+    "EXPERIENCE",
+    "MOTIVATION",
+    "CONDUCT",
+    "ROLEPLAY",
+    "COMMUNICATION",
+    "TEAMWORK",
+    "SITUATIONS",
+    "RESPONSIBILITY",
+    "CHOQUE",
+    "SELF_ASSESSMENT",
+    "Q_CODES",
+)
 GROUPS = (
-    ("IDENTIFICATION", "Identificação", 1, 3),
-    ("AVAILABILITY", "Disponibilidade", 2, 3),
-    ("EXPERIENCE", "Experiência", 3, 2),
-    ("MOTIVATION", "Motivação", 4, 2),
-    ("CONDUCT", "Conduta", 5, 3),
-    ("ROLEPLAY", "Roleplay", 6, 2),
-    ("COMMUNICATION", "Comunicação", 7, 1),
-    ("TEAMWORK", "Trabalho em equipe", 8, 1),
-    ("SITUATIONS", "Cenários situacionais", 9, 3),
-    ("RESPONSIBILITY", "Responsabilidade", 10, 1),
-    ("CHOQUE", "Conhecimento da CHOQUE", 11, 2),
-    ("SELF_ASSESSMENT", "Autoavaliação", 12, 1),
+    ("MOTIVATION", "Motivação", 1, 1),
+    ("ROLEPLAY", "Conhecimento de Roleplay", 2, 2),
+    ("Q_CODES", "Códigos Q", 3, 4),
+    ("COMMUNICATION", "Comunicação operacional", 4, 1),
+    ("CONDUCT", "Conduta policial", 5, 1),
+    ("CHOQUE", "Postura CHOQUE", 6, 1),
 )
 
 
@@ -72,8 +82,8 @@ def _question(
     *,
     question_type: str = "LONG_TEXT",
     security: str = "CONTROLLED",
-    minimum: int | None = 100,
-    maximum: int | None = 800,
+    minimum: int | None = 10,
+    maximum: int | None = 300,
     options: tuple[str, ...] = (),
     enabled: bool = True,
     condition: Mapping[str, object] | None = None,
@@ -94,56 +104,21 @@ def _question(
         "timer_enabled": security != "NORMAL",
         "allow_back": security != "STRICT",
         "shuffle_position": group not in {"IDENTIFICATION", "AVAILABILITY"},
-        "difficulty": "HARD" if security == "STRICT" else "MEDIUM",
+        "difficulty": "HARD" if security == "STRICT" else "EASY" if security == "NORMAL" else "MEDIUM",
     }
 
 
 DEFAULT_QUESTIONS = (
-    _question(1, "IDENTIFICATION", "Qual é o seu nick utilizado no servidor BGR?", question_type="SHORT_TEXT", security="NORMAL", minimum=2, maximum=40),
-    _question(2, "IDENTIFICATION", "Qual é o seu ID no servidor BGR?", question_type="NUMBER", security="NORMAL", minimum=None, maximum=None),
-    _question(3, "IDENTIFICATION", "Qual é a sua idade?", question_type="NUMBER", security="NORMAL", minimum=None, maximum=None),
-    _question(4, "IDENTIFICATION", "Discord vinculado automaticamente pelo OAuth.", question_type="BOOLEAN", security="NORMAL", minimum=None, maximum=None, enabled=False),
-    _question(5, "AVAILABILITY", "Em quais períodos você costuma estar disponível para atuar no servidor?", question_type="MULTI_SELECT", security="NORMAL", minimum=None, maximum=None, options=("Manhã", "Tarde", "Noite", "Madrugada", "Variável")),
-    _question(6, "AVAILABILITY", "Em média, quantas horas por dia você consegue dedicar à corporação?", question_type="NUMBER", security="NORMAL", minimum=None, maximum=None),
-    _question(7, "AVAILABILITY", "Você possui disponibilidade para treinamentos, reuniões e operações previamente marcadas?", question_type="SINGLE_SELECT", security="NORMAL", minimum=None, maximum=None, options=("SIM", "NÃO", "DEPENDE DO HORÁRIO")),
-    _question(8, "EXPERIENCE", "Você já participou de alguma corporação policial em MTA ou outro servidor de roleplay?", question_type="BOOLEAN", security="NORMAL", minimum=None, maximum=None),
-    _question(9, "EXPERIENCE", "Quais corporações você já integrou e quais funções exercia?", minimum=100, maximum=500, condition={"question": "Q08", "equals": True}),
-    _question(10, "EXPERIENCE", "Você já exerceu cargo de liderança, instrução ou supervisão em alguma organização?", question_type="BOOLEAN", security="NORMAL", minimum=None, maximum=None),
-    _question(11, "EXPERIENCE", "Descreva brevemente sua experiência exercendo essa função.", minimum=100, maximum=500, condition={"question": "Q10", "equals": True}),
-    _question(12, "MOTIVATION", "Por que você deseja ingressar na CHOQUE?", security="STRICT", minimum=300, maximum=800),
-    _question(13, "MOTIVATION", "O que você acredita que pode agregar à corporação?", security="STRICT", minimum=250, maximum=700),
-    _question(14, "MOTIVATION", "O que você espera encontrar na CHOQUE caso seja aprovado?", minimum=200, maximum=600),
-    _question(15, "CONDUCT", "Para você, o que significa disciplina dentro de uma corporação?", security="STRICT", minimum=250, maximum=700),
-    _question(16, "CONDUCT", "Como você reagiria ao receber uma ordem de um superior com a qual não concorda?", security="STRICT", minimum=300, maximum=800),
-    _question(17, "CONDUCT", "Caso um colega esteja desrespeitando regras internas, como você agiria?", security="STRICT", minimum=300, maximum=800),
-    _question(18, "CONDUCT", "Como deve agir caso perceba que cometeu um erro durante uma patrulha?", security="STRICT", minimum=200, maximum=700),
-    _question(19, "CONDUCT", "Qual deve ser sua postura ao representar a CHOQUE fora de uma operação oficial?", minimum=200, maximum=700),
-    _question(20, "ROLEPLAY", "Explique com suas palavras o que significa Roleplay.", minimum=200, maximum=600),
-    _question(21, "ROLEPLAY", "Por que preservar o Roleplay é importante durante uma abordagem ou operação policial?", security="STRICT", minimum=200, maximum=700),
-    _question(22, "ROLEPLAY", "Explique a diferença entre agir pelo personagem e usar informações obtidas fora do Roleplay.", security="STRICT", minimum=250, maximum=800),
-    _question(23, "ROLEPLAY", "Você presencia um jogador usando informações que o personagem não poderia conhecer. Como deve agir?", security="STRICT", minimum=250, maximum=800),
-    _question(24, "COMMUNICATION", "Por que uma comunicação clara e objetiva é importante durante uma patrulha?", minimum=200, maximum=700),
-    _question(25, "COMMUNICATION", "Vários membros falam ao mesmo tempo durante uma ocorrência. Como você agiria?", security="STRICT", minimum=250, maximum=800),
-    _question(26, "COMMUNICATION", "Durante uma operação, você não entendeu uma orientação do comandante. O que deve fazer?", security="STRICT", minimum=200, maximum=700),
-    _question(27, "TEAMWORK", "Como você lida com críticas ou correções feitas por um superior?", minimum=200, maximum=700),
-    _question(28, "TEAMWORK", "Um colega de patrulha está tendo dificuldades. Como você agiria?", security="STRICT", minimum=250, maximum=800),
-    _question(29, "TEAMWORK", "Você prefere atuar individualmente ou em equipe? Explique.", minimum=200, maximum=700),
-    _question(30, "SITUATIONS", "Um integrante discute com outro jogador e abandona a postura esperada. Como você reagiria?", security="STRICT", minimum=400, maximum=1000),
-    _question(31, "SITUATIONS", "Você percebe abuso de autoridade dentro do Roleplay. Como deve proceder?", security="STRICT", minimum=350, maximum=1000),
-    _question(32, "SITUATIONS", "O responsável toma decisão diferente daquela que você tomaria. Como deve se comportar?", security="STRICT", minimum=350, maximum=1000),
-    _question(33, "SITUATIONS", "Um jogador provoca você repetidamente durante uma abordagem. Como manter sua postura?", security="STRICT", minimum=350, maximum=1000),
-    _question(34, "SITUATIONS", "Um procedimento foi realizado incorretamente por um colega. Como lidar sem comprometer a operação?", security="STRICT", minimum=400, maximum=1100),
-    _question(35, "SITUATIONS", "Durante a patrulha, um superior comete um erro. Como agir no momento e depois?", security="STRICT", minimum=400, maximum=1100),
-    _question(36, "SITUATIONS", "Um membro antigo pede algo contrário às regras internas. Como você reagiria?", security="STRICT", minimum=400, maximum=1100),
-    _question(37, "RESPONSIBILITY", "Se não puder cumprir atividade marcada, qual deve ser sua atitude?", minimum=180, maximum=650),
-    _question(38, "RESPONSIBILITY", "Por que registrar corretamente entrada e saída de serviço é importante?", minimum=180, maximum=650),
-    _question(39, "RESPONSIBILITY", "Iniciou o serviço, mas não poderá continuar patrulhando. O que deve fazer?", security="STRICT", minimum=200, maximum=700),
-    _question(40, "CHOQUE", "Qual é a principal função da CHOQUE dentro do servidor?", security="STRICT", minimum=200, maximum=700),
-    _question(41, "CHOQUE", "Cite regras da corporação que considera fundamentais e explique por quê.", security="STRICT", minimum=300, maximum=900),
-    _question(42, "CHOQUE", "Quais responsabilidades você assume ao ingressar na CHOQUE?", security="STRICT", minimum=250, maximum=800),
-    _question(43, "SELF_ASSESSMENT", "Qual característica sua acredita ser mais útil para atuar na corporação?", minimum=180, maximum=600),
-    _question(44, "SELF_ASSESSMENT", "Qual aspecto você acredita que ainda precisa desenvolver?", minimum=180, maximum=600),
-    _question(45, "SELF_ASSESSMENT", "Por que deveríamos considerar sua candidatura?", security="STRICT", minimum=300, maximum=800),
+    _question(1, "MOTIVATION", "Por que você deseja ingressar na CHOQUE?", security="NORMAL"),
+    _question(2, "ROLEPLAY", "Explique o que é Roleplay e por que ele deve ser preservado em uma ação policial.", security="NORMAL"),
+    _question(3, "ROLEPLAY", "Qual situação representa Meta Gaming?", question_type="SINGLE_SELECT", security="NORMAL", minimum=None, maximum=None, options=("Usar no personagem uma informação obtida fora do RP", "Pedir apoio pelo rádio durante uma ocorrência", "Registrar uma denúncia após a ação", "Seguir a ordem de um superior")),
+    _question(4, "Q_CODES", "No rádio policial, o código QAP significa:", question_type="SINGLE_SELECT", security="NORMAL", minimum=None, maximum=None, options=("Na escuta ou disponível", "Localização atual", "Mensagem entendida", "Pedido de apoio urgente")),
+    _question(5, "Q_CODES", "No rádio policial, o código QSL significa:", question_type="SINGLE_SELECT", security="NORMAL", minimum=None, maximum=None, options=("Mensagem entendida", "Na escuta ou disponível", "Localização atual", "Encerrar comunicação")),
+    _question(6, "Q_CODES", "No rádio policial, o código QTH significa:", question_type="SINGLE_SELECT", security="NORMAL", minimum=None, maximum=None, options=("Localização atual", "Mensagem entendida", "Aguardar no local", "Abordagem iniciada")),
+    _question(7, "Q_CODES", "No rádio policial, o código QRR é usado para:", question_type="SINGLE_SELECT", security="NORMAL", minimum=None, maximum=None, options=("Solicitar apoio urgente", "Informar localização", "Confirmar entendimento", "Permanecer em silêncio")),
+    _question(8, "COMMUNICATION", "Durante uma ocorrência, vários policiais falam ao mesmo tempo no rádio. Qual é a conduta correta?", question_type="SINGLE_SELECT", security="NORMAL", minimum=None, maximum=None, options=("Manter objetividade e respeitar a prioridade da comunicação", "Falar mais alto para ser ouvido", "Ignorar o comandante da patrulha", "Usar o chat externo para decidir a ação")),
+    _question(9, "CONDUCT", "Um jogador provoca a equipe e tenta quebrar o Roleplay durante uma abordagem. Como você agiria?", security="NORMAL"),
+    _question(10, "CHOQUE", "Como você deve agir ao discordar de uma ordem durante a operação, sem quebrar a hierarquia nem o Roleplay?", security="NORMAL"),
 )
 
 
@@ -179,6 +154,13 @@ class RecruitmentService:
     async def ensure_defaults(self, guild_id: int, actor_id: int | None = None) -> dict[str, int]:
         now = self.clock()
         async with self.database.transaction() as connection:
+            await connection.execute(
+                f"""
+                UPDATE recruitment_question_groups SET active=0
+                WHERE guild_id=? AND code IN ({','.join('?' for _ in LEGACY_DEFAULT_GROUP_CODES)})
+                """,
+                (guild_id, *LEGACY_DEFAULT_GROUP_CODES),
+            )
             groups: dict[str, int] = {}
             for code, name, position, count in GROUPS:
                 await connection.execute(
@@ -187,7 +169,9 @@ class RecruitmentService:
                         guild_id, code, name, position, questions_per_application
                     ) VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(guild_id, code) DO UPDATE SET
-                        name=excluded.name, position=excluded.position
+                        name=excluded.name, position=excluded.position,
+                        questions_per_application=excluded.questions_per_application,
+                        active=1
                     """,
                     (guild_id, code, name, position, count),
                 )
@@ -196,6 +180,13 @@ class RecruitmentService:
                     (guild_id, code),
                 )
                 groups[code] = int((await cursor.fetchone())["id"])
+            await connection.execute(
+                """
+                UPDATE recruitment_questions SET enabled=0, updated_at=?
+                WHERE guild_id=? AND stable_key GLOB 'Q[0-9][0-9]'
+                """,
+                (now, guild_id),
+            )
             for position, question in enumerate(DEFAULT_QUESTIONS, start=1):
                 await connection.execute(
                     """
@@ -206,7 +197,26 @@ class RecruitmentService:
                         allow_back, shuffle_position, difficulty, options_json,
                         condition_json, created_at, updated_at
                     ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'AUTO', ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(guild_id, stable_key) DO NOTHING
+                    ON CONFLICT(guild_id, stable_key) DO UPDATE SET
+                        group_id=excluded.group_id,
+                        title=excluded.title,
+                        question_type=excluded.question_type,
+                        required=excluded.required,
+                        position=excluded.position,
+                        enabled=excluded.enabled,
+                        min_length=excluded.min_length,
+                        max_length=excluded.max_length,
+                        expected_min_length=excluded.expected_min_length,
+                        expected_max_length=excluded.expected_max_length,
+                        security_level=excluded.security_level,
+                        timer_enabled=excluded.timer_enabled,
+                        timer_mode=excluded.timer_mode,
+                        allow_back=excluded.allow_back,
+                        shuffle_position=excluded.shuffle_position,
+                        difficulty=excluded.difficulty,
+                        options_json=excluded.options_json,
+                        condition_json=excluded.condition_json,
+                        updated_at=excluded.updated_at
                     """,
                     (
                         guild_id,
@@ -232,18 +242,53 @@ class RecruitmentService:
                     ),
                 )
             cursor = await connection.execute(
-                "SELECT id FROM recruitment_form_versions WHERE guild_id=? ORDER BY version_number LIMIT 1",
-                (guild_id,),
+                """
+                SELECT id FROM recruitment_form_versions
+                WHERE guild_id=? AND json_extract(settings_json, '$.seed_revision')=?
+                ORDER BY version_number DESC LIMIT 1
+                """,
+                (guild_id, DEFAULT_FORM_REVISION),
             )
             version = await cursor.fetchone()
+            created_default_version = version is None
             if not version:
                 cursor = await connection.execute(
                     """
-                    INSERT INTO recruitment_form_versions(
-                        guild_id, version_number, status, settings_json, created_at, created_by
-                    ) VALUES (?, 1, 'PUBLISHED', ?, ?, ?)
+                    SELECT COALESCE(MAX(version_number), 0) + 1 AS next
+                    FROM recruitment_form_versions WHERE guild_id=?
                     """,
-                    (guild_id, json.dumps({"network_grace_seconds": 5}), now, actor_id),
+                    (guild_id,),
+                )
+                version_number = int((await cursor.fetchone())["next"])
+                await connection.execute(
+                    """
+                    UPDATE recruitment_form_versions SET status='RETIRED'
+                    WHERE guild_id=? AND status='PUBLISHED'
+                    """,
+                    (guild_id,),
+                )
+                cursor = await connection.execute(
+                    """
+                    INSERT INTO recruitment_form_versions(
+                        guild_id, version_number, status, settings_json, created_at,
+                        created_by, published_at, published_by
+                    ) VALUES (?, ?, 'PUBLISHED', ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        guild_id,
+                        version_number,
+                        json.dumps(
+                            {
+                                "network_grace_seconds": 5,
+                                "seed_revision": DEFAULT_FORM_REVISION,
+                                "question_count": len(DEFAULT_QUESTIONS),
+                            }
+                        ),
+                        now,
+                        actor_id,
+                        now,
+                        actor_id,
+                    ),
                 )
                 version_id = int(cursor.lastrowid)
                 questions = await connection.execute(
@@ -253,7 +298,8 @@ class RecruitmentService:
                            g.questions_per_application, g.active AS group_active
                     FROM recruitment_questions q
                     JOIN recruitment_question_groups g ON g.id=q.group_id
-                    WHERE q.guild_id=? ORDER BY g.position, q.position
+                    WHERE q.guild_id=? AND q.enabled=1 AND g.active=1
+                    ORDER BY g.position, q.position
                     """,
                     (guild_id,),
                 )
@@ -300,6 +346,15 @@ class RecruitmentService:
                 campaign_id = int(cursor.lastrowid)
             else:
                 campaign_id = int(campaign["id"])
+                if created_default_version:
+                    await connection.execute(
+                        """
+                        UPDATE recruitment_campaigns
+                        SET form_version_id=?, updated_at=?
+                        WHERE guild_id=? AND status!='ARCHIVED'
+                        """,
+                        (version_id, now, guild_id),
+                    )
         imported = await self.migrate_legacy_tickets(
             guild_id, campaign_id=campaign_id, form_version_id=version_id, actor_id=actor_id
         )
@@ -1106,6 +1161,13 @@ class RecruitmentService:
                 f"application-submitted:{application_id}",
                 {"application_id": application_id, "protocol": application["protocol"]}, now,
             )
+            await self._public_status_notification(
+                connection,
+                guild_id,
+                application_id,
+                "SUBMITTED",
+                now,
+            )
             await self.audit.record(
                 guild_id, "RECRUITMENT_APPLICATION_SUBMITTED", actor_id=discord_id,
                 target_id=discord_id, after={"application_id": application_id}, connection=connection,
@@ -1532,11 +1594,12 @@ class RecruitmentService:
     async def assign(
         self, guild_id: int, application_id: int, reviewer_id: int, expected_version: int
     ) -> dict[str, object]:
-        return await self._transition(
+        result = await self._transition(
             guild_id, application_id, reviewer_id, expected_version,
             allowed={"SUBMITTED", "UNDER_REVIEW"}, target="UNDER_REVIEW", action="APPLICATION_ASSIGNED",
             assignments={"assigned_to": reviewer_id, "assigned_at": self.clock()},
         )
+        return result
 
     async def schedule_interview(
         self,
@@ -1575,6 +1638,14 @@ class RecruitmentService:
                 f"interview-scheduled:{application_id}:{scheduled_at}",
                 {"application_id": application_id, "scheduled_at": scheduled_at},
                 now,
+            )
+            await self._public_status_notification(
+                connection,
+                guild_id,
+                application_id,
+                "INTERVIEW_SCHEDULED",
+                now,
+                extra_key=str(scheduled_at),
             )
             await self.audit.record(
                 guild_id,
@@ -1631,6 +1702,13 @@ class RecruitmentService:
             await self._set_application_status(
                 connection, application, "FINAL_REVIEW", evaluator_id,
                 "INTERVIEW_COMPLETED", now,
+            )
+            await self._public_status_notification(
+                connection,
+                guild_id,
+                application_id,
+                "FINAL_REVIEW",
+                now,
             )
             await self.audit.record(
                 guild_id,
@@ -1729,6 +1807,13 @@ class RecruitmentService:
                 )
                 member_id = None
                 event = "APPLICATION_REJECTED"
+            await self._public_status_notification(
+                connection,
+                guild_id,
+                application_id,
+                target,
+                now,
+            )
             await self._history(connection, guild_id, application_id, event, actor_id, public, {})
             await self.audit.record(
                 guild_id, f"RECRUITMENT_{event}", actor_id=actor_id,
@@ -2396,6 +2481,13 @@ class RecruitmentService:
                 after={"status": target},
                 connection=connection,
             )
+            await self._public_status_notification(
+                connection,
+                guild_id,
+                application_id,
+                target,
+                now,
+            )
         return dict(await self.database.fetchone("SELECT * FROM recruitment_applications WHERE id=?", (application_id,)))
 
     async def _set_application_status(
@@ -2487,6 +2579,27 @@ class RecruitmentService:
             ON CONFLICT(guild_id, event_key) DO NOTHING
             """,
             (guild_id, application_id, event_type, event_key, json.dumps(payload, ensure_ascii=False), now, now),
+        )
+
+    async def _public_status_notification(
+        self,
+        connection: aiosqlite.Connection,
+        guild_id: int,
+        application_id: int,
+        status: str,
+        now: int,
+        *,
+        extra_key: str | None = None,
+    ) -> None:
+        suffix = f":{extra_key}" if extra_key else ""
+        await self._notification(
+            connection,
+            guild_id,
+            application_id,
+            "RECRUITMENT_PUBLIC_STATUS",
+            f"application-public-status:{application_id}:{status}{suffix}",
+            {"application_id": application_id, "status": status},
+            now,
         )
     @staticmethod
     def _prevent_self_review(application: Mapping[str, object], actor_id: int) -> None:

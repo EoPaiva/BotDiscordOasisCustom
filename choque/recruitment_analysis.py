@@ -515,15 +515,42 @@ class RecruitmentAnalysisService:
         async with self.database.transaction() as connection:
             cursor = await connection.execute(
                 """
-                UPDATE recruitment_analysis_jobs
+                UPDATE recruitment_analysis_jobs AS target
                 SET status='PROCESSING', attempts=attempts+1, started_at=?, updated_at=?,
                     last_error_code=NULL, last_error_detail=NULL
                 WHERE id=? AND status IN ('PENDING','FAILED')
                   AND attempts < max_attempts AND available_at<=?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM recruitment_analysis_jobs AS active
+                      WHERE active.id<>target.id
+                        AND active.application_id=target.application_id
+                        AND active.analysis_type=target.analysis_type
+                        AND active.status IN ('PENDING','PROCESSING')
+                  )
                 """,
                 (now, now, job_id, now),
             )
             if cursor.rowcount != 1:
+                # Um reprocessamento manual mais recente pode coexistir com um job
+                # antigo em FAILED. O índice parcial impede promover os dois para
+                # PROCESSING; aposenta-se o job antigo em vez de derrubar o worker.
+                await connection.execute(
+                    """
+                    UPDATE recruitment_analysis_jobs AS target
+                    SET status='OUTDATED', updated_at=?,
+                        last_error_code='SUPERSEDED_BY_ACTIVE_JOB',
+                        last_error_detail='Substituído por uma análise ativa mais recente.'
+                    WHERE id=? AND status='FAILED'
+                      AND EXISTS (
+                          SELECT 1 FROM recruitment_analysis_jobs AS active
+                          WHERE active.id<>target.id
+                            AND active.application_id=target.application_id
+                            AND active.analysis_type=target.analysis_type
+                            AND active.status IN ('PENDING','PROCESSING')
+                      )
+                    """,
+                    (now, job_id),
+                )
                 return False
             cursor = await connection.execute(
                 "SELECT * FROM recruitment_analysis_jobs WHERE id=?", (job_id,)

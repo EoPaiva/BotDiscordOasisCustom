@@ -451,7 +451,7 @@ def test_ticket_operations_configuration_is_registry_validated_and_command_only(
 def test_signed_requests_block_replay_and_tampering(api_client, monkeypatch) -> None:
     client, database_path, _ = api_client
     monkeypatch.delenv("COMMAND_CENTER_ALLOW_LEGACY_AUTH")
-    headers = _signed_headers("GET", "/v1/context", discord_id=MEMBER_DISCORD_ID)
+    headers = _signed_headers("GET", "/v1/context", discord_id=ADMIN_DISCORD_ID)
     assert client.get("/v1/context", headers=headers).status_code == 200
     replay = client.get("/v1/context", headers=headers)
     assert replay.status_code == 401
@@ -589,19 +589,11 @@ def test_production_security_configuration_fails_closed(monkeypatch) -> None:
     validate_security_configuration()
 
 
-def test_member_dashboard_is_scoped_and_has_no_administrative_inbox(api_client) -> None:
-    client, _, seeded = api_client
+def test_member_cannot_access_command_center_dashboard(api_client) -> None:
+    client, _, _ = api_client
     response = client.get("/v1/dashboard", headers=_headers(MEMBER_DISCORD_ID))
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["capabilities"] == {
-        "view_inbox": False,
-        "view_changes": False,
-        "view_all_operations": False,
-    }
-    assert payload["inbox"] == []
-    assert payload["changes"] == {"counts": {}, "events": []}
-    assert [row["member_id"] for row in payload["queue"]] == [seeded["member_id"]]
+    assert response.status_code == 403
+    assert "Centro de Comando" in response.json()["detail"]
 
 
 def test_command_can_view_inbox_and_rank_change_creates_outbox_atomically(api_client) -> None:
@@ -766,7 +758,7 @@ def test_candidate_cannot_read_another_candidate_and_instructor_cannot_approve(
             "candidate_message": "Mensagem de teste",
         },
     )
-    assert visible.status_code == 200
+    assert visible.status_code == 403
     assert approve.status_code == 403
 
 
@@ -863,15 +855,17 @@ def test_recruitment_ai_configuration_is_command_only_and_never_exposes_secret(
     assert unavailable.status_code == 422
 
 
-def test_context_uses_live_permission_service_and_revokes_stale_session(api_client) -> None:
+def test_context_rejects_profile_downgrade_outside_command(
+    api_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
     client, database_path, _ = api_client
-    headers = _headers(INSTRUCTOR_DISCORD_ID)
+    monkeypatch.delenv("WEB_ADMIN_DISCORD_IDS")
+    headers = _headers(ADMIN_DISCORD_ID)
 
     before = client.get("/v1/context", headers=headers)
     allowed = client.get("/v1/admin/recruitment/applications", headers=headers)
     assert before.status_code == 200
-    assert before.json()["access"]["profile"] == "INSTRUTOR"
-    assert "recruitment.view" in before.json()["access"]["permissions"]
+    assert before.json()["access"]["profile"] == "COMANDO"
     assert allowed.status_code == 200
 
     connection = sqlite3.connect(database_path)
@@ -887,7 +881,7 @@ def test_context_uses_live_permission_service_and_revokes_stale_session(api_clie
                 authorization_version=authorization_version+1
             WHERE guild_id=? AND discord_id=?
             """,
-            (member_rank, GUILD_ID, INSTRUCTOR_DISCORD_ID),
+            (member_rank, GUILD_ID, ADMIN_DISCORD_ID),
         )
         connection.execute(
             """
@@ -896,7 +890,7 @@ def test_context_uses_live_permission_service_and_revokes_stale_session(api_clie
                 SELECT id FROM members WHERE guild_id=? AND discord_id=?
             )
             """,
-            (GUILD_ID, INSTRUCTOR_DISCORD_ID),
+            (GUILD_ID, ADMIN_DISCORD_ID),
         )
         connection.commit()
     finally:
@@ -904,10 +898,8 @@ def test_context_uses_live_permission_service_and_revokes_stale_session(api_clie
 
     after = client.get("/v1/me", headers=headers)
     denied = client.get("/v1/admin/recruitment/applications", headers=headers)
-    assert after.status_code == 200
-    assert after.json()["access"]["profile"] == "MEMBRO"
-    assert after.json()["authorization_version"] == before.json()["authorization_version"] + 1
-    assert "recruitment.view" not in after.json()["permissions"]
+    assert after.status_code == 403
+    assert "Centro de Comando" in after.json()["detail"]
     assert denied.status_code == 403
 
 

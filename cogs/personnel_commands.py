@@ -864,12 +864,12 @@ class GateApprovalModal(ErrorModal, title="Decisão da Portaria Digital"):
         self.action = action
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
         actor = await require_registration_permission(interaction, "registration.review")
         bot = get_bot(interaction)
         record = await bot.services.registration_gate.get(self.registration_id)
         if not record or int(record["guild_id"]) != actor.guild.id:
             raise NotFoundError("Cadastro não encontrado.")
-        await interaction.response.defer(ephemeral=True, thinking=True)
         if self.action == "APPROVE":
             target = actor.guild.get_member(int(record["discord_id"]))
             if target is None:
@@ -938,6 +938,7 @@ class GateCorrectIdModal(ErrorModal, title="Corrigir ID BGR"):
         self.registration_id = registration_id
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
         actor = await require_registration_permission(interaction, "registration.review")
         bot = get_bot(interaction)
         updated = await bot.services.registration_gate.correct_bgr_id(
@@ -952,7 +953,7 @@ class GateCorrectIdModal(ErrorModal, title="Corrigir ID BGR"):
                 await gate_cog.publish_registration_for_review(actor.guild, updated)
             except Exception:
                 LOGGER.exception("Falha ao atualizar cadastro da Portaria %s", updated["id"])
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "✏️ ID corrigido. O cadastro retornou à fila pendente.", ephemeral=True
         )
 
@@ -990,6 +991,7 @@ class GateLinkReasonModal(ErrorModal, title="Vincular identidade existente"):
         self.member_id = member_id
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
         actor = await require_registration_permission(interaction, "registration.review")
         bot = get_bot(interaction)
         record = await bot.services.registration_gate.link_existing_member(
@@ -1013,7 +1015,7 @@ class GateLinkReasonModal(ErrorModal, title="Vincular identidade existente"):
                 )
             except Exception:
                 LOGGER.exception("Falha ao arquivar cadastro da Portaria %s", record["id"])
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "🔗 Identidade vinculada. "
             + ("Acesso sincronizado." if synced else "Sincronização pendente/alertada."),
             ephemeral=True,

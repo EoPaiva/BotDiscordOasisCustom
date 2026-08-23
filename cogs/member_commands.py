@@ -47,7 +47,7 @@ def build_registration_panel_embed(bot: ChoqueBot) -> discord.Embed:
     embed.add_field(
         name="🪪 Já é membro, foi aprovado ou é Companheiro de Farda?",
         value=(
-            "`01` Selecione **Realizar cadastro**.\n"
+            "`01` Selecione **Identificar vínculo**.\n"
             "`02` Informe somente seu **nick BGR** e **ID BGR**.\n"
             "`03` O sistema procura vínculo de membro ou candidatura já existente.\n"
             "`04` Cargos, patente e nickname são sincronizados após a validação."
@@ -245,10 +245,10 @@ class RegistrationPanelView(discord.ui.View):
             )
 
     @discord.ui.button(
-        label="Realizar cadastro",
+        label="Identificar vínculo",
         emoji="🪪",
         style=discord.ButtonStyle.danger,
-        custom_id="choque:member:register:v1",
+        custom_id="choque:member:identify:v2",
         row=1,
     )
     async def register(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:

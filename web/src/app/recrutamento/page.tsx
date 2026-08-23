@@ -1,4 +1,13 @@
-import { ArrowRight, BadgeCheck, Clock3, FileText, ShieldCheck } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowRight,
+  Check,
+  ClipboardCheck,
+  Clock3,
+  RadioTower,
+  Search,
+  ShieldCheck,
+} from "lucide-react";
 import Link from "next/link";
 
 import { CommandCenterApiError, recruitmentCandidateFetch, recruitmentPublicFetch } from "@/lib/api";
@@ -33,6 +42,27 @@ const reasonLabels: Record<string, string> = {
   ADMINISTRATIVE_BLOCK: "Existe uma restrição administrativa ativa.",
 };
 
+const steps = [
+  {
+    number: "01",
+    title: "Identificação",
+    description: "Informe somente os dados necessários para localizar sua ficha no Discord e no BGR.",
+    meta: "cerca de 2 min",
+  },
+  {
+    number: "02",
+    title: "Avaliação operacional",
+    description: "Responda 10 questões curtas sobre Roleplay policial, comunicação e códigos Q.",
+    meta: "cerca de 6 a 9 min",
+  },
+  {
+    number: "03",
+    title: "Análise humana",
+    description: "O Comando confere o alistamento, registra a decisão e atualiza o protocolo no Discord.",
+    meta: "acompanhamento por protocolo",
+  },
+];
+
 export default async function RecruitmentLandingPage() {
   const identity = await getRecruitmentCandidateIdentity();
   let campaign: Campaign | null = null;
@@ -45,50 +75,129 @@ export default async function RecruitmentLandingPage() {
     unavailable = error instanceof CommandCenterApiError ? error.message : "Portal temporariamente indisponível.";
   }
   const open = campaign?.status === "OPEN";
+  const activeApplication = eligibility?.active_application;
+  const primaryHref = activeApplication
+    ? activeApplication.status === "DRAFT"
+      ? "/recrutamento/avaliacao"
+      : "/minha-candidatura"
+    : "#candidatura";
+  const primaryLabel = activeApplication ? "Continuar candidatura" : "Iniciar candidatura";
+
   return (
-    <main className="recruitment-shell">
+    <main className="recruitment-shell recruitment-redesign">
       <header className="recruitment-masthead">
-        <Link className="recruitment-brand" href="/recrutamento"><span>CB</span><div><strong>CHOQUE BGR</strong><small>PROCESSO SELETIVO</small></div></Link>
-        <nav><Link href="/minha-candidatura">Minha candidatura</Link>{identity && <Link href="/dashboard">Centro de Comando</Link>}</nav>
+        <Link className="recruitment-brand" href="/recrutamento">
+          <span>CB</span>
+          <div><strong>CHOQUE BGR</strong><small>POSTO DIGITAL DE ALISTAMENTO</small></div>
+        </Link>
+        <nav aria-label="Navegação do recrutamento">
+          <Link href="/minha-candidatura"><Search size={14} /> Consultar candidatura</Link>
+          {identity && <Link href="/dashboard">Centro de Comando</Link>}
+        </nav>
       </header>
-      <section className="recruitment-hero">
-        <div className="recruitment-hero-copy">
-          <span className="eyebrow">ALISTAMENTO / INGRESSO INSTITUCIONAL</span>
-          <h1>Disciplina antes da função.<br /><strong>Postura antes da patente.</strong></h1>
-          <p>O processo de ingresso da CHOQUE BGR avalia disponibilidade, conduta, comunicação, roleplay e capacidade de atuar em equipe sob procedimento.</p>
-          <div className="campaign-state"><i className={open ? "operational" : "closed"} /><div><span>SITUAÇÃO DO PROCESSO</span><strong>{campaign?.status ?? "INDISPONÍVEL"}</strong></div><div><span>CAMPANHA</span><strong>{campaign?.name ?? "Nenhuma campanha ativa"}</strong></div></div>
+
+      <section className="enlistment-hero">
+        <span aria-hidden="true" className="enlistment-watermark">CHOQUE</span>
+        <div className="enlistment-hero-copy">
+          <div className="enlistment-kicker">
+            <span />
+            <p>{open ? "ALISTAMENTO ABERTO" : "ALISTAMENTO EM CONSULTA"}</p>
+          </div>
+          <h1>Seu primeiro passo<br /><strong>começa pela postura.</strong></h1>
+          <p className="enlistment-lead">
+            Entre para a CHOQUE - BGR por um processo direto, transparente e feito para respeitar
+            seu tempo. Você conclui tudo em poucos minutos e acompanha o resultado pelo protocolo.
+          </p>
+          <div className="enlistment-actions">
+            <Link className="enlistment-primary-action" href={primaryHref}>
+              {primaryLabel} <ArrowRight size={18} />
+            </Link>
+            <Link className="enlistment-secondary-action" href="/minha-candidatura">
+              <Search size={16} /> Já me candidatei
+            </Link>
+          </div>
+          <div className="enlistment-time"><Clock3 size={17} /><span><strong>8 a 12 minutos</strong> para concluir • sem anexos</span></div>
         </div>
-        <aside className="recruitment-briefing">
-          <span className="technical-index">DIRETRIZ / 01</span>
-          <h2>Antes de iniciar</h2>
+        <aside className="enlistment-brief">
+          <span className="enlistment-serial">DIRETRIZ / 01</span>
+          <ShieldCheck aria-hidden="true" size={38} />
+          <h2>O que você precisa</h2>
           <ul>
-            <li><ShieldCheck /> Identificação declarada e protegida por protocolo</li>
-            <li><FileText /> Aproximadamente 24 questões individuais</li>
-            <li><Clock3 /> Cronômetro e autosave controlados pelo servidor</li>
-            <li><BadgeCheck /> Decisão final realizada por pessoa autorizada</li>
+            <li><Check size={15} /> Conta ativa no Discord</li>
+            <li><Check size={15} /> Nick e ID utilizados no BGR</li>
+            <li><Check size={15} /> Noções de RP policial e códigos Q</li>
           </ul>
-          <p>Eventos de foco, cópia ou colagem servem apenas como evidência de integridade. Nenhum sinal gera reprovação automática.</p>
+          <p>10 QUESTÕES <i /> 3 ETAPAS <i /> 1 PROTOCOLO</p>
         </aside>
+        <a className="enlistment-scroll" href="#como-funciona"><ArrowDown size={16} /> Entenda o processo</a>
       </section>
-      <section className="recruitment-intake">
-        <div className="intake-heading"><span>02</span><div><h2>Apresentação do candidato</h2><p>Informe seus dados. Não é necessário entrar com o Discord.</p></div></div>
-        {unavailable ? <div className="candidate-blocked"><strong>Portal indisponível</strong><p>{unavailable}</p></div> : eligibility?.active_application ? (
-          <div className="candidate-login"><h3>Candidatura em andamento</h3><p>Protocolo <strong>{eligibility.active_application.protocol}</strong> • {eligibility.active_application.status}</p><Link className="button button-primary" href={eligibility.active_application.status === "DRAFT" ? "/recrutamento/avaliacao" : "/minha-candidatura"}>Continuar acompanhamento <ArrowRight size={16} /></Link></div>
-        ) : open ? (
-          <form action={startRecruitmentApplication} className="candidate-start-form">
-            <label>ID do Discord<input autoComplete="off" inputMode="numeric" name="discordId" pattern="[0-9]{15,22}" required /></label>
-            <label>Usuário no Discord<input autoComplete="username" name="discordUsername" placeholder="usuario" required minLength={2} maxLength={100} /></label>
-            <label>Nick no servidor BGR<input autoComplete="nickname" name="candidateNick" required minLength={2} maxLength={80} /></label>
-            <label>ID no servidor BGR<input inputMode="numeric" name="bgrId" required maxLength={40} /></label>
-            <label>Idade<input inputMode="numeric" name="age" required min={13} max={100} type="number" /></label>
-            <label className="consent-field"><input name="consent" required type="checkbox" value="accepted" /><span>Declaro que as informações são verdadeiras e aceito o tratamento dos dados estritamente para recrutamento, auditoria e ingresso na CHOQUE BGR.</span></label>
-            <button className="button button-primary" type="submit">Iniciar candidatura <ArrowRight size={16} /></button>
-          </form>
-        ) : (
-          <div className="candidate-blocked"><strong>Candidatura indisponível</strong>{eligibility?.reasons.map((reason) => <p key={reason}>{reasonLabels[reason] ?? reason}</p>)}{eligibility?.cooldown_until && <p>Nova tentativa a partir de <time>{new Date(eligibility.cooldown_until).toLocaleDateString("pt-BR")}</time>.</p>}</div>
-        )}
+
+      <section className="enlistment-process" id="como-funciona" aria-labelledby="process-title">
+        <header>
+          <span className="technical-index">PROCESSO / 03 ETAPAS</span>
+          <h2 id="process-title">Simples do início ao resultado.</h2>
+          <p>Uma etapa por vez, sem telas desnecessárias e sem repetir informações.</p>
+        </header>
+        <ol>
+          {steps.map((step) => (
+            <li key={step.number}>
+              <span>{step.number}</span>
+              <div><h3>{step.title}</h3><p>{step.description}</p><small>{step.meta}</small></div>
+            </li>
+          ))}
+        </ol>
       </section>
-      <footer className="recruitment-footer"><span>CHOQUE BGR • SISTEMA DE GESTÃO</span><span>Dados protegidos por controle de acesso e trilha de auditoria</span></footer>
+
+      <section className="recruitment-intake" id="candidatura">
+        <div className="recruitment-intake-layout">
+          <div className="intake-copy">
+            <span className="technical-index">FICHA / IDENTIFICAÇÃO</span>
+            <h2>{activeApplication ? "Continue de onde parou." : "Vamos começar."}</h2>
+            <p>
+              Seus dados são usados somente no processo seletivo. As respostas ficam restritas ao
+              Comando; no Discord público aparece apenas o protocolo e a etapa.
+            </p>
+            <div className="intake-trust-line"><ShieldCheck size={18} /><span>Decisão final sempre realizada por pessoa autorizada.</span></div>
+          </div>
+
+          <div className="intake-operation">
+            <div className="campaign-state">
+              <i className={open ? "operational" : "closed"} />
+              <div><span>SITUAÇÃO</span><strong>{campaign?.status ?? "INDISPONÍVEL"}</strong></div>
+              <div><span>CAMPANHA</span><strong>{campaign?.name ?? "Nenhuma campanha ativa"}</strong></div>
+            </div>
+            {unavailable ? (
+              <div className="candidate-blocked"><strong>Portal indisponível</strong><p>{unavailable}</p></div>
+            ) : activeApplication ? (
+              <div className="candidate-login">
+                <ClipboardCheck size={28} />
+                <div><h3>Candidatura em andamento</h3><p>Protocolo <strong>{activeApplication.protocol}</strong> • {activeApplication.status}</p></div>
+                <Link className="button button-primary" href={primaryHref}>Continuar <ArrowRight size={16} /></Link>
+              </div>
+            ) : open ? (
+              <form action={startRecruitmentApplication} className="candidate-start-form">
+                <label className="wide-field">ID do Discord<input autoComplete="off" inputMode="numeric" name="discordId" pattern="[0-9]{15,22}" required placeholder="Ex.: 123456789012345678" /></label>
+                <label>Usuário no Discord<input autoComplete="username" name="discordUsername" placeholder="usuario" required minLength={2} maxLength={100} /></label>
+                <label>Nick no servidor BGR<input autoComplete="nickname" name="candidateNick" placeholder="Seu nick no jogo" required minLength={2} maxLength={80} /></label>
+                <label>ID no servidor BGR<input inputMode="numeric" name="bgrId" placeholder="Seu ID" required maxLength={40} /></label>
+                <label>Idade<input inputMode="numeric" name="age" required min={13} max={100} type="number" /></label>
+                <label className="consent-field"><input name="consent" required type="checkbox" value="accepted" /><span>Confirmo que os dados são verdadeiros e autorizo seu uso somente para recrutamento, auditoria e ingresso na CHOQUE - BGR.</span></label>
+                <button className="enlistment-primary-action" type="submit">Avançar para as 10 questões <ArrowRight size={17} /></button>
+              </form>
+            ) : (
+              <div className="candidate-blocked"><strong>Candidatura indisponível</strong>{eligibility?.reasons.map((reason) => <p key={reason}>{reasonLabels[reason] ?? reason}</p>)}{eligibility?.cooldown_until && <p>Nova tentativa a partir de <time>{new Date(eligibility.cooldown_until).toLocaleDateString("pt-BR")}</time>.</p>}</div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="enlistment-focus" aria-label="Conteúdo da avaliação">
+        <RadioTower size={25} />
+        <div><span>AVALIAÇÃO OBJETIVA</span><strong>Roleplay policial • comunicação • códigos Q • postura operacional</strong></div>
+        <Link href="#candidatura">Começar agora <ArrowRight size={15} /></Link>
+      </section>
+
+      <footer className="recruitment-footer"><span>CHOQUE - BGR • SISTEMA DE GESTÃO</span><span>Alistamento oficial • dados protegidos por controle de acesso</span></footer>
     </main>
   );
 }

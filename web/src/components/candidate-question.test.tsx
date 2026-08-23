@@ -1,5 +1,7 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { saveRecruitmentAnswer } from "@/app/recrutamento/actions";
 
 import { CandidateQuestion, type ReadyQuestion } from "./candidate-question";
 
@@ -44,7 +46,10 @@ const active: ReadyQuestion = {
 };
 
 describe("candidate controlled question", () => {
-  beforeEach(() => recordIntegrity.mockClear());
+  beforeEach(() => {
+    recordIntegrity.mockClear();
+    vi.mocked(saveRecruitmentAnswer).mockResolvedValue({ ok: true });
+  });
   afterEach(() => cleanup());
 
   it("does not reveal the prompt before the server start", () => {
@@ -107,12 +112,54 @@ describe("candidate controlled question", () => {
     );
   });
 
-  it("requires a second explicit confirmation before final submission", () => {
+  it("advances with a single explicit action", () => {
     render(<CandidateQuestion applicationId={5} protocol="AL-00005" ready={active} />);
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar resposta" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("não poderá mais ser alterada");
-    expect(screen.getByRole("button", { name: "Continuar editando" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Confirmar definitivamente" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Salvar e próxima questão" })).toBeInTheDocument();
+    expect(screen.queryByText("Confirmar resposta?")).not.toBeInTheDocument();
+  });
+
+  it("replaces the submitted question when the server returns the next one", async () => {
+    const { rerender } = render(
+      <CandidateQuestion applicationId={5} protocol="AL-00005" ready={active} />,
+    );
+    rerender(
+      <CandidateQuestion applicationId={5} protocol="AL-00005" ready={{
+        complete: false,
+        id: 32,
+        ordinal: 5,
+        total: 24,
+        status: "NOT_STARTED",
+        time_seconds: 300,
+      }} />,
+    );
+    await waitFor(() => expect(screen.getByText("Questão pronta")).toBeInTheDocument());
+    expect(screen.getByText("QUESTÃO 05 DE 24")).toBeInTheDocument();
+    expect(screen.queryByText(active.question!.title)).not.toBeInTheDocument();
+  });
+
+  it("locks the old question and reports progress after a successful confirmation", async () => {
+    render(<CandidateQuestion applicationId={5} protocol="AL-00005" ready={active} />);
+    fireEvent.click(screen.getByRole("button", { name: "Salvar e próxima questão" }));
+    await waitFor(() => expect(saveRecruitmentAnswer).toHaveBeenCalledWith(
+      expect.objectContaining({ questionId: 31, submit: true }),
+    ));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Resposta confirmada. Preparando a próxima questão",
+    );
+    expect(screen.getByRole("button", { name: "Salvando..." })).toBeDisabled();
+  });
+
+  it("shows a server validation error and lets the candidate correct the answer", async () => {
+    vi.mocked(saveRecruitmentAnswer).mockResolvedValueOnce({
+      ok: false,
+      error: "Resposta abaixo do mínimo configurado.",
+    });
+    render(<CandidateQuestion applicationId={5} protocol="AL-00005" ready={active} />);
+    fireEvent.click(screen.getByRole("button", { name: "Salvar e próxima questão" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Resposta abaixo do mínimo");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Salvar e próxima questão" })).toBeEnabled();
+    });
   });
 
   it("keeps clipboard available when an audited accessibility adaptation exists", () => {

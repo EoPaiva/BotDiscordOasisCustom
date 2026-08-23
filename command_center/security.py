@@ -16,6 +16,7 @@ from fastapi import Header, HTTPException, Request, status
 LOGGER = logging.getLogger(__name__)
 SIGNATURE_VERSION = "choque-v1"
 NONCE_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{16,128}$")
+COMMAND_CENTER_PROFILES = frozenset({"COMANDO", "ALTO_COMANDO", "ADMINISTRADOR"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +133,12 @@ async def authenticate_request(
     if not await services.security.session_allowed(guild_id, discord_id, issued_at):
         await _record_access(request, guild_id, discord_id, "AUTH", "DENIED")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sessão revogada. Entre novamente.")
+    if not technical_bootstrap and access.profile not in COMMAND_CENTER_PROFILES:
+        await _record_access(request, guild_id, discord_id, "AUTH", "DENIED")
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Centro de Comando restrito ao Comando e Alto Comando.",
+        )
     permissions = frozenset({"*"}) if technical_bootstrap else access.permissions
     profile = "ADMINISTRADOR" if technical_bootstrap else access.profile
     profile_name = "Administrador técnico" if technical_bootstrap else access.profile_name

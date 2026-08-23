@@ -370,3 +370,21 @@ combinado com o `.env` privado mantido fora do Git; ele nunca deve receber segre
     o launcher valida e consome um candidato explícito `recovery-once` sem abrir o banco corrompido.
     Evidências finais: Discloud online, health 200, Gateway conectado, `quick_check=ok`, FK=0,
     migration 24, **296 pytest**, **29 Vitest**, Ruff, compile/check, ESLint, typecheck e build.
+
+## Continuidade de produção
+
+31. ✅ **Portaria segura, Recrutamento operacional e patrulhas ao vivo — concluído em produção em
+    2026-08-23.** O atalho ambíguo de cadastro foi substituído por identificação de vínculo e um
+    visitante comum não pode mais virar membro sem candidatura ou role funcional reconhecida. Os
+    modais administrativos confirmam a interação antes do trabalho demorado. A jornada pública de
+    Recrutamento recebeu matriz de leitura, Mesa privada, posto `Setar tag`, menção/DM do aprovado e
+    atualização idempotente do protocolo anterior. A migration 25 e o frontend publicado mostram
+    ocupação real das calls no painel sem criar patrulha falsa. O Centro de Comando ficou restrito a
+    perfis `COMANDO` ou superiores.
+
+    Evidências: snapshot de overwrites, três backups Discloud, banco v25, Gateway online, validação
+    REST do protocolo e dos canais, Vercel 200, **300 pytest**, **32 Vitest**, Ruff, compileall,
+    `main.py --check`, ESLint, TypeScript e build. Como não havia ninguém nas calls na hora do corte,
+    a próxima ocupação real ainda deve ser observada no painel; isso não bloqueia o mecanismo já
+    testado. Gestão bidirecional de qualificações e compactação do servidor permanecem na fila
+    futura e não foram executadas nesta entrega.

@@ -12,7 +12,7 @@ EXPECTED = {
     "MEMBER": (
         "registration.panel",
         "🛡️ PORTARIA DIGITAL • CHOQUE - BGR",
-        {"choque:member:register:v1"},
+        {"choque:member:identify:v2"},
     ),
     "POINT": (
         "point.panel",

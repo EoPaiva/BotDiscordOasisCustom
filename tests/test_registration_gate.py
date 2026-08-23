@@ -13,6 +13,24 @@ from .conftest import DISCORD_ID, GUILD_ID
 from .test_identity_sync import FakeGuild, FakeMember, FakeRole
 
 
+async def open_managed_rank_registration(
+    service_bundle, discord_id: int, role_id: int
+) -> None:
+    database = service_bundle["database"]
+    await database.execute(
+        """
+        INSERT INTO ranks(
+            guild_id, name, prefix, level, discord_role_id, rbac_profile, created_at
+        ) VALUES (?, ?, '[REC]', 1, ?, 'RECRUTA', 1)
+        """,
+        (GUILD_ID, f"Recruta teste {discord_id}", role_id),
+    )
+    _, created = await service_bundle[
+        "registration_gate"
+    ].ensure_rank_registration_compliance(GUILD_ID, discord_id, role_id)
+    assert created is True
+
+
 @pytest.mark.asyncio
 async def test_registration_gate_reconciles_active_member(service_bundle):
     gate = service_bundle["registration_gate"]
@@ -379,7 +397,9 @@ async def test_registration_gate_does_not_reactivate_inactive_member(service_bun
 
 
 @pytest.mark.asyncio
-async def test_registration_gate_unknown_visitor_waits_for_human_review(service_bundle):
+async def test_registration_gate_unknown_visitor_creates_identity_without_membership(
+    service_bundle,
+):
     gate = service_bundle["registration_gate"]
     settings = service_bundle["settings"]
     database = service_bundle["database"]
@@ -401,8 +421,17 @@ async def test_registration_gate_unknown_visitor_waits_for_human_review(service_
     )
 
     assert first["id"] == second["id"]
-    assert first["status"] == "PENDING"
+    assert first["status"] == "REGISTERED"
     assert first["access_tier"] == "REGISTERED_VISITOR"
+    assert first["member_id"] is None
+    assert await gate.pending_review_notifications(GUILD_ID) == []
+    with pytest.raises(ConflictError):
+        await gate.approve_new_member(
+            int(first["id"]),
+            reviewer_id=DISCORD_ID,
+            reason="Tentativa inválida",
+            discord_nick="Visitante",
+        )
     total = await database.fetchone(
         "SELECT COUNT(*) AS total FROM registration_gate_records WHERE discord_id=9001"
     )
@@ -534,6 +563,7 @@ async def test_registration_gate_approval_is_atomic_and_enqueues_sync(service_bu
     settings = service_bundle["settings"]
     database = service_bundle["database"]
     await settings.set(GUILD_ID, "registration_gate_enabled", True, DISCORD_ID)
+    await open_managed_rank_registration(service_bundle, 9003, 88_903)
     pending = await gate.submit(
         GUILD_ID,
         9003,
@@ -578,6 +608,7 @@ async def test_registration_review_notification_and_archive_are_persisted(servic
     gate = service_bundle["registration_gate"]
     settings = service_bundle["settings"]
     await settings.set(GUILD_ID, "registration_gate_enabled", True, DISCORD_ID)
+    await open_managed_rank_registration(service_bundle, 9_033, 88_933)
     pending = await gate.submit(
         GUILD_ID,
         9_033,
@@ -657,6 +688,10 @@ async def test_approved_registration_projects_existing_functional_role(service_b
         """,
         (GUILD_ID, functional_role.id, position_id, instructor_profile["id"]),
     )
+    _, compliance_created = await gate.ensure_rank_registration_compliance(
+        GUILD_ID, 9_020, rank_role.id
+    )
+    assert compliance_created is True
     pending = await gate.submit(
         GUILD_ID,
         9_020,

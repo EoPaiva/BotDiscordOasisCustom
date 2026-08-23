@@ -699,7 +699,7 @@ class RegistrationGateConfigurator(discord.Client):
             if getattr(component, "custom_id", None)
         }
         expected_ids = {
-            "choque:member:register:v1",
+            "choque:member:identify:v2",
             "choque:registration:status:v1",
             "choque:registration:help:v1",
         }

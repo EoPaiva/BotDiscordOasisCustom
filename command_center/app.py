@@ -781,7 +781,7 @@ async def dashboard(request: Request, actor: Actor) -> dict[str, object]:
     services = request.app.state.services
     readiness, patrols, queue = await asyncio.gather(
         services.operations.readiness(actor.guild_id),
-        services.operations.active_patrols(actor.guild_id),
+        services.operations.active_patrol_overview(actor.guild_id),
         services.operations.queue(actor.guild_id),
     )
     if not has_all_operations:
@@ -830,7 +830,7 @@ async def readiness(request: Request, actor: Actor) -> Any:
 async def patrols(request: Request, actor: Actor) -> Any:
     require_permission(actor, "patrol.view.all")
     active, queue = await asyncio.gather(
-        request.app.state.services.operations.active_patrols(actor.guild_id),
+        request.app.state.services.operations.active_patrol_overview(actor.guild_id),
         request.app.state.services.operations.queue(actor.guild_id),
     )
     return plain({"generated_at": int(time.time() * 1000), "active": active, "queue": queue})
@@ -2835,6 +2835,8 @@ async def update_channel_setting(
         "activity_panel_channel_id": "TEXT_CHANNEL",
         "recruitment_panel_channel_id": "TEXT_CHANNEL",
         "recruitment_queue_channel_id": "TEXT_CHANNEL",
+        "recruitment_review_channel_id": "TEXT_CHANNEL",
+        "recruitment_public_status_channel_id": "TEXT_CHANNEL",
         "recruitment_notification_channel_id": "TEXT_CHANNEL",
         "recruitment_approved_channel_id": "TEXT_CHANNEL",
         "recruitment_rejected_channel_id": "TEXT_CHANNEL",

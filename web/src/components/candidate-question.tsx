@@ -36,6 +36,22 @@ function initialAnswer(payload: CandidateQuestionPayload | null): string | boole
   return "";
 }
 
+function payloadFromReady(ready: ReadyQuestion): CandidateQuestionPayload | null {
+  if (!ready.question) return null;
+  return {
+    question: ready.question,
+    started_at: ready.started_at!,
+    expires_at: ready.expires_at ?? null,
+    draft: ready.draft,
+    question_token: ready.question_token!,
+  };
+}
+
+function readyIdentity(ready: ReadyQuestion): string {
+  if (ready.complete) return `complete:${ready.application_version ?? "current"}`;
+  return [ready.id ?? "unknown", ready.status ?? "unknown", ready.started_at ?? "waiting"].join(":");
+}
+
 export function CandidateQuestion({
   applicationId,
   protocol,
@@ -46,28 +62,37 @@ export function CandidateQuestion({
   ready: ReadyQuestion;
 }) {
   const router = useRouter();
-  const initialPayload = ready.question
-    ? ({
-        question: ready.question,
-        started_at: ready.started_at!,
-        expires_at: ready.expires_at ?? null,
-        draft: ready.draft,
-        question_token: ready.question_token!,
-      } satisfies CandidateQuestionPayload)
-    : null;
+  const initialPayload = payloadFromReady(ready);
   const [payload, setPayload] = useState<CandidateQuestionPayload | null>(initialPayload);
   const [answer, setAnswer] = useState<string | boolean | string[]>(initialAnswer(initialPayload));
   const [remaining, setRemaining] = useState<number | null>(null);
   const [notice, setNotice] = useState<string>("");
-  const [confirming, setConfirming] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
   const [pending, startTransition] = useTransition();
   const savedRef = useRef<string>(JSON.stringify(initialAnswer(initialPayload)));
   const blurStarted = useRef<number | null>(null);
+  const readyIdentityRef = useRef(readyIdentity(ready));
+  const timeoutSubmissionRef = useRef<number | null>(null);
   const clipboardRestricted = Boolean(
     payload
     && payload.question.security_level !== "NORMAL"
     && !payload.question.clipboard_adapted
   );
+
+  useEffect(() => {
+    const nextIdentity = readyIdentity(ready);
+    if (nextIdentity === readyIdentityRef.current) return;
+    readyIdentityRef.current = nextIdentity;
+    const nextPayload = payloadFromReady(ready);
+    const nextAnswer = initialAnswer(nextPayload);
+    setPayload(nextPayload);
+    setAnswer(nextAnswer);
+    savedRef.current = JSON.stringify(nextAnswer);
+    timeoutSubmissionRef.current = null;
+    setRemaining(null);
+    setNotice("");
+    setAdvancing(false);
+  }, [ready]);
 
   useEffect(() => {
     if (!payload?.expires_at) return;
@@ -78,7 +103,7 @@ export function CandidateQuestion({
   }, [payload?.expires_at]);
 
   useEffect(() => {
-    if (!payload || pending) return;
+    if (!payload || pending || advancing) return;
     const serialized = JSON.stringify(answer);
     if (serialized === savedRef.current) return;
     const timer = window.setTimeout(async () => {
@@ -97,7 +122,7 @@ export function CandidateQuestion({
       }
     }, 3_000);
     return () => window.clearTimeout(timer);
-  }, [answer, applicationId, payload, pending]);
+  }, [answer, applicationId, payload, pending, advancing]);
 
   useEffect(() => {
     if (!payload) return;
@@ -147,7 +172,13 @@ export function CandidateQuestion({
   }, [applicationId, clipboardRestricted, payload]);
 
   useEffect(() => {
-    if (remaining !== 0 || !payload) return;
+    if (
+      remaining !== 0
+      || !payload
+      || advancing
+      || timeoutSubmissionRef.current === payload.question.id
+    ) return;
+    timeoutSubmissionRef.current = payload.question.id;
     const timer = window.setTimeout(() => {
       void saveRecruitmentAnswer({
         applicationId,
@@ -155,10 +186,19 @@ export function CandidateQuestion({
         answer,
         questionToken: payload.question_token,
         submit: true,
-      }).then(() => router.refresh());
+      }).then((result) => {
+        if (result.ok) {
+          setAdvancing(true);
+          setNotice("Tempo encerrado. Preparando a próxima questão...");
+          router.refresh();
+        } else {
+          timeoutSubmissionRef.current = null;
+          setNotice(result.error ?? "Não foi possível finalizar a questão.");
+        }
+      });
     }, 5_200);
     return () => window.clearTimeout(timer);
-  }, [remaining, payload, applicationId, answer, router]);
+  }, [remaining, payload, applicationId, answer, router, advancing]);
 
   const textLength = typeof answer === "string" ? answer.length : 0;
   const progress = useMemo(
@@ -233,7 +273,7 @@ export function CandidateQuestion({
   const question = payload.question;
   const expired = remaining === 0;
   const common = {
-    disabled: pending || expired,
+    disabled: pending || expired || advancing,
     onPaste: (event: React.ClipboardEvent) => blocked(event, "PASTE_BLOCKED"),
     onDrop: (event: React.DragEvent) => blocked(event, "DROP_BLOCKED"),
     onContextMenu: (event: React.MouseEvent) => {
@@ -297,7 +337,7 @@ export function CandidateQuestion({
         </div>
         <footer className="question-actions">
           <span role="status"><Save size={13} /> {notice || "Autosave a cada 3 segundos"}</span>
-          {!confirming ? <button className="button button-primary" disabled={pending || expired} onClick={() => setConfirming(true)} type="button">Confirmar resposta</button> : <div className="answer-confirmation" role="alert"><p><strong>Confirmar resposta?</strong> Após continuar, ela não poderá mais ser alterada.</p><button className="button button-secondary" onClick={() => setConfirming(false)} type="button">Continuar editando</button><button className="button button-primary" disabled={pending || expired} onClick={() => startTransition(async () => {
+          <button className="button button-primary" disabled={pending || expired || advancing} onClick={() => startTransition(async () => {
             const result = await saveRecruitmentAnswer({
               applicationId,
               questionId: question.id,
@@ -305,12 +345,15 @@ export function CandidateQuestion({
               questionToken: payload.question_token,
               submit: true,
             });
-            if (result.ok) router.refresh();
+            if (result.ok) {
+              setAdvancing(true);
+              setNotice("Resposta confirmada. Preparando a próxima questão...");
+              router.refresh();
+            }
             else {
-              setConfirming(false);
               setNotice(result.error ?? "Não foi possível confirmar.");
             }
-          })} type="button">Confirmar definitivamente</button></div>}
+          })} type="button">{pending || advancing ? "Salvando..." : "Salvar e próxima questão"}</button>
         </footer>
       </div>
     </section>

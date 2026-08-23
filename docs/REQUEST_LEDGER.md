@@ -2,6 +2,22 @@
 
 Atualizado em 2026-08-23.
 
+## Pedidos concluídos nesta continuidade
+
+- **Portaria sem atalho de ingresso:** o botão público agora identifica vínculo. Visitante sem
+  candidatura ou role reconhecida não pode ser aprovado como membro por esse caminho.
+- **Timeout na aprovação:** decisões confirmam a interação antes do trabalho transacional e
+  respondem por follow-up; a ordem recebeu teste dedicado.
+- **Recrutamento visível e organizado:** cinco canais de leitura pública, Mesa privada, posto
+  `Setar tag`, menção do aprovado, DM e fallback administrativo foram aplicados e validados.
+- **Protocolo anterior:** `AL-00005` foi atualizado no quadro e no resultado sem duplicar mensagens.
+- **Patrulha no site:** ocupação real das calls passou a alimentar API e frontend, mesmo sem uma
+  patrulha formal aberta; nenhuma call estava ocupada no instante da validação real.
+- **Acesso ao site:** Centro de Comando restrito a Comando/Alto Comando; jornada pública de
+  candidatura não depende desse perfil.
+- **Pendências preservadas:** gestão bidirecional de qualificações e compactação estrutural do
+  servidor continuam como trabalhos futuros, sem alterações destrutivas nesta rodada.
+
 Este arquivo é o índice de cobertura dos pedidos. Ele não substitui as especificações e não declara
 como concluído aquilo que apenas entrou na fila. A ordem operacional oficial está em
 `docs/PHASE_QUEUE.md`.

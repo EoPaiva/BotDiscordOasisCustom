@@ -2,6 +2,7 @@ import { Activity, ArrowRight, Radio, ShieldAlert } from "lucide-react";
 import Link from "next/link";
 
 import { EmptyState, MetricStrip, PageHeader, SectionHeader, Status } from "@/components/ui";
+import { LiveDataRefresh } from "@/components/live-data-refresh";
 import { commandCenterFetch } from "@/lib/api";
 import { dateTime, duration, label } from "@/lib/format";
 
@@ -30,6 +31,7 @@ export default async function DashboardPage() {
   const changeCounts = data.changes.counts ?? {};
   return (
     <>
+      <LiveDataRefresh intervalMs={10_000} />
       <PageHeader
         code="CC / 01"
         title="Centro de Comando"
@@ -52,9 +54,10 @@ export default async function DashboardPage() {
               <article className="patrol-record" key={String(patrol.id)}>
                 <div className="patrol-code"><span>PTR</span><strong>{String(patrol.sequence_number ?? patrol.id).padStart(3, "0")}</strong></div>
                 <div className="patrol-body">
-                  <header><Status value={patrol.status} /><code>CALL {String(patrol.voice_channel_id)}</code></header>
+                  <header><Status value={patrol.status} /><code>{String(patrol.voice_channel_name ?? `CALL ${String(patrol.voice_channel_id)}`)}</code></header>
                   <div className="patrol-members">
-                    {memberIds(patrol.member_ids).map((id) => <span key={id}>{id === String(patrol.commander_discord_id ?? "") ? "COMANDANTE" : "EFETIVO"} <strong>{id}</strong></span>)}
+                    {String(patrol.member_names ?? "").split(" | ").filter(Boolean).map((name, index) => <span key={`${name}-${index}`}>EFETIVO <strong>{name}</strong></span>)}
+                    {!patrol.member_names && memberIds(patrol.member_ids).map((id) => <span key={id}>{id === String(patrol.commander_discord_id ?? "") ? "COMANDANTE" : "EFETIVO"} <strong>{id}</strong></span>)}
                   </div>
                 </div>
                 <div className="patrol-time"><Radio size={15} aria-hidden="true" /><strong>{duration(data.generated_at - Number(patrol.started_at ?? data.generated_at))}</strong><span>{String(patrol.member_count ?? 0)} militares</span></div>

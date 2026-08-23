@@ -1292,6 +1292,16 @@ class RegistrationGateService:
             member = await self._member_by_discord(connection, guild_id, discord_id)
             conflicting_member = await self._member_by_bgr(connection, guild_id, normalized_id)
             recruitment = await self._recruitment_by_discord(connection, guild_id, discord_id)
+            compliance_cursor = await connection.execute(
+                """
+                SELECT * FROM rank_registration_compliance
+                WHERE guild_id=? AND discord_id=? AND status IN ('PENDING','EXPIRING')
+                ORDER BY detected_at, id
+                LIMIT 1
+                """,
+                (guild_id, discord_id),
+            )
+            compliance = await compliance_cursor.fetchone()
 
             status = "PENDING"
             tier = "REGISTERED_VISITOR"
@@ -1348,6 +1358,19 @@ class RegistrationGateService:
                     nick = expected_nick or nick
                     sync_status = "PENDING"
                     event_type = "REGISTRATION_COMPLETED"
+            elif compliance:
+                status = "PENDING"
+                conflict_code = "FUNCTIONAL_ROLE_REVIEW_REQUIRED"
+                sync_status = "NOT_REQUIRED"
+                event_type = "REGISTRATION_REVIEW_REQUIRED"
+            else:
+                # Uma identidade de visitante é útil para suporte e auditoria, mas não
+                # representa ingresso na corporação. Sem candidatura ou cargo funcional
+                # monitorado, o fluxo termina aqui e nunca entra na fila de novos membros.
+                status = "REGISTERED"
+                tier = "REGISTERED_VISITOR"
+                sync_status = "PENDING"
+                event_type = "REGISTRATION_COMPLETED"
 
             record = await self._upsert(
                 connection,
@@ -1483,6 +1506,12 @@ class RegistrationGateService:
     ):
         if not reason.strip():
             raise ValidationError("Informe o motivo da aprovação.")
+        preliminary = await self.get(registration_id)
+        if not preliminary:
+            raise NotFoundError("Cadastro não encontrado.")
+        companion_role_id = await self.settings.get(
+            int(preliminary["guild_id"]), "companion_role_id"
+        )
         now = utc_now_ms()
         async with self.database.transaction() as connection:
             cursor = await connection.execute(
@@ -1495,11 +1524,58 @@ class RegistrationGateService:
                 raise ConflictError("Este cadastro não está disponível para aprovação.")
             if record["conflict_member_id"]:
                 raise ConflictError("Use o vínculo ao perfil existente para resolver este conflito.")
-            rank_cursor = await connection.execute(
-                "SELECT id, name FROM ranks WHERE guild_id=? AND active=1 ORDER BY level LIMIT 1",
-                (record["guild_id"],),
+            compliance_cursor = await connection.execute(
+                """
+                SELECT c.*, r.id AS assigned_rank_id, r.name AS assigned_rank_name
+                FROM rank_registration_compliance c
+                LEFT JOIN ranks r
+                  ON r.guild_id=c.guild_id AND r.discord_role_id=c.rank_role_id AND r.active=1
+                WHERE c.guild_id=? AND c.discord_id=?
+                  AND c.status IN ('PENDING','EXPIRING')
+                ORDER BY CASE WHEN r.id IS NULL THEN 1 ELSE 0 END, c.detected_at, c.id
+                LIMIT 1
+                """,
+                (record["guild_id"], record["discord_id"]),
             )
-            rank = await rank_cursor.fetchone()
+            compliance = await compliance_cursor.fetchone()
+            recruitment_approved = None
+            if record["recruitment_application_id"]:
+                recruitment_cursor = await connection.execute(
+                    """
+                    SELECT id FROM recruitment_applications
+                    WHERE id=? AND guild_id=? AND discord_id=? AND status='APPROVED'
+                    """,
+                    (
+                        record["recruitment_application_id"],
+                        record["guild_id"],
+                        record["discord_id"],
+                    ),
+                )
+                recruitment_approved = await recruitment_cursor.fetchone()
+            if not compliance and not recruitment_approved:
+                raise ConflictError(
+                    "Visitantes não podem ser convertidos em membros pela Portaria. "
+                    "Use o processo seletivo ou valide um vínculo funcional reconhecido."
+                )
+
+            is_companion = bool(
+                compliance
+                and companion_role_id
+                and int(compliance["rank_role_id"]) == int(companion_role_id)
+                and compliance["assigned_rank_id"] is None
+            )
+            rank_id = int(compliance["assigned_rank_id"]) if (
+                compliance and compliance["assigned_rank_id"] is not None
+            ) else None
+            rank_name = str(compliance["assigned_rank_name"] or "") if compliance else ""
+            if recruitment_approved and rank_id is None and not is_companion:
+                rank_cursor = await connection.execute(
+                    "SELECT id, name FROM ranks WHERE guild_id=? AND active=1 ORDER BY level LIMIT 1",
+                    (record["guild_id"],),
+                )
+                rank = await rank_cursor.fetchone()
+                rank_id = int(rank["id"]) if rank else None
+                rank_name = str(rank["name"]) if rank else ""
             try:
                 member_cursor = await connection.execute(
                     """
@@ -1514,7 +1590,7 @@ class RegistrationGateService:
                         discord_nick,
                         record["mta_nick"],
                         record["bgr_id"],
-                        rank["id"] if rank else None,
+                        rank_id,
                         now,
                         now,
                         now,
@@ -1534,7 +1610,11 @@ class RegistrationGateService:
                 WHERE id=? AND status IN ('PENDING','REQUIRES_REVIEW')
                 """,
                 (
-                    "RECRUIT" if rank and "RECRUTA" in str(rank["name"]).upper() else "MEMBER",
+                    (
+                        "REGISTERED_VISITOR"
+                        if is_companion
+                        else "RECRUIT" if "RECRUTA" in rank_name.upper() else "MEMBER"
+                    ),
                     member_id,
                     now,
                     now,
@@ -1544,7 +1624,10 @@ class RegistrationGateService:
                     registration_id,
                 ),
             )
-            await self._create_onboarding_checklist(connection, int(record["guild_id"]), member_id)
+            if not is_companion:
+                await self._create_onboarding_checklist(
+                    connection, int(record["guild_id"]), member_id
+                )
             await self._enqueue_member_sync(
                 connection,
                 int(record["guild_id"]),
@@ -1559,14 +1642,21 @@ class RegistrationGateService:
                     event_type=event,
                     actor_id=reviewer_id,
                     source="ADMIN_APPROVAL",
-                    metadata={"member_id": member_id},
+                    metadata={
+                        "member_id": member_id,
+                        "source": "COMPANION_ROLE" if is_companion else "AUTHORIZED_MEMBERSHIP",
+                    },
                 )
             await self.audit.record(
                 int(record["guild_id"]),
                 "REGISTRATION_APPROVED",
                 actor_id=reviewer_id,
                 target_id=int(record["discord_id"]),
-                after={"registration_id": registration_id, "member_id": member_id},
+                after={
+                    "registration_id": registration_id,
+                    "member_id": member_id,
+                    "source": "COMPANION_ROLE" if is_companion else "AUTHORIZED_MEMBERSHIP",
+                },
                 reason=reason,
                 connection=connection,
             )

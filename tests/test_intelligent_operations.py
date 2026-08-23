@@ -191,6 +191,30 @@ async def test_patrol_lifecycle_history_and_private_feedback(service_bundle):
 
 
 @pytest.mark.asyncio
+async def test_live_voice_presence_does_not_create_false_patrol_history(service_bundle):
+    operations = service_bundle["operations"]
+    await prepare_patrol(service_bundle)
+    await prepare_ranked_member(service_bundle, DISCORD_ID, name="Paiva")
+    await prepare_ranked_member(service_bundle, 457, name="Lopes")
+
+    count = await operations.sync_patrol_voice_presence(
+        GUILD_ID,
+        {ACTIVE_A: [(DISCORD_ID, "Paiva"), (457, "Lopes")], ACTIVE_B: []},
+    )
+    assert count == 2
+    overview = await operations.active_patrol_overview(GUILD_ID)
+    assert len(overview) == 1
+    assert overview[0]["origin"] == "DISCORD_LIVE"
+    assert overview[0]["member_count"] == 2
+    assert overview[0]["member_names"] == "Choque_User | Lopes"
+    assert await service_bundle["database"].fetchone("SELECT id FROM patrols") is None
+
+    service_bundle["clock"].advance(5_000)
+    await operations.sync_patrol_voice_presence(GUILD_ID, {ACTIVE_A: [], ACTIVE_B: []})
+    assert await operations.active_patrol_overview(GUILD_ID) == []
+
+
+@pytest.mark.asyncio
 async def test_patrol_commander_prefers_higher_rank_deterministically(service_bundle):
     operations = service_bundle["operations"]
     await prepare_patrol(service_bundle)

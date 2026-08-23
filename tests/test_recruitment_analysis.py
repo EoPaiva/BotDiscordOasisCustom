@@ -386,6 +386,44 @@ async def test_retry_is_bounded_and_backoff_does_not_loop_forever(analysis_bundl
 
 
 @pytest.mark.asyncio
+async def test_failed_job_is_retired_when_a_newer_manual_job_is_active(analysis_bundle):
+    settings = analysis_bundle["settings"]
+    provider = analysis_bundle["provider"]
+    analysis = analysis_bundle["analysis"]
+    database = analysis_bundle["database"]
+    clock = analysis_bundle["clock"]
+    await settings.set(GUILD_ID, "recruitment_ai_enabled", True, ADMIN_ID)
+    application = await submitted_application(analysis_bundle)
+    provider.error = AnalysisUnavailableError("falha sintética")
+    assert await analysis.process_pending() == 0
+    failed = await database.fetchone(
+        "SELECT id FROM recruitment_analysis_jobs WHERE application_id=?",
+        (application["id"],),
+    )
+    await database.execute(
+        "UPDATE recruitment_analysis_jobs SET available_at=? WHERE id=?",
+        (clock(), failed["id"]),
+    )
+    provider.error = None
+    manual_id = await analysis.enqueue(
+        GUILD_ID,
+        int(application["id"]),
+        requested_by=ADMIN_ID,
+        request_reason="MANUAL",
+    )
+    assert manual_id != failed["id"]
+    assert await analysis.process_pending() == 1
+    jobs = await database.fetchall(
+        "SELECT id,status,last_error_code FROM recruitment_analysis_jobs ORDER BY id"
+    )
+    assert [(row["id"], row["status"]) for row in jobs] == [
+        (failed["id"], "OUTDATED"),
+        (manual_id, "COMPLETED"),
+    ]
+    assert jobs[0]["last_error_code"] == "SUPERSEDED_BY_ACTIVE_JOB"
+
+
+@pytest.mark.asyncio
 async def test_identical_manual_reanalysis_reuses_cached_immutable_result(analysis_bundle):
     settings = analysis_bundle["settings"]
     analysis = analysis_bundle["analysis"]

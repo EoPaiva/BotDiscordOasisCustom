@@ -2562,6 +2562,22 @@ CREATE INDEX ix_rank_registration_compliance_due
 ON rank_registration_compliance(guild_id, status, due_at, next_reminder_at, id);
 """
 
+MIGRATION_025 = """
+CREATE TABLE patrol_voice_presence (
+    guild_id INTEGER NOT NULL,
+    voice_channel_id INTEGER NOT NULL,
+    discord_id INTEGER NOT NULL,
+    member_id INTEGER REFERENCES members(id) ON DELETE SET NULL,
+    display_name TEXT NOT NULL,
+    joined_at INTEGER NOT NULL,
+    observed_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, voice_channel_id, discord_id)
+);
+
+CREATE INDEX ix_patrol_voice_presence_observed
+ON patrol_voice_presence(guild_id, observed_at, voice_channel_id);
+"""
+
 MIGRATIONS = (
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -2587,6 +2603,7 @@ MIGRATIONS = (
     (22, MIGRATION_022),
     (23, MIGRATION_023),
     (24, MIGRATION_024),
+    (25, MIGRATION_025),
 )
 
 

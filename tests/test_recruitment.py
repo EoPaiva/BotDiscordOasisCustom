@@ -92,11 +92,11 @@ async def _start(
 
 
 @pytest.mark.asyncio
-async def test_defaults_seed_45_questions_and_24_question_snapshot(recruitment_bundle) -> None:
+async def test_defaults_seed_short_roleplay_form(recruitment_bundle) -> None:
     service = recruitment_bundle["service"]
     database = recruitment_bundle["database"]
-    assert len(DEFAULT_QUESTIONS) == 45
-    assert sum(group[3] for group in GROUPS) == 24
+    assert len(DEFAULT_QUESTIONS) == 10
+    assert sum(group[3] for group in GROUPS) == 10
     questions = await database.fetchone(
         "SELECT COUNT(*) AS total FROM recruitment_questions WHERE guild_id=?",
         (GUILD_ID,),
@@ -106,8 +106,12 @@ async def test_defaults_seed_45_questions_and_24_question_snapshot(recruitment_b
         "SELECT COUNT(*) AS total FROM recruitment_application_questions WHERE application_id=?",
         (application["id"],),
     )
-    assert int(questions["total"]) == 45
-    assert int(assigned["total"]) == 24
+    assert int(questions["total"]) == 10
+    assert int(assigned["total"]) == 10
+    assert all(
+        question["min_length"] in {None, 10}
+        for question in DEFAULT_QUESTIONS
+    )
     assert application["protocol"].startswith("AL-")
     assert application["guild_membership_verified_at"]
     assert application["consent_accepted_at"]
@@ -251,7 +255,7 @@ async def test_double_question_submit_is_idempotent(recruitment_bundle) -> None:
         CANDIDATE_ID,
         int(application["id"]),
         int(ready["id"]),
-        answer="Nick_Test",
+        answer="Quero atuar com disciplina na CHOQUE.",
         question_token=str(started["question_token"]),
         submit=True,
     )
@@ -260,7 +264,7 @@ async def test_double_question_submit_is_idempotent(recruitment_bundle) -> None:
         CANDIDATE_ID,
         int(application["id"]),
         int(ready["id"]),
-        answer="Nick_Test",
+        answer="Quero atuar com disciplina na CHOQUE.",
         question_token=str(started["question_token"]),
         submit=True,
     )
@@ -485,18 +489,18 @@ async def test_group_distribution_is_versioned_and_new_form_changes_only_new_app
     service = recruitment_bundle["service"]
     database = recruitment_bundle["database"]
     first = await _start(service)
-    identification = await database.fetchone(
-        "SELECT * FROM recruitment_question_groups WHERE guild_id=? AND code='IDENTIFICATION'",
+    roleplay = await database.fetchone(
+        "SELECT * FROM recruitment_question_groups WHERE guild_id=? AND code='ROLEPLAY'",
         (GUILD_ID,),
     )
     await service.update_group(
         GUILD_ID,
-        int(identification["id"]),
+        int(roleplay["id"]),
         ADMIN_ID,
         {
-            "name": identification["name"],
-            "position": identification["position"],
-            "questions_per_application": 2,
+            "name": roleplay["name"],
+            "position": roleplay["position"],
+            "questions_per_application": 1,
             "active": True,
         },
     )
@@ -515,8 +519,8 @@ async def test_group_distribution_is_versioned_and_new_form_changes_only_new_app
         "SELECT COUNT(*) AS total FROM recruitment_application_questions WHERE application_id=?",
         (second["id"],),
     )
-    assert int(first_total["total"]) == 24
-    assert int(second_total["total"]) == 23
+    assert int(first_total["total"]) == 10
+    assert int(second_total["total"]) == 9
 
 
 @pytest.mark.asyncio
@@ -736,16 +740,21 @@ async def test_recruitment_notification_outbox_retries_without_new_event(
         return 77, 88
 
     monkeypatch.setattr(worker, "_dispatch_recruitment", dispatch_success)
-    assert await worker.process_recruitment_pending() == 1
-    completed = await database.fetchone("SELECT * FROM recruitment_notification_outbox")
+    assert await worker.process_recruitment_pending() == 2
+    completed = await database.fetchone(
+        """
+        SELECT * FROM recruitment_notification_outbox
+        WHERE event_type='RECRUITMENT_APPLICATION_SUBMITTED'
+        """
+    )
     total = await database.fetchone(
         "SELECT COUNT(*) AS total FROM recruitment_notification_outbox"
     )
     assert completed["status"] == "COMPLETED"
     assert completed["attempts"] == 2
     assert (completed["delivery_channel_id"], completed["delivery_message_id"]) == (77, 88)
-    assert int(total["total"]) == 1
-    assert calls == 2
+    assert int(total["total"]) == 2
+    assert calls == 4
 
 
 @pytest.mark.asyncio
@@ -769,6 +778,36 @@ async def test_recruitment_notification_embed_uses_central_branding(
     )
 
     assert embed.footer.text == Branding().footer
+
+
+@pytest.mark.asyncio
+async def test_public_recruitment_embed_exposes_only_protocol_and_status(
+    recruitment_bundle,
+) -> None:
+    worker = WebActionWorker(
+        recruitment_bundle["database"],
+        None,
+        recruitment_bundle["audit"],
+        object(),  # type: ignore[arg-type]
+    )
+    embed = worker._recruitment_public_embed(
+        {
+            "id": 7,
+            "protocol": "AL-00007",
+            "status": "UNDER_REVIEW",
+            "candidate_nick": "NÃO DEVE APARECER",
+            "discord_username": "privado",
+            "bgr_id": "123456",
+        },
+        72,
+    )
+
+    rendered = str(embed.to_dict())
+    assert "AL-00007" in rendered
+    assert "Em análise" in rendered
+    assert "NÃO DEVE APARECER" not in rendered
+    assert "privado" not in rendered
+    assert "123456" not in rendered
 
 
 @pytest.mark.asyncio

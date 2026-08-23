@@ -5,6 +5,7 @@ import io
 import json
 import logging
 from contextlib import suppress
+from urllib.parse import urlsplit
 
 import discord
 
@@ -588,6 +589,8 @@ class WebActionWorker:
             raise RuntimeError("Guild indisponível no Discord")
         event_type = str(row["event_type"])
         payload = json.loads(row["payload_json"])
+        if event_type == "RECRUITMENT_PUBLIC_STATUS":
+            return await self._dispatch_recruitment_public_status(row, application)
         member = guild.get_member(int(application["discord_id"]))
         if not member:
             try:
@@ -633,18 +636,58 @@ class WebActionWorker:
                     if role and role in member.roles:
                         await member.remove_roles(role, reason="Decisão final do recrutamento")
                 title = "Candidatura aprovada" if approved else "Resultado da candidatura"
-                message = await member.send(
-                    embed=self._recruitment_embed(
-                        title,
-                        application,
-                        str(
-                            application["candidate_message"] or "Consulte seu protocolo no portal."
-                        ),
-                        approved=approved,
-                    )
+                description = str(
+                    application["candidate_message"] or "Consulte seu protocolo no portal."
                 )
+                if approved:
+                    tag_channel_id = await self.audit.settings.get(
+                        int(row["guild_id"]), "recruitment_tag_setup_channel_id"
+                    )
+                    if tag_channel_id:
+                        tag_channel = guild.get_channel(int(tag_channel_id))
+                        if not isinstance(tag_channel, discord.TextChannel):
+                            try:
+                                tag_channel = await self.bot.fetch_channel(int(tag_channel_id))
+                            except discord.DiscordException:
+                                tag_channel = None
+                        if isinstance(tag_channel, discord.TextChannel):
+                            try:
+                                await tag_channel.set_permissions(
+                                    member,
+                                    view_channel=True,
+                                    send_messages=True,
+                                    read_message_history=True,
+                                    attach_files=True,
+                                    embed_links=True,
+                                    reason="Candidato aprovado • acesso à setagem",
+                                )
+                            except discord.DiscordException:
+                                LOGGER.exception(
+                                    "Falha ao liberar canal de setagem para o candidato %s",
+                                    member.id,
+                                )
+                        description += (
+                            "\n\n**Próxima ordem:** acesse "
+                            f"<#{int(tag_channel_id)}> e informe seu **ID**, "
+                            "**horário disponível** e **localização no jogo** para a setagem."
+                        )
+                try:
+                    message = await member.send(
+                        embed=self._recruitment_embed(
+                            title,
+                            application,
+                            description,
+                            approved=approved,
+                        )
+                    )
+                except discord.Forbidden:
+                    return await self._recruitment_dm_fallback(
+                        row, application, "Mensagens privadas bloqueadas pelo candidato."
+                    )
                 return message.channel.id, message.id
-            raise RuntimeError("Candidato indisponível para notificação de resultado")
+            return await self._recruitment_dm_fallback(
+                row, application, "Candidato não está disponível no servidor."
+            )
         if event_type in {
             "RECRUITMENT_APPLICATION_APPROVED_LOG",
             "RECRUITMENT_APPLICATION_REJECTED_LOG",
@@ -665,13 +708,63 @@ class WebActionWorker:
                 channel = await self.bot.fetch_channel(int(channel_id))
             if not isinstance(channel, discord.TextChannel):
                 raise RuntimeError("Canal de resultado não é textual")
-            message = await channel.send(
-                embed=self._recruitment_embed(
-                    "Candidatura aprovada" if approved else "Candidatura encerrada",
-                    application,
-                    "Decisão humana registrada. Consulte o dossiê protegido para os detalhes.",
-                    approved=approved,
+            review_sla_hours = await self.audit.settings.get(
+                int(row["guild_id"]), "recruitment_review_sla_hours", 72
+            )
+            mention = f"<@{int(application['discord_id'])}>" if approved else None
+            embed = self._recruitment_public_embed(application, int(review_sla_hours))
+            allowed_mentions = (
+                discord.AllowedMentions(
+                    everyone=False,
+                    roles=False,
+                    users=[discord.Object(id=int(application["discord_id"]))],
+                    replied_user=False,
                 )
+                if approved
+                else discord.AllowedMentions.none()
+            )
+            previous = await self.database.fetchone(
+                """
+                SELECT delivery_channel_id, delivery_message_id
+                FROM recruitment_notification_outbox
+                WHERE guild_id=? AND application_id=? AND event_type=?
+                  AND status='COMPLETED' AND delivery_message_id IS NOT NULL
+                  AND id<>?
+                ORDER BY processed_at DESC, id DESC LIMIT 1
+                """,
+                (
+                    int(row["guild_id"]),
+                    int(application["id"]),
+                    event_type,
+                    int(row["id"]),
+                ),
+            )
+            if previous:
+                previous_channel = self.bot.get_channel(
+                    int(previous["delivery_channel_id"])
+                )
+                if not isinstance(previous_channel, discord.TextChannel):
+                    previous_channel = await self.bot.fetch_channel(
+                        int(previous["delivery_channel_id"])
+                    )
+                if isinstance(previous_channel, discord.TextChannel):
+                    try:
+                        previous_message = await previous_channel.fetch_message(
+                            int(previous["delivery_message_id"])
+                        )
+                    except discord.NotFound:
+                        pass
+                    else:
+                        await previous_message.edit(
+                            content=mention,
+                            embed=embed,
+                            allowed_mentions=allowed_mentions,
+                        )
+                        return previous_message.channel.id, previous_message.id
+            message = await channel.send(
+                content=mention,
+                embed=embed,
+                allowed_mentions=allowed_mentions,
             )
             return message.channel.id, message.id
         if event_type not in {
@@ -682,6 +775,7 @@ class WebActionWorker:
             raise ValueError(f"Evento de recrutamento não suportado: {event_type}")
         channel_id = None
         for key in (
+            "recruitment_review_channel_id",
             "recruitment_notification_channel_id",
             "recruitment_queue_channel_id",
             "personnel_admin_channel_id",
@@ -700,14 +794,24 @@ class WebActionWorker:
         view = None
         public_url = await self.audit.settings.get(int(row["guild_id"]), "recruitment_public_url")
         if isinstance(public_url, str) and public_url.startswith(("https://", "http://")):
+            parsed_url = urlsplit(public_url)
             view = discord.ui.View()
-            view.add_item(
-                discord.ui.Button(
-                    label="Analisar no painel",
-                    style=discord.ButtonStyle.link,
-                    url=f"{public_url.rstrip('/')}/recruitment/{application['id']}",
-                )
+            dossier_url = (
+                f"{parsed_url.scheme}://{parsed_url.netloc}/recruitment/{application['id']}"
             )
+            for label, anchor in (
+                ("Abrir dossiê", ""),
+                ("Adicionar nota", "#notas"),
+                ("Entrevista", "#entrevista"),
+                ("Decidir", "#decisao"),
+            ):
+                view.add_item(
+                    discord.ui.Button(
+                        label=label,
+                        style=discord.ButtonStyle.link,
+                        url=f"{dossier_url}{anchor}",
+                    )
+                )
         stale = event_type == "RECRUITMENT_APPLICATION_STALE"
         analysis_completed = event_type == "RECRUITMENT_ANALYSIS_COMPLETED"
         embed = self._recruitment_embed(
@@ -778,7 +882,164 @@ class WebActionWorker:
                     value=str(analysis["summary"])[:1024] or "Resumo indisponível.",
                     inline=False,
                 )
-        message = await channel.send(embed=embed, view=view, file=attachment)
+        mention_content = None
+        allowed_mentions = discord.AllowedMentions.none()
+        if event_type in {
+            "RECRUITMENT_APPLICATION_SUBMITTED",
+            "RECRUITMENT_APPLICATION_STALE",
+        }:
+            staff_rows = await self.database.fetchall(
+                """
+                SELECT DISTINCT discord_role_id FROM discord_role_mappings
+                WHERE guild_id=? AND mapping_type='POSITION' AND enabled=1
+                  AND internal_code IN ('RECRUITMENT_LEAD','RECRUITER')
+                ORDER BY priority DESC, discord_role_id
+                """,
+                (int(row["guild_id"]),),
+            )
+            staff_role_ids = [
+                int(item["discord_role_id"])
+                for item in staff_rows
+                if guild.get_role(int(item["discord_role_id"])) is not None
+            ]
+            if staff_role_ids:
+                mention_content = "🔔 " + " ".join(
+                    f"<@&{role_id}>" for role_id in staff_role_ids
+                )
+                allowed_mentions = discord.AllowedMentions(
+                    everyone=False,
+                    users=False,
+                    roles=[discord.Object(id=role_id) for role_id in staff_role_ids],
+                    replied_user=False,
+                )
+        message = await channel.send(
+            content=mention_content,
+            embed=embed,
+            view=view,
+            file=attachment,
+            allowed_mentions=allowed_mentions,
+        )
+        return message.channel.id, message.id
+
+    async def _dispatch_recruitment_public_status(
+        self,
+        row,
+        application,
+    ) -> tuple[int | None, int | None]:
+        guild_id = int(row["guild_id"])
+        channel_id = await self.audit.settings.get(
+            guild_id, "recruitment_public_status_channel_id"
+        )
+        if not channel_id:
+            raise RuntimeError("Canal público de candidaturas não configurado")
+        channel = self.bot.get_channel(int(channel_id))
+        if not isinstance(channel, discord.TextChannel):
+            channel = await self.bot.fetch_channel(int(channel_id))
+        if not isinstance(channel, discord.TextChannel):
+            raise RuntimeError("Canal público de candidaturas não é textual")
+        review_sla_hours = int(
+            await self.audit.settings.get(guild_id, "recruitment_review_sla_hours", 72)
+        )
+        embed = self._recruitment_public_embed(application, review_sla_hours)
+        approved = str(application["status"]) == "APPROVED"
+        mention = f"<@{int(application['discord_id'])}>" if approved else None
+        allowed_mentions = (
+            discord.AllowedMentions(
+                everyone=False,
+                roles=False,
+                users=[discord.Object(id=int(application["discord_id"]))],
+                replied_user=False,
+            )
+            if approved
+            else discord.AllowedMentions.none()
+        )
+        view = None
+        public_url = await self.audit.settings.get(guild_id, "recruitment_public_url")
+        if isinstance(public_url, str) and public_url.startswith(("https://", "http://")):
+            parsed_url = urlsplit(public_url)
+            status_url = f"{parsed_url.scheme}://{parsed_url.netloc}/minha-candidatura"
+            view = discord.ui.View()
+            view.add_item(
+                discord.ui.Button(
+                    label="Acompanhar candidatura",
+                    style=discord.ButtonStyle.link,
+                    url=status_url,
+                )
+            )
+        previous = await self.database.fetchone(
+            """
+            SELECT delivery_channel_id, delivery_message_id
+            FROM recruitment_notification_outbox
+            WHERE guild_id=? AND application_id=?
+              AND event_type='RECRUITMENT_PUBLIC_STATUS'
+              AND status='COMPLETED' AND delivery_message_id IS NOT NULL
+              AND id<>?
+            ORDER BY processed_at DESC, id DESC LIMIT 1
+            """,
+            (guild_id, int(application["id"]), int(row["id"])),
+        )
+        if previous:
+            previous_channel = self.bot.get_channel(int(previous["delivery_channel_id"]))
+            if not isinstance(previous_channel, discord.TextChannel):
+                previous_channel = await self.bot.fetch_channel(
+                    int(previous["delivery_channel_id"])
+                )
+            if isinstance(previous_channel, discord.TextChannel):
+                try:
+                    message = await previous_channel.fetch_message(
+                        int(previous["delivery_message_id"])
+                    )
+                except discord.NotFound:
+                    pass
+                else:
+                    await message.edit(
+                        content=mention,
+                        embed=embed,
+                        view=view,
+                        allowed_mentions=allowed_mentions,
+                    )
+                    return message.channel.id, message.id
+        message = await channel.send(
+            content=mention,
+            embed=embed,
+            view=view,
+            allowed_mentions=allowed_mentions,
+        )
+        return message.channel.id, message.id
+
+    async def _recruitment_dm_fallback(
+        self,
+        row,
+        application,
+        reason: str,
+    ) -> tuple[int | None, int | None]:
+        guild_id = int(row["guild_id"])
+        channel_id = await self.audit.settings.get(guild_id, "recruitment_review_channel_id")
+        if not channel_id:
+            raise RuntimeError(f"Resultado não entregue por DM: {reason}")
+        channel = self.bot.get_channel(int(channel_id))
+        if not isinstance(channel, discord.TextChannel):
+            channel = await self.bot.fetch_channel(int(channel_id))
+        if not isinstance(channel, discord.TextChannel):
+            raise RuntimeError(f"Resultado não entregue por DM: {reason}")
+        await self.audit.record(
+            guild_id,
+            "RECRUITMENT_RESULT_DM_UNDELIVERABLE",
+            target_id=int(application["discord_id"]),
+            after={"application_id": int(application["id"]), "reason": reason},
+            deliver_immediately=False,
+        )
+        embed = self._recruitment_embed(
+            "Entrega privada pendente",
+            application,
+            f"{reason} O resultado administrativo foi preservado; contate o candidato pelo servidor.",
+            approved=str(application["status"]) == "APPROVED",
+        )
+        message = await channel.send(
+            content=f"⚠️ <@{int(application['discord_id'])}>",
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
         return message.channel.id, message.id
 
     def _recruitment_embed(
@@ -799,5 +1060,82 @@ class WebActionWorker:
         embed.add_field(name="Protocolo", value=str(application["protocol"]), inline=True)
         embed.add_field(name="Candidato", value=str(application["candidate_nick"]), inline=True)
         embed.add_field(name="ID BGR", value=str(application["bgr_id"]), inline=True)
+        embed.set_footer(text=self.audit.branding.footer)
+        return embed
+
+    def _recruitment_public_embed(
+        self,
+        application,
+        review_sla_hours: int,
+    ) -> discord.Embed:
+        data = dict(application)
+        status = str(data.get("status") or "SUBMITTED")
+        labels = {
+            "SUBMITTED": "Recebida",
+            "UNDER_REVIEW": "Em análise",
+            "INTERVIEW_PENDING": "Entrevista pendente",
+            "INTERVIEW_SCHEDULED": "Entrevista agendada",
+            "INTERVIEW_COMPLETED": "Entrevista concluída",
+            "FINAL_REVIEW": "Decisão final",
+            "APPROVED": "Aprovada",
+            "REJECTED": "Reprovada",
+        }
+        if status == "APPROVED":
+            color = 0x71906D
+        elif status == "REJECTED":
+            color = 0xA94F43
+        else:
+            color = self.audit.branding.embed_color
+        if status == "APPROVED":
+            title = "🎖️ ALISTAMENTO APROVADO"
+            description = (
+                "**MISSÃO CUMPRIDA.** O protocolo concluiu o formulário com aprovação. "
+                "A próxima orientação será comunicada pelos responsáveis do Recrutamento."
+            )
+        elif status == "REJECTED":
+            title = "📋 PROCESSO SELETIVO ENCERRADO"
+            description = (
+                "O protocolo concluiu esta etapa sem aprovação. A decisão é registrada de "
+                "forma reservada e respeitosa; dados pessoais e pareceres não são publicados."
+            )
+        else:
+            title = "🛡️ ACOMPANHAMENTO DE ALISTAMENTO"
+            description = (
+                "Atualização pública e anonimizada. Dados pessoais e respostas "
+                "permanecem restritos à equipe responsável."
+            )
+        embed = discord.Embed(title=title, description=description, color=color)
+        embed.set_author(name="CHOQUE - BGR • COMANDO DE RECRUTAMENTO")
+        embed.add_field(name="Protocolo", value=str(data.get("protocol") or "—"), inline=True)
+        embed.add_field(name="Etapa", value=labels.get(status, status), inline=True)
+        final = status in {"APPROVED", "REJECTED"}
+        embed.add_field(
+            name="Prazo",
+            value=(
+                "Processo concluído"
+                if final
+                else f"Até {max(1, min(720, review_sla_hours))} horas para a primeira análise"
+            ),
+            inline=False,
+        )
+        if status == "APPROVED":
+            embed.add_field(
+                name="Candidato convocado",
+                value=f"<@{int(data['discord_id'])}>",
+                inline=False,
+            )
+            embed.add_field(
+                name="Ordem do dia",
+                value="🏅 Consulte sua mensagem privada e apresente-se no canal de setagem.",
+                inline=False,
+            )
+        elif status == "REJECTED":
+            embed.add_field(
+                name="Orientação",
+                value="Consulte o protocolo no portal para verificar o encerramento do processo.",
+                inline=False,
+            )
+        if self.audit.branding.logo_url:
+            embed.set_thumbnail(url=self.audit.branding.logo_url)
         embed.set_footer(text=self.audit.branding.footer)
         return embed

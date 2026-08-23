@@ -35,7 +35,7 @@ async def test_migration_copies_legacy_and_creates_pre_migration_backup(tmp_path
         row = await database.fetchone("SELECT value FROM legacy_value")
         version = await database.fetchone("SELECT MAX(version) AS version FROM schema_migrations")
         assert row["value"] == "preserved"
-        assert version["version"] == 24
+        assert version["version"] == 25
         assert target.with_suffix(".db.migration-backup").exists()
         assert legacy.exists()
     finally:
@@ -394,7 +394,7 @@ async def test_migration_nine_preserves_existing_tickets_and_allows_other_subjec
             """,
             (1, 3, '{"subject":"Dúvida","details":"Preciso de ajuda"}', 4, 4),
         )
-        assert version["version"] == 24
+        assert version["version"] == 25
         assert preserved["ticket_type"] == "REPORT"
         assert json.loads(preserved["payload_json"])["details"] == "legado"
         assert new_id > int(preserved["id"])

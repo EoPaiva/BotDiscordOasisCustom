@@ -23,7 +23,12 @@ export default async function RecruitmentAssessmentPage() {
       <header className="assessment-header"><Link href="/recrutamento"><span>CB</span><div><strong>AVALIAÇÃO DE ALISTAMENTO</strong><small>CHOQUE BGR • AMBIENTE CONTROLADO</small></div></Link><Link href="/minha-candidatura">Consultar protocolo</Link></header>
       <span aria-hidden="true" className="assessment-watermark">{current.application.protocol} • {identity.discordId.slice(-6)}</span>
       <div className="assessment-stage">
-        <CandidateQuestion applicationId={current.application.id} protocol={current.application.protocol} ready={ready} />
+        <CandidateQuestion
+          key={ready.complete ? `complete:${ready.application_version ?? "current"}` : `question:${ready.id}:${ready.status}`}
+          applicationId={current.application.id}
+          protocol={current.application.protocol}
+          ready={ready}
+        />
       </div>
     </main>
   );
