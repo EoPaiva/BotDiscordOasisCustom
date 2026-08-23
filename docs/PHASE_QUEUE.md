@@ -481,6 +481,8 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     poder fazer isso”. Confirmar se a intenção é **somente a conta proprietária** ou **todo o Alto
     Comando**. Até a resposta, preservar o RBAC atual e não adivinhar Discord ID nem retirar acesso.
 
-45. 🟢 **Checkpoint sanitizado no repositório privado.** Publicar o estado consolidado atual apenas
-    no remoto privado, depois de secret scan e revisão do diff; nunca enviar `.env`, token, bancos,
-    backups, logs ou dados pessoais e nunca empurrar estas mudanças para o remoto público.
+45. ✅ **Checkpoint sanitizado no repositório privado — concluído em 2026-08-23.** O remoto foi
+    verificado como privado antes da operação. Após `SECRET_SCAN_OK`, revisão dos 38 arquivos e gates
+    verdes, o estado consolidado foi enviado explicitamente somente para `private/main` no commit
+    `1fa51db`. `.env`, tokens, bancos, WAL/SHM, backups, logs e dados pessoais não entraram; o remoto
+    público não recebeu push.

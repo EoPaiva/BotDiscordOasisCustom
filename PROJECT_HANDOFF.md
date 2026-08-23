@@ -16,6 +16,8 @@
   suposição; a escolha foi colocada no fim da fila, sem bloquear trabalhos seguros.
 - Gates desta correção: **309 pytest**, **32 Vitest**, Ruff, compileall, `main.py --check`, scanner
   de segredos, ESLint, TypeScript e build. Discloud e Vercel voltaram online após o rollout.
+- O estado consolidado foi enviado somente ao repositório privado `EoPaiva/CHOQUE-BGR`, commit
+  `1fa51db`, após `SECRET_SCAN_OK` e revisão dos 38 arquivos. O remoto público não recebeu push.
 
 ## Medalhas removidas por decisão do proprietário — 2026-08-23
 
