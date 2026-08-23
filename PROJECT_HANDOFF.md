@@ -1,5 +1,30 @@
 # PROJECT HANDOFF
 
+## Jornada intuitiva de recrutamento e recuperação preventiva — 2026-08-23
+
+- O visitante encontra **Candidatar-me agora** diretamente na mensagem persistente `MEMBER`, na
+  Recepção, sem precisar procurar a categoria de Recrutamento. O mesmo botão abre o portal em um
+  único clique; `Realizar cadastro` ficou claramente reservado a aprovados, membros e vínculos já
+  reconhecidos.
+- A mensagem persistente `RECRUITMENT` foi editada no lugar com quatro passos objetivos, requisitos,
+  explicação do resultado e três ações: candidatura direta, acompanhamento direto e requisitos. Os
+  handlers antigos continuam registrados para compatibilidade com componentes anteriores.
+- A DM de entrada agora separa os caminhos “quero entrar” e “já fui aprovado”, com links diretos para
+  o recrutamento e para a Portaria. Falha de DM continua best-effort e nunca bloqueia o acesso.
+- `scripts/validate_live_phase11.py` confirmou no Discord as duas mensagens originais, textos novos,
+  três controles da Portaria, três ações do Recrutamento, sete configurações, módulos ativos e zero
+  comandos publicados.
+- O primeiro commit Discloud revelou que o pacote incluía indevidamente `data/*.db*` e sobrepôs o
+  SQLite remoto com uma cópia local antiga enquanto havia WAL ativo. A aplicação foi parada assim que
+  o erro foi detectado. O backup pré-deploy passou em `quick_check`, FK e migration 24, foi restaurado
+  atomicamente antes do startup e o runtime confirmou `DATABASE_RECOVERY_OK` e `CHECK_OK`.
+- `.discloudignore` agora exclui banco, WAL, SHM e candidato de recuperação. O launcher aceita um
+  arquivo explícito `recovery-once`, valida-o antes da troca, isola os arquivos incidentados e recusa
+  banco sem migrations ou com violação de integridade.
+- Evidência final: aplicação `choque-bgr-api` online, health HTTP 200, Gateway conectado, SQLite
+  `quick_check=ok`, FK=0, migration 24, **296 testes Python**, **29 testes web**, Ruff, compileall,
+  `main.py --check`, ESLint, TypeScript e build aprovados.
+
 ## Recrutamento público em produção — 2026-08-23
 
 - portal operacional: `https://web-plum-tau-82.vercel.app/recrutamento`, HTTP 200, campanha `OPEN`;

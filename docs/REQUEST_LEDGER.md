@@ -106,6 +106,7 @@ para a decisão arquitetural do Programa Web.
 | Simplificar Central Administrativa por categorias e explicar cada área | IMPLEMENTADO e validado ao vivo; cinco ações raiz e doze funções preservadas | `docs/PHASE_QUEUE.md`, `cogs/personnel_commands.py` |
 | Auditar botões e ações implementadas sem caminho visível | CONCLUÍDO; item 28 | `docs/INTERACTION_ROUTE_AUDIT.md` |
 | Empacotamento e publicação Discloud Diamond | CONCLUÍDO operacionalmente; ZIP sanitizado validado e runtime ativo. Rotação de credenciais continua dívida do gate de segurança | `docs/PHASE_QUEUE.md` |
+| Entrada de visitantes sem dúvida ou procura de canais | CONCLUÍDO; candidatura em um clique na Recepção e no Recrutamento, Portaria separada, DM orientativa e validação ao vivo | `cogs/member_commands.py`, `cogs/ticket_commands.py`, `cogs/registration_gate_system.py`, `scripts/validate_live_phase11.py` |
 
 ## Recrutamento público ativado — 2026-08-23
 
@@ -118,6 +119,20 @@ para a decisão arquitetural do Programa Web.
   central `branding.footer`, possui teste de regressão e já está ativo na Discloud.
 - O Robô Analista permanece bloqueado somente pela ausência de provider/credencial no runtime. A
   decisão humana e todo o recrutamento básico continuam operacionais sem classificação fabricada.
+
+## Entrada pública simplificada — 2026-08-23
+
+- Pedido: quem entra no Discord sem ser membro deve localizar imediatamente `Candidatar-me`, abrir o
+  processo e enviar a candidatura sem navegar por vários canais.
+- Entrega: a mensagem `MEMBER` da Recepção ganhou link direto para o portal e explica que a Portaria
+  é somente para aprovados/vínculos existentes; `RECRUITMENT` ganhou candidatura e acompanhamento
+  diretos, requisitos e sequência de quatro passos; a DM de entrada repete os dois caminhos.
+- Preservação: mensagens, canais, IDs, históricos, posições e overwrites não foram substituídos. Os
+  custom IDs anteriores continuam registrados para compatibilidade; apenas os CTAs públicos ativos
+  passaram a links de um clique.
+- Rollout: o incidente de WAL causado pelo empacotamento de `data/*.db*` foi contido sem prosseguir
+  com escritas, restaurado a partir do backup pré-deploy e eliminado da política de pacote. O banco
+  remoto terminou íntegro e o validador REST confirmou as superfícies reais.
 
 ## Regras transversais da fila
 

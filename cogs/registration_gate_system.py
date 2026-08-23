@@ -617,16 +617,64 @@ class RegistrationGateSystem(commands.Cog):
     async def _welcome(self, member: discord.Member) -> None:
         if not await self.services.settings.get(member.guild.id, "registration_dm_enabled", True):
             return
-        channel_id = await self.services.settings.get(
+        registration_channel_id = await self.services.settings.get(
             member.guild.id, "registration_panel_channel_id"
         )
-        channel = member.guild.get_channel(int(channel_id)) if channel_id else None
-        destination = channel.mention if isinstance(channel, discord.TextChannel) else "a Portaria Digital"
+        recruitment_channel_id = await self.services.settings.get(
+            member.guild.id, "recruitment_panel_channel_id"
+        )
+        public_url = await self.services.settings.get(member.guild.id, "recruitment_public_url")
+        registration_channel = (
+            member.guild.get_channel(int(registration_channel_id))
+            if registration_channel_id
+            else None
+        )
+        recruitment_channel = (
+            member.guild.get_channel(int(recruitment_channel_id))
+            if recruitment_channel_id
+            else None
+        )
+        registration_destination = (
+            registration_channel.mention
+            if isinstance(registration_channel, discord.TextChannel)
+            else "a Portaria Digital"
+        )
+        recruitment_destination = (
+            recruitment_channel.mention
+            if isinstance(recruitment_channel, discord.TextChannel)
+            else "o painel de Recrutamento"
+        )
+        view = discord.ui.View(timeout=900)
+        if isinstance(public_url, str) and public_url.startswith("https://"):
+            view.add_item(
+                discord.ui.Button(
+                    label="Candidatar-me agora",
+                    emoji="🪖",
+                    style=discord.ButtonStyle.link,
+                    url=f"{public_url.rstrip('/')}/recrutamento",
+                )
+            )
+        if isinstance(registration_channel, discord.TextChannel):
+            view.add_item(
+                discord.ui.Button(
+                    label="Já fui aprovado • Portaria",
+                    emoji="🪪",
+                    style=discord.ButtonStyle.link,
+                    url=(
+                        f"https://discord.com/channels/{member.guild.id}/"
+                        f"{registration_channel.id}"
+                    ),
+                )
+            )
         try:
             await member.send(
-                "🛡️ **CHOQUE - BGR • Portaria Digital**\n"
-                "Seu acesso está temporariamente limitado. "
-                f"Conclua sua identificação em {destination}."
+                "🪖 **BEM-VINDO À CHOQUE - BGR**\n\n"
+                "**Quer entrar para a organização?**\n"
+                f"Comece em {recruitment_destination} e selecione **Candidatar-me agora**.\n\n"
+                "**Já é membro ou já foi aprovado?**\n"
+                f"Conclua sua identificação em {registration_destination}.\n\n"
+                "Não use a Portaria para iniciar uma candidatura nova.",
+                view=view if view.children else None,
             )
         except (discord.Forbidden, discord.HTTPException):
             pass

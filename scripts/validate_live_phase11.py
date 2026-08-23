@@ -10,9 +10,12 @@ from scripts.validate_live_phase5 import discord_get
 from scripts.validate_live_phase6 import components, panel
 
 EXPECTED_COMPONENTS = {
+    "MEMBER": {
+        "choque:member:register:v1",
+        "choque:registration:status:v1",
+        "choque:registration:help:v1",
+    },
     "RECRUITMENT": {
-        "choque:recruitment:apply:v1",
-        "choque:recruitment:mine:v1",
         "choque:recruitment:requirements:v1",
     },
     "TICKET": {
@@ -93,16 +96,54 @@ def main() -> int:
 
     failures: list[str] = []
     found_components: dict[str, set[str]] = {}
+    found_links: dict[str, set[str]] = {}
     for panel_type, expected in EXPECTED_COMPONENTS.items():
         channel_id, message_id = panel_rows[panel_type]
         message = discord_get(f"/channels/{channel_id}/messages/{message_id}", config.token)
+        message_components = components(message)
         custom_ids = {
-            item.get("custom_id") for item in components(message) if item.get("custom_id")
+            item.get("custom_id") for item in message_components if item.get("custom_id")
         }
+        links = {str(item["url"]) for item in message_components if item.get("url")}
         found_components[panel_type] = custom_ids
+        found_links[panel_type] = links
         missing = expected - custom_ids
         if missing:
             failures.append(f"{panel_type.lower()}_missing={sorted(missing)}")
+        embeds = message.get("embeds", [])
+        if panel_type == "MEMBER" and (
+            not embeds or "Candidatar-me agora" not in str(embeds[0].get("description", ""))
+        ):
+            failures.append("member_recruitment_guidance_missing")
+        if panel_type == "RECRUITMENT" and (
+            not embeds
+            or embeds[0].get("title") != "🪖 QUERO ENTRAR PARA A CHOQUE - BGR"
+            or "não precisa procurar outro canal"
+            not in str(embeds[0].get("description", "")).lower()
+        ):
+            failures.append("recruitment_guidance_missing")
+
+    member_recruitment_links = {
+        url for url in found_links["MEMBER"] if url.startswith("https://")
+    }
+    if len(member_recruitment_links) != 1:
+        failures.append("member_recruitment_link_invalid")
+    else:
+        member_recruitment_url = member_recruitment_links.pop()
+        if not member_recruitment_url.endswith("/recrutamento"):
+            failures.append("member_recruitment_link_invalid")
+        root = member_recruitment_url.removesuffix("/recrutamento").rstrip("/")
+        expected_links = {
+            "MEMBER": {f"{root}/recrutamento"},
+            "RECRUITMENT": {
+                f"{root}/recrutamento",
+                f"{root}/minha-candidatura",
+            },
+        }
+        for panel_type, expected in expected_links.items():
+            missing = expected - found_links[panel_type]
+            if missing:
+                failures.append(f"{panel_type.lower()}_links_missing={sorted(missing)}")
 
     missing_settings = EXPECTED_SETTINGS - {
         key for key, value in settings.items() if isinstance(value, int) and value > 0
@@ -124,7 +165,10 @@ def main() -> int:
 
     print("LIVE_PHASE11_OK" if not failures else "LIVE_PHASE11_INVALID")
     for panel_type, custom_ids in found_components.items():
-        print(f"{panel_type.lower()}_components={len(custom_ids)}")
+        print(
+            f"{panel_type.lower()}_components={len(custom_ids)},"
+            f"links={len(found_links[panel_type])}"
+        )
     print(f"settings={len(EXPECTED_SETTINGS) - len(missing_settings)}/{len(EXPECTED_SETTINGS)}")
     print(f"modules=recruitment:{modules.get('RECRUITMENT')},tickets:{modules.get('TICKETS')}")
     print(f"migration={migration}")

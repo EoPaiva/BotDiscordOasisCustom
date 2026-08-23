@@ -1,5 +1,25 @@
 # Relatório vivo — Primeira entrega CHOQUE - BGR
 
+## 2026-08-23 — Entrada de recrutamento em um clique
+
+- A Recepção passou a ser também o ponto de entrada do candidato: a mensagem `MEMBER` existente foi
+  editada com `Candidatar-me agora`, apontando diretamente para o portal público. Cadastro funcional,
+  consulta e suporte permanecem na segunda linha e são explicados como fluxo de aprovados/membros.
+- O painel `RECRUITMENT` existente foi editado sem duplicação. O CTA de candidatura e o acompanhamento
+  agora são links diretos; requisitos continua como controle persistente. A mensagem apresenta quatro
+  passos, tratamento após envio e a distinção entre candidato e membro já aprovado.
+- Novos visitantes recebem a mesma orientação por DM com link do processo seletivo e link da Portaria;
+  bloqueio de DM continua sem impacto no ingresso.
+- `validate_live_phase11` aprovou os componentes, links e conteúdo nas duas mensagens reais, os demais
+  painéis do lote, sete configurações, módulos ativos e zero comandos remotos.
+- No primeiro rollout, os logs detectaram `database disk image is malformed`. A causa foi o upload de
+  `data/*.db*` pelo commit Discloud, que misturou banco local antigo e WAL remoto. A instância foi
+  parada, o backup pré-deploy foi validado e restaurado atomicamente, e o launcher passou a aceitar
+  recuperação única validada antes de abrir o banco. O `.discloudignore` agora bloqueia DB/WAL/SHM.
+- Estado final: Discloud online, health 200, Gateway conectado, SQLite `quick_check=ok`, FK=0 e
+  migration 24. Gates: **296 pytest**, **29 Vitest**, Ruff, compileall, `main.py --check`, ESLint,
+  TypeScript e build Next.js.
+
 ## 2026-08-23 — Recrutamento público e runtime combinado em produção
 
 - `choque-bgr-api` opera na Discloud Diamond como `TYPE=site`, 1 GB, executando o bot e a API; o

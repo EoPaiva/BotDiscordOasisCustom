@@ -71,20 +71,53 @@ async def build_recruitment_landing_embed(bot: ChoqueBot, guild: discord.Guild) 
     requirements_id = await bot.services.settings.get(
         guild.id, "recruitment_requirements_channel_id"
     )
+    registration_id = await bot.services.settings.get(
+        guild.id, "registration_panel_channel_id"
+    )
     embed = branded_embed(
         bot.config.branding,
-        title="📝 Recrutamento • CHOQUE - BGR",
+        title="🪖 QUERO ENTRAR PARA A CHOQUE - BGR",
         description=(
-            "Envie sua candidatura pelo painel e acompanhe o resultado de forma privada. "
-            "Uma aprovação na entrevista encaminha o cadastro para a decisão final do Comando."
+            "**Este é o ponto de partida para quem ainda não faz parte da organização.**\n"
+            "Você não precisa procurar outro canal: selecione **Candidatar-me agora** abaixo "
+            "e o portal oficial abrirá diretamente."
         ),
     )
     embed.add_field(
-        name="Antes de começar",
+        name="✅ Como fazer sua candidatura",
         value=(
-            f"Leia os requisitos em <#{requirements_id}>."
+            "`01` Clique em **Candidatar-me agora**.\n"
+            "`02` Informe seus dados e responda a avaliação com atenção.\n"
+            "`03` Revise as respostas e envie a candidatura.\n"
+            "`04` Use **Acompanhar candidatura** para consultar cada atualização."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="📌 Antes de enviar",
+        value=(
+            f"Confira os critérios em <#{requirements_id}>. "
             if requirements_id
-            else "Leia os requisitos publicados nesta categoria."
+            else "Confira os requisitos publicados nesta categoria. "
+        )
+        + "O portal não exige login pelo Discord, mas os dados informados precisam ser verdadeiros.",
+        inline=False,
+    )
+    embed.add_field(
+        name="📨 Depois do envio",
+        value=(
+            "Sua candidatura recebe um protocolo e segue para análise da equipe responsável. "
+            "A classificação auxilia a triagem, mas a decisão final sempre é humana."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="🪪 Já é membro ou já foi aprovado?",
+        value=(
+            f"Não abra uma nova candidatura. Conclua sua identificação na Portaria em "
+            f"<#{registration_id}>."
+            if registration_id
+            else "Não abra uma nova candidatura. Use a Portaria Digital para concluir seu cadastro."
         ),
         inline=False,
     )
@@ -395,8 +428,34 @@ async def send_my_tickets(interaction: discord.Interaction) -> None:
 
 
 class RecruitmentPanelView(ErrorView):
-    def __init__(self) -> None:
+    def __init__(self, public_url: str | None = None) -> None:
         super().__init__(timeout=None)
+        if isinstance(public_url, str) and public_url.startswith("https://"):
+            for item in tuple(self.children):
+                if item.custom_id in {
+                    "choque:recruitment:apply:v1",
+                    "choque:recruitment:mine:v1",
+                }:
+                    self.remove_item(item)
+            root = public_url.rstrip("/")
+            self.add_item(
+                discord.ui.Button(
+                    label="Candidatar-me agora",
+                    emoji="🪖",
+                    style=discord.ButtonStyle.link,
+                    url=f"{root}/recrutamento",
+                    row=0,
+                )
+            )
+            self.add_item(
+                discord.ui.Button(
+                    label="Acompanhar candidatura",
+                    emoji="📋",
+                    style=discord.ButtonStyle.link,
+                    url=f"{root}/minha-candidatura",
+                    row=0,
+                )
+            )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         try:
@@ -414,6 +473,7 @@ class RecruitmentPanelView(ErrorView):
         emoji="📝",
         style=discord.ButtonStyle.primary,
         custom_id="choque:recruitment:apply:v1",
+        row=0,
     )
     async def apply(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         public_url = await get_bot(interaction).services.settings.get(
@@ -434,6 +494,7 @@ class RecruitmentPanelView(ErrorView):
         emoji="📋",
         style=discord.ButtonStyle.secondary,
         custom_id="choque:recruitment:mine:v1",
+        row=0,
     )
     async def mine(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         public_url = await get_bot(interaction).services.settings.get(
@@ -454,6 +515,7 @@ class RecruitmentPanelView(ErrorView):
         emoji="📚",
         style=discord.ButtonStyle.success,
         custom_id="choque:recruitment:requirements:v1",
+        row=1,
     )
     async def requirements(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         channel_id = await get_bot(interaction).services.settings.get(
@@ -1812,7 +1874,10 @@ class TicketCommands(commands.Cog):
     ) -> discord.Message:
         if panel_type == "RECRUITMENT":
             embed = await build_recruitment_landing_embed(self.bot, guild)
-            view: discord.ui.View = RecruitmentPanelView()
+            public_url = await self.services.settings.get(guild.id, "recruitment_public_url")
+            view: discord.ui.View = RecruitmentPanelView(
+                public_url if isinstance(public_url, str) else None
+            )
         elif panel_type == "TICKET":
             embed = build_ticket_landing_embed(self.bot)
             view = TicketPanelView()

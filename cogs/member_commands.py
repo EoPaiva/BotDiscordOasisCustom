@@ -30,14 +30,22 @@ def build_registration_panel_embed(bot: ChoqueBot) -> discord.Embed:
         bot.config.branding,
         title="🛡️ PORTARIA DIGITAL • CHOQUE - BGR",
         description=(
-            "**CONTROLE OFICIAL DE IDENTIDADE E ACESSO**\n\n"
-            "O acesso às áreas internas é consequência da sua identidade, situação funcional e "
-            "cargos autorizados. Conclua a identificação abaixo para que o sistema aplique apenas "
-            "o nível de acesso correspondente."
+            "**ESCOLHA O CAMINHO CORRETO PARA NÃO PERDER TEMPO**\n\n"
+            "Se você **ainda não pertence à CHOQUE - BGR**, comece por "
+            "**Candidatar-me agora**. A Portaria é destinada a quem já foi aprovado, já é membro "
+            "ou possui vínculo funcional reconhecido."
         ),
     )
     embed.add_field(
-        name="📋 Procedimento de identificação",
+        name="🪖 Ainda não é membro?",
+        value=(
+            "Clique em **Candidatar-me agora**. Você será levado diretamente ao processo seletivo "
+            "e poderá acompanhar o andamento pelo mesmo portal."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="🪪 Já é membro, foi aprovado ou é Companheiro de Farda?",
         value=(
             "`01` Selecione **Realizar cadastro**.\n"
             "`02` Informe somente seu **nick BGR** e **ID BGR**.\n"
@@ -223,14 +231,25 @@ def application_result_embed(bot: ChoqueBot, application) -> discord.Embed:
 
 
 class RegistrationPanelView(discord.ui.View):
-    def __init__(self) -> None:
+    def __init__(self, recruitment_public_url: str | None = None) -> None:
         super().__init__(timeout=None)
+        if isinstance(recruitment_public_url, str) and recruitment_public_url.startswith("https://"):
+            self.add_item(
+                discord.ui.Button(
+                    label="Candidatar-me agora",
+                    emoji="🪖",
+                    style=discord.ButtonStyle.link,
+                    url=f"{recruitment_public_url.rstrip('/')}/recrutamento",
+                    row=0,
+                )
+            )
 
     @discord.ui.button(
         label="Realizar cadastro",
         emoji="🪪",
         style=discord.ButtonStyle.danger,
         custom_id="choque:member:register:v1",
+        row=1,
     )
     async def register(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         if not interaction.guild:
@@ -293,6 +312,7 @@ class RegistrationPanelView(discord.ui.View):
         emoji="📋",
         style=discord.ButtonStyle.secondary,
         custom_id="choque:registration:status:v1",
+        row=1,
     )
     async def status(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
@@ -310,6 +330,7 @@ class RegistrationPanelView(discord.ui.View):
         emoji="🆘",
         style=discord.ButtonStyle.primary,
         custom_id="choque:registration:help:v1",
+        row=1,
     )
     async def help(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         if not interaction.guild:
@@ -352,6 +373,12 @@ class MemberCommands(commands.Cog):
         guild: discord.Guild,
         channel: discord.TextChannel,
     ) -> discord.Message:
+        recruitment_public_url = await self.services.settings.get(
+            guild.id, "recruitment_public_url"
+        )
+        panel_view = RegistrationPanelView(
+            recruitment_public_url if isinstance(recruitment_public_url, str) else None
+        )
         async with self._panel_lock:
             panel = await self.services.settings.get_panel(guild.id, "MEMBER")
             message = None
@@ -363,12 +390,12 @@ class MemberCommands(commands.Cog):
             if message is None:
                 message = await channel.send(
                     embed=build_registration_panel_embed(self.bot),
-                    view=RegistrationPanelView(),
+                    view=panel_view,
                 )
             else:
                 await message.edit(
                     embed=build_registration_panel_embed(self.bot),
-                    view=RegistrationPanelView(),
+                    view=panel_view,
                 )
             await self.services.settings.upsert_panel(
                 guild.id,

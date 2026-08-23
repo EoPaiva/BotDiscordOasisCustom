@@ -354,3 +354,19 @@ Regras obrigatórias para o pacote Discloud:
 O item 29 foi concluído após o ZIP passar pelas validações, a restauração segura do banco ser
 comprovada e a aplicação permanecer operacional na Discloud Diamond. O pacote sanitizado deve ser
 combinado com o `.env` privado mantido fora do Git; ele nunca deve receber segredos versionados.
+
+## Acabamento da entrada pública
+
+30. ✅ **Jornada intuitiva do visitante para o recrutamento — concluída em produção em 2026-08-23.**
+    A mensagem persistente da Recepção passou a oferecer `Candidatar-me agora` em um clique e a
+    distinguir candidatura de cadastro funcional. O painel de Recrutamento foi editado no lugar com
+    candidatura, acompanhamento e requisitos, sem duplicar mensagens, canais ou IDs. A DM de entrada
+    repete a mesma decisão simples. A validação REST confirmou os textos, links e componentes nas
+    mensagens `MEMBER` e `RECRUITMENT`, além de zero comandos publicados.
+
+    Durante o rollout, o pacote Discloud incluiu o SQLite local porque `data/*.db*` ainda não estava
+    no `.discloudignore`. O erro foi detectado nos logs, a instância foi parada e o backup pré-deploy
+    íntegro foi restaurado atomicamente antes do startup. O empacotamento agora bloqueia DB/WAL/SHM;
+    o launcher valida e consome um candidato explícito `recovery-once` sem abrir o banco corrompido.
+    Evidências finais: Discloud online, health 200, Gateway conectado, `quick_check=ok`, FK=0,
+    migration 24, **296 pytest**, **29 Vitest**, Ruff, compile/check, ESLint, typecheck e build.

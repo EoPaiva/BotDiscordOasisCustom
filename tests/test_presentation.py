@@ -14,9 +14,11 @@ from cogs.member_commands import (
 from cogs.shift_commands import PointPanelView, build_point_panel_embed
 from cogs.ticket_commands import (
     PartnershipLandingView,
+    RecruitmentPanelView,
     TransferLandingView,
     build_partnership_landing_embed,
     build_partnership_links,
+    build_recruitment_landing_embed,
     build_terms_landing_embed,
     build_transfer_landing_embed,
 )
@@ -28,6 +30,15 @@ def bot_stub():
 
 def custom_ids(view) -> set[str]:
     return {str(item.custom_id) for item in view.children if item.custom_id}
+
+
+class SettingsStub:
+    async def get(self, guild_id: int, key: str):
+        assert guild_id == 123
+        return {
+            "recruitment_requirements_channel_id": 456,
+            "registration_panel_channel_id": 789,
+        }[key]
 
 
 def test_unregistered_registration_button_always_opens_the_form() -> None:
@@ -61,12 +72,30 @@ async def test_registration_and_point_panels_are_detailed_and_keep_persistent_ac
     point = build_point_panel_embed(bot_stub())
 
     assert registration.title == "🛡️ PORTARIA DIGITAL • CHOQUE - BGR"
-    assert len(registration.fields) == 4
-    assert "nível de acesso correspondente" in (registration.description or "")
+    assert len(registration.fields) == 5
+    assert "Candidatar-me agora" in (registration.description or "")
     assert custom_ids(RegistrationPanelView()) == {
         "choque:member:register:v1",
         "choque:registration:status:v1",
         "choque:registration:help:v1",
+    }
+
+    public_registration = RegistrationPanelView("https://example.test")
+    recruitment_links = [item.url for item in public_registration.children if item.url]
+    assert recruitment_links == ["https://example.test/recrutamento"]
+
+    public_recruitment = RecruitmentPanelView("https://example.test")
+    assert {item.label for item in public_recruitment.children} == {
+        "Candidatar-me agora",
+        "Acompanhar candidatura",
+        "Requisitos",
+    }
+    assert {item.url for item in public_recruitment.children if item.url} == {
+        "https://example.test/recrutamento",
+        "https://example.test/minha-candidatura",
+    }
+    assert custom_ids(public_recruitment) == {
+        "choque:recruitment:requirements:v1",
     }
 
     assert point.title == "⏱️ CONTROLE OPERACIONAL DE SERVIÇO"
@@ -79,6 +108,21 @@ async def test_registration_and_point_panels_are_detailed_and_keep_persistent_ac
         "choque:shift:hours:v1",
         "choque:shift:history:v1",
     }
+
+
+@pytest.mark.asyncio
+async def test_recruitment_landing_gives_visitors_one_unambiguous_starting_point() -> None:
+    bot = SimpleNamespace(
+        config=SimpleNamespace(branding=Branding()),
+        services=SimpleNamespace(settings=SettingsStub()),
+    )
+    embed = await build_recruitment_landing_embed(bot, SimpleNamespace(id=123))
+
+    assert embed.title == "🪖 QUERO ENTRAR PARA A CHOQUE - BGR"
+    assert "não precisa procurar outro canal" in (embed.description or "").lower()
+    assert "Candidatar-me agora" in embed.fields[0].value
+    assert "<#456>" in embed.fields[1].value
+    assert "<#789>" in embed.fields[3].value
 
 
 @pytest.mark.asyncio

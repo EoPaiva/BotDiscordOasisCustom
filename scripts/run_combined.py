@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import os
+import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
 from collections.abc import Sequence
+from datetime import UTC, datetime
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 GRACEFUL_SHUTDOWN_SECONDS = 20
 POLL_INTERVAL_SECONDS = 0.5
+DATABASE_RECOVERY_FILENAME = "recovery-once"
 
 
 def _terminate(processes: Sequence[subprocess.Popen[bytes]]) -> None:
@@ -53,10 +58,60 @@ def _validate_environment() -> None:
         raise RuntimeError("APP_ENV deve ser production no runtime combinado.")
 
 
+def _validate_sqlite(path: Path) -> None:
+    connection = sqlite3.connect(path)
+    try:
+        quick_check = str(connection.execute("PRAGMA quick_check").fetchone()[0])
+        foreign_keys = connection.execute("PRAGMA foreign_key_check").fetchall()
+        migrations = connection.execute(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+        ).fetchone()
+    finally:
+        connection.close()
+    if quick_check != "ok":
+        raise RuntimeError(f"Banco de recuperação inválido: {quick_check}")
+    if foreign_keys:
+        raise RuntimeError(
+            f"Banco de recuperação possui {len(foreign_keys)} violações de foreign key"
+        )
+    if not migrations or int(migrations[0]) <= 0:
+        raise RuntimeError("Banco de recuperação não possui migrations válidas")
+
+
+def _restore_database_if_requested(database_path: Path) -> Path | None:
+    recovery_path = database_path.parent / DATABASE_RECOVERY_FILENAME
+    if not recovery_path.exists():
+        return None
+    _validate_sqlite(recovery_path)
+
+    incident_dir = database_path.parent / "security_backups"
+    incident_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    for source in (
+        database_path,
+        Path(f"{database_path}-wal"),
+        Path(f"{database_path}-shm"),
+    ):
+        if source.exists():
+            shutil.move(
+                str(source),
+                incident_dir / f"incident-{timestamp}-{source.name}",
+            )
+
+    os.replace(recovery_path, database_path)
+    _validate_sqlite(database_path)
+    print(
+        f"DATABASE_RECOVERY_OK path={database_path} backup_dir={incident_dir}",
+        flush=True,
+    )
+    return incident_dir
+
+
 def main() -> int:
     load_dotenv(".env", override=False)
     load_dotenv(".env.combined", override=False)
     _validate_environment()
+    _restore_database_if_requested(Path(os.environ["DATABASE_PATH"]))
 
     check = subprocess.run(
         [sys.executable, "main.py", "--check"],
