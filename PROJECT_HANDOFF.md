@@ -1,13 +1,29 @@
 # PROJECT HANDOFF
 
+## Recrutamento público em produção — 2026-08-23
+
+- portal operacional: `https://web-plum-tau-82.vercel.app/recrutamento`, HTTP 200, campanha `OPEN`;
+- runtime único `choque-bgr-api` na Discloud Diamond: bot + FastAPI, 1 GB, `/health` ok; instância
+  local e aplicação Discloud anterior offline;
+- teste sintético completou 24 perguntas, submeteu `AL-00001`, confirmou outbox `COMPLETED` no
+  canal administrativo e depois marcou o registro como `WITHDRAWN` para sair da fila ativa;
+- hotfix de produção: a notificação usava `branding.footer_text`, atributo inexistente. Agora usa
+  `branding.footer`; retry concluiu sem evento duplicado e há teste de regressão;
+- QA final desta rodada: 293 testes Python, 29 testes web, Ruff, compileall, `main.py --check`,
+  ESLint, TypeScript e build aprovados;
+- bloqueio restante do recrutamento: o Robô Analista está implementado, mas `provider_ready=false`.
+  É necessária credencial externa de um provider OpenAI-compatible/NVIDIA antes de ativá-lo;
+- item 29 permanece parcial apenas pelo ZIP sanitizado/reproduzível pós-hotfix e pela rotação das
+  credenciais divulgadas. O rollout operacional já está ativo.
+
 ## Verificação Discloud e funcional — 2026-08-22
 
 - bot publicado na Discloud Diamond e conectado à guild oficial; instância local confirmada offline;
-- alocação atual de 900 MB, com consumo observado abaixo de 70 MB, portanto sem necessidade técnica de aumento;
+- alocação atual de 1 GB, com consumo observado próximo de 150 MB;
 - backup remoto conferido: SQLite íntegro, zero violações de foreign key e migration 24;
 - 15 validadores Discord ao vivo aprovados, além da sincronização de patentes contra o banco remoto;
-- suíte final: 292 testes aprovados, Ruff e compilação aprovados; auditoria com zero callback ausente e zero `custom_id` duplicado;
-- item 29 continua parcial: o bot está na Discloud, mas o runtime combinado de site/API e seu healthcheck ainda não foram publicados.
+- suíte final atual: 293 testes aprovados, Ruff e compilação aprovados; auditoria com zero callback ausente e zero `custom_id` duplicado;
+- runtime combinado de site/API e healthcheck já publicados; item 29 resta aberto somente pelo artefato sanitizado final e rotação de credenciais.
 
 > Fotografia técnica gerada em 2026-08-22 a partir da inspeção do código real.
 > Este é um documento vivo: atualize as seções 27, 31, 39, 40, 41, 42, 46 e 47 ao concluir cada fase.

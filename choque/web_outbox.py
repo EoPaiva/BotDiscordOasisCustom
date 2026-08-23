@@ -799,5 +799,5 @@ class WebActionWorker:
         embed.add_field(name="Protocolo", value=str(application["protocol"]), inline=True)
         embed.add_field(name="Candidato", value=str(application["candidate_nick"]), inline=True)
         embed.add_field(name="ID BGR", value=str(application["bgr_id"]), inline=True)
-        embed.set_footer(text=self.audit.branding.footer_text)
+        embed.set_footer(text=self.audit.branding.footer)
         return embed

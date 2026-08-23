@@ -7,6 +7,8 @@ import sys
 import time
 from collections.abc import Sequence
 
+from dotenv import load_dotenv
+
 GRACEFUL_SHUTDOWN_SECONDS = 20
 POLL_INTERVAL_SECONDS = 0.5
 
@@ -52,6 +54,8 @@ def _validate_environment() -> None:
 
 
 def main() -> int:
+    load_dotenv(".env", override=False)
+    load_dotenv(".env.combined", override=False)
     _validate_environment()
 
     check = subprocess.run(

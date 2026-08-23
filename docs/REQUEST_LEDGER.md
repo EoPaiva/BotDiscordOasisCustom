@@ -1,6 +1,6 @@
 # Registro consolidado de pedidos — CHOQUE BGR
 
-Atualizado em 2026-08-22.
+Atualizado em 2026-08-23.
 
 Este arquivo é o índice de cobertura dos pedidos. Ele não substitui as especificações e não declara
 como concluído aquilo que apenas entrou na fila. A ordem operacional oficial está em
@@ -105,7 +105,19 @@ para a decisão arquitetural do Programa Web.
 | Exoneração mantém usuário no Discord e aplica cargo Exonerado | IMPLEMENTADO e validado ao vivo; cargo, patentes e apelido conferidos pela API | `docs/PHASE_QUEUE.md`, `cogs/member_sync.py` |
 | Simplificar Central Administrativa por categorias e explicar cada área | IMPLEMENTADO e validado ao vivo; cinco ações raiz e doze funções preservadas | `docs/PHASE_QUEUE.md`, `cogs/personnel_commands.py` |
 | Auditar botões e ações implementadas sem caminho visível | CONCLUÍDO; item 28 | `docs/INTERACTION_ROUTE_AUDIT.md` |
-| Empacotamento e publicação Discloud Diamond | PENDENTE e obrigatoriamente último; item 29 da fila | `docs/PHASE_QUEUE.md` |
+| Empacotamento e publicação Discloud Diamond | ROLLOUT ATIVO; falta ZIP final sanitizado/reproduzível e rotação de credenciais; item 29 | `docs/PHASE_QUEUE.md` |
+
+## Recrutamento público ativado — 2026-08-23
+
+- O portal público sem OAuth foi publicado na Vercel e a campanha inicial foi aberta no backend.
+- Os painéis persistentes usam `Candidatar-me`, `Minha candidatura` e `Requisitos`, localizados por
+  IDs e atualizados no lugar, sem duplicar mensagens.
+- Um teste sintético completou 24 questões, submeteu a candidatura, gerou dossiê e confirmou a
+  entrega no canal administrativo pelo outbox. O registro de QA foi retirado depois da entrega.
+- O teste encontrou o uso do atributo legado `branding.footer_text`; o hotfix usa a propriedade
+  central `branding.footer`, possui teste de regressão e já está ativo na Discloud.
+- O Robô Analista permanece bloqueado somente pela ausência de provider/credencial no runtime. A
+  decisão humana e todo o recrutamento básico continuam operacionais sem classificação fabricada.
 
 ## Regras transversais da fila
 

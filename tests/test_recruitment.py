@@ -749,6 +749,29 @@ async def test_recruitment_notification_outbox_retries_without_new_event(
 
 
 @pytest.mark.asyncio
+async def test_recruitment_notification_embed_uses_central_branding(
+    recruitment_bundle,
+) -> None:
+    worker = WebActionWorker(
+        recruitment_bundle["database"],
+        None,
+        recruitment_bundle["audit"],
+        object(),  # type: ignore[arg-type]
+    )
+    embed = worker._recruitment_embed(
+        "Nova candidatura recebida",
+        {
+            "protocol": "AL-00001",
+            "candidate_nick": "Candidato QA",
+            "bgr_id": "QA-001",
+        },
+        "Conteúdo disponível no Centro de Comando.",
+    )
+
+    assert embed.footer.text == Branding().footer
+
+
+@pytest.mark.asyncio
 async def test_stale_recruitment_notification_is_enqueued_once(recruitment_bundle) -> None:
     service = recruitment_bundle["service"]
     database = recruitment_bundle["database"]

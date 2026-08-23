@@ -1,5 +1,26 @@
 # Relatório vivo — Primeira entrega CHOQUE - BGR
 
+## 2026-08-23 — Recrutamento público e runtime combinado em produção
+
+- `choque-bgr-api` opera na Discloud Diamond como `TYPE=site`, 1 GB, executando o bot e a API; o
+  healthcheck respondeu `status=ok`, o bot local permaneceu `BOT_OFFLINE` e a aplicação antiga está
+  offline.
+- O portal `https://web-plum-tau-82.vercel.app/recrutamento` respondeu HTTP 200 com campanha
+  `OPEN`, formulário público sem OAuth, 24 questões por candidatura e acesso à consulta de status.
+- Configurações persistidas: URL pública do recrutamento, canal administrativo de notificações e
+  campanha inicial aberta com idade mínima de 16 anos e cooldown de 30 dias.
+- QA sintético em produção: candidatura `AL-00001`, 24 respostas, transição `DRAFT -> SUBMITTED`,
+  estágio `REVIEW`, outbox `COMPLETED` no canal configurado e retirada posterior `WITHDRAWN` para não
+  poluir a fila. O histórico permanece auditável e não contém pessoa real.
+- A primeira entrega do outbox falhou por uma referência antiga a `Branding.footer_text`. O código
+  foi corrigido para `Branding.footer`, recebeu teste de regressão e foi publicado na mesma
+  aplicação; o retry concluiu na sexta tentativa, sem duplicar evento.
+- Gates pós-hotfix: **293 pytest**, **29 Vitest**, Ruff, compileall, `main.py --check`, ESLint,
+  TypeScript e build Next.js. O frontend foi revalidado pela integração Vercel com HTTP 200 e headers
+  de segurança.
+- O Robô Analista continua deliberadamente desativado: a API confirmou provider ausente. Sua
+  ativação depende de credencial externa e nova validação; nenhuma recomendação foi simulada.
+
 ## 2026-08-22 — Smoke funcional na Discloud
 
 A instância Diamond foi confirmada online e conectada ao Discord, com a instância local desligada.
@@ -10,7 +31,7 @@ para a Central Administrativa categorizada e para as regras atuais de `KEEP_LAST
 Companheiro de Farda. O deploy atual cobre o bot; site/API combinado permanece como parte não concluída
 do item 29.
 
-Atualizado em 2026-08-22.
+Atualizado em 2026-08-23.
 
 ## Estado
 

@@ -1,6 +1,6 @@
 # Fila de Fases — CHOQUE BGR
 
-Atualizada em 2026-08-22.
+Atualizada em 2026-08-23.
 
 Esta é a ordem oficial de continuidade. Uma fase só sai da fila depois de implementação, testes,
 validação proporcional ao risco e atualização do `PROJECT_HANDOFF.md`.
@@ -99,10 +99,15 @@ Regras obrigatórias para o programa web:
 
 ## Sistema de Alistamento, Recrutamento e Integridade
 
-15. ✅ **Sistema de Alistamento, Recrutamento e Integridade — concluído localmente em 2026-08-22.**
+15. ✅ **Sistema de Alistamento, Recrutamento e Integridade — concluído em produção em 2026-08-23.**
    Executado a partir de `docs/RECRUITMENT_INTEGRITY_SYSTEM_SPEC.md`. O programa possui
    oito subfases: Domínio, Candidato, Avaliação, Integração, Admin, Processo Seletivo, Ingresso e
-   Hardening específico.
+   Hardening específico. O portal público está em
+   `https://web-plum-tau-82.vercel.app/recrutamento`, sem exigir OAuth, e a campanha inicial está
+   `OPEN`. Um cenário sintético respondeu as 24 questões, submeteu `AL-00001`, entregou o dossiê
+   pelo outbox no canal administrativo e foi retirado em seguida, permanecendo somente como trilha
+   auditável. A falha descoberta no footer da notificação foi corrigida, coberta por regressão e
+   publicada na mesma aplicação Discloud.
 
 Regras obrigatórias:
 
@@ -115,9 +120,12 @@ Regras obrigatórias:
 
 ## Robô Analista de Candidaturas
 
-16. ✅ **Robô Analista de Candidaturas — concluído localmente em 2026-08-22.** Executado a partir de
-   `docs/RECRUITMENT_AI_ANALYST_SPEC.md`. O módulo auxilia recrutadores por rubrica e evidências,
-   permanece desativado por padrão e não possui autoridade administrativa.
+16. 🟡 **Robô Analista de Candidaturas — implementação concluída; ativação externa pendente.**
+   Executado a partir de `docs/RECRUITMENT_AI_ANALYST_SPEC.md`. O módulo auxilia recrutadores por
+   rubrica e evidências e não possui autoridade administrativa. A API de produção confirmou
+   `enabled=false` e `provider_ready=false`: não existe `RECRUITMENT_AI_API_KEY`/provider no runtime.
+   Ativar e validar a análise qualitativa exige cadastrar uma credencial de provedor compatível na
+   hospedagem; até lá, o sistema não fabrica classificação e mantém a decisão exclusivamente humana.
 
 Regras obrigatórias:
 
@@ -213,22 +221,22 @@ credenciais, menor privilégio e validações humanas continuam dívida obrigat�
 
 ## Sincronização Discord, identidade funcional e RBAC
 
-23. 🔄 **Fase 19 — Sincronização Discord, identidade funcional e RBAC — EM EXECUÇÃO.** Executar a
+23. ✅ **Fase 19 — Sincronização Discord, identidade funcional e RBAC — concluída em produção em
+    2026-08-23.** Executada a
     partir de `docs/DISCORD_IDENTITY_RBAC_SYNC_SPEC.md` e da fonte integral
     `docs/source-prompts/15-discord-role-access-sync-original.md`. Evoluir a reconciliação existente
     para a pipeline única `DISCORD -> IDENTIDADE -> RBAC -> BOT + SITE`, separando patente, cargo
     principal e funções secundárias, com mapping por role ID, versão de autorização, downgrade
     imediato, startup/periódico/sob demanda, histórico, observabilidade e superfícies web.
 
-    Estado local em 2026-08-22: migration v23, pipeline, correlação, observabilidade, Portaria e
+    Estado implementado: migration v23, pipeline, correlação, observabilidade, Portaria e
     restauração do apelido anterior ao cadastro estão implementados; **272 testes Python**, Ruff,
     compileall, secret scan, **29 Vitest**, ESLint, typecheck, build e migração sobre cópia v22
     passaram. A Portaria publica pedidos no canal administrativo, oferece botão persistente para a
     fila e arquiva a mensagem após decisão. Desligamentos capturam/restauram o apelido original.
-    A fase ainda não está concluída porque o rollout real foi bloqueado pela janela de capacidade do
-    plano gratuito da Railway. O deployment anterior foi removido após backup íntegro; serviço,
-    volume, variáveis e domínio permanecem preservados, mas o bot remoto está offline até a
-    plataforma aceitar novo deployment. Não iniciar instância com banco desatualizado.
+    O rollout posterior na Discloud Diamond eliminou o bloqueio da Railway: banco v24 íntegro,
+    reconciliação real sem falhas, Portaria validada por usuário e instância local desligada. O bot,
+    a API e o site operam sobre uma única fonte SQLite na aplicação `choque-bgr-api`.
 
     Continuidade verificada às 17:09 BRT: nova tentativa de `railway up` foi novamente recusada
     pela indisponibilidade de deploy gratuito em `us-west2` durante o horário de pico. O checkpoint
@@ -305,9 +313,12 @@ Regras obrigatórias:
 
 ## Empacotamento e publicação na Discloud
 
-29. 🟡 **Preparar o pacote final para Discloud Diamond — parcial.** O bot já está online na
-    Discloud, conectado à guild, com banco remoto íntegro e smoke funcional aprovado. Ainda faltam
-    o runtime combinado `TYPE=site`, API/healthcheck e a validação do frontend antes do fechamento.
+29. 🟡 **Preparar o pacote final para Discloud Diamond — rollout operacional concluído; artefato
+    final pendente.** A aplicação combinada `choque-bgr-api` está online como `TYPE=site`, com 1 GB,
+    bot Discord, API/healthcheck e banco SQLite v24 no mesmo runtime. O frontend Vercel e o fluxo
+    público de recrutamento responderam 200, e a instância local está desligada. Ainda falta gerar
+    um ZIP sanitizado e reproduzível do estado pós-hotfix, sem `.env`, banco ou segredo, validar seu
+    inventário/SHA-256 e rotacionar as credenciais anteriormente divulgadas antes de encerrar o item.
     Depois que todos os itens funcionais, correções de produção e gates anteriores estiverem
     concluídos, gerar o ZIP final exatamente no formato aceito pela Discloud e validar o pacote
     antes do upload. Esta etapa não pode ser antecipada enquanto o conteúdo do deploy ainda estiver
