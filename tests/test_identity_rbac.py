@@ -70,6 +70,28 @@ async def test_new_access_profile_binding_uses_canonical_mapping(service_bundle)
 
 
 @pytest.mark.asyncio
+async def test_existing_upamento_role_gets_only_officer_review_permissions(service_bundle):
+    settings = service_bundle["settings"]
+    permissions = service_bundle["permissions"]
+    role_id = 987_777
+
+    await settings.bind_role(
+        GUILD_ID, role_id, RbacProfile.OFFICER_REVIEWER, DISCORD_ID
+    )
+    resolved = await permissions.permissions_for(GUILD_ID, [role_id])
+
+    assert {
+        "officer.review",
+        "officer.assign",
+        "officer.evaluate",
+        "officer.interview",
+        "officer.decide",
+    } <= resolved
+    assert "settings.manage" not in resolved
+    assert "career.manage" not in resolved
+
+
+@pytest.mark.asyncio
 async def test_explicit_member_deny_overrides_admin_wildcard(service_bundle):
     database = service_bundle["database"]
     permissions = service_bundle["permissions"]

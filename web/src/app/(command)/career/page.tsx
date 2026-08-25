@@ -5,7 +5,7 @@ import { commandCenterFetch } from "@/lib/api";
 import { dateTime, duration, label } from "@/lib/format";
 
 type Row = Record<string, unknown>;
-type CareerData = { generated_at: number; members: Row[]; movements: Row[] };
+type CareerData = { generated_at: number; members: Row[]; movements: Row[]; officer_applications: Record<string, number> };
 
 export default async function CareerPage() {
   const data = await commandCenterFetch<CareerData>("/v1/career");
@@ -20,6 +20,7 @@ export default async function CareerPage() {
       { label: "ATIVOS", value: active, tone: "success" },
       { label: "EXIGEM ATENÇÃO", value: attention, tone: attention ? "warning" : undefined },
       { label: "MOVIMENTAÇÕES", value: data.movements.length },
+      { label: "OFICIALATO NA FILA", value: (data.officer_applications.SUBMITTED ?? 0) + (data.officer_applications.IN_REVIEW ?? 0) + (data.officer_applications.INTERVIEW_REQUIRED ?? 0) },
     ]} />
     <section className="command-section"><SectionHeader index="01" title="Quadro por patente" meta={`${ranks.length} faixas ocupadas`} />
       {ranks.length ? <div className="rank-roster">{ranks.map(([rank, rows]) => <div key={rank}><span>{rank}</span><strong>{rows?.length ?? 0}</strong><p>{rows?.filter((row) => row.status === "ACTIVE").length ?? 0} ativos</p></div>)}</div> : <EmptyState title="Nenhum membro em carreira" detail="Cadastros aprovados com vínculo funcional aparecerão neste quadro." />}
@@ -31,6 +32,8 @@ export default async function CareerPage() {
         { key: "status", label: "STATUS", render: (row) => <Status value={row.status} /> },
         { key: "rank_since", label: "NA PATENTE DESDE", render: (row) => dateTime(Number(row.rank_since)) },
         { key: "valid_hours_ms", label: "HORAS VÁLIDAS", render: (row) => duration(Number(row.valid_hours_ms)) },
+        { key: "progression_next_rank_name", label: "PRÓXIMO OBJETIVO", render: (row) => row.progression_next_rank_name ? <span><strong>{String(row.progression_next_rank_name)}</strong><br /><code>{duration(Number(row.valid_hours_ms))} / {duration(Number(row.progression_target_ms))}</code></span> : "Carreira humana" },
+        { key: "merit_count", label: "MÉRITOS", render: (row) => <span>{String(row.merit_count)}<br /><code>+{String(row.positive_merit_weight)} / -{String(row.negative_merit_weight)}</code></span> },
         { key: "patrols", label: "PATRULHAS" },
         { key: "active_warnings", label: "ADVERTÊNCIAS", render: (row) => <Status value={Number(row.active_warnings) ? `${String(row.active_warnings)} ATIVA(S)` : "REGULAR"} /> },
         { key: "discord_id", label: "AÇÃO", render: (row) => <Link className="text-link inline" href={`/members/${String(row.discord_id)}`}>Analisar dossiê</Link> },

@@ -69,6 +69,14 @@ def main() -> int:
                 lowered = candidate.lower()
                 if any(marker in lowered for marker in SAFE_MARKERS):
                     continue
+                if (
+                    name == "assigned-secret"
+                    and match.lastindex
+                    and line[match.end(1) :].lstrip().startswith("(")
+                ):
+                    # Expressões como ``token = context_var.set(...)`` não são
+                    # literais; o scanner continua cobrindo segredos atribuídos.
+                    continue
                 if name == "assigned-secret" and _entropy(candidate) < 3.2:
                     continue
                 findings.append((str(path.relative_to(root)), number, name))

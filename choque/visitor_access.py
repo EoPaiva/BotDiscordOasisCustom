@@ -21,12 +21,8 @@ MEMBER_CATEGORY_KEYS = frozenset(
         "registration",
         "info",
         "community",
-        "point",
-        "events",
         "patrol",
         "courses",
-        "away",
-        "meeting",
     }
 )
 
@@ -36,7 +32,6 @@ PRIVATE_CATEGORY_KEYS = frozenset(
         "admin",
         "management",
         "audit",
-        "archive",
     }
 )
 

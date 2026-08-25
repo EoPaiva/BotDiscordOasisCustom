@@ -4,6 +4,8 @@ import asyncio
 import io
 import json
 import logging
+import re
+import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 import discord
@@ -18,6 +20,11 @@ from choque.tickets import (
     build_minimized_transcript,
 )
 from choque.time_utils import discord_timestamp
+from choque.web_outbox import (
+    RECRUITMENT_DECISION_STATUSES,
+    build_recruitment_review_embed,
+    build_recruitment_review_view,
+)
 from choque.web_urls import recruitment_portal_url, recruitment_status_url
 from cogs.config_ui import respond_error
 
@@ -910,6 +917,147 @@ class TicketDecisionView(ErrorView):
         )
 
 
+class RecruitmentDecisionModal(ErrorModal):
+    """One decision path for the private Discord card and the web portal."""
+
+    internal_reason = discord.ui.TextInput(
+        label="Justificativa interna",
+        placeholder="Registre a razão objetiva desta decisão.",
+        style=discord.TextStyle.paragraph,
+        min_length=3,
+        max_length=1000,
+    )
+    candidate_message = discord.ui.TextInput(
+        label="Mensagem ao candidato",
+        placeholder="Mensagem clara e respeitosa que será entregue ao candidato.",
+        style=discord.TextStyle.paragraph,
+        min_length=3,
+        max_length=1000,
+    )
+
+    def __init__(
+        self,
+        application_id: int,
+        expected_version: int,
+        approved: bool,
+        source_message: discord.Message,
+    ) -> None:
+        super().__init__(title="Aprovar candidatura" if approved else "Reprovar candidatura")
+        self.application_id = application_id
+        self.expected_version = expected_version
+        self.approved = approved
+        self.source_message = source_message
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            actor = await require_reviewer(
+                interaction,
+                "recruitment.approve" if self.approved else "recruitment.reject",
+                "RECRUITMENT",
+            )
+            bot = get_bot(interaction)
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            application = await bot.services.recruitment.decide(
+                actor.guild.id,
+                self.application_id,
+                actor.id,
+                self.expected_version,
+                approved=self.approved,
+                internal_reason=str(self.internal_reason).strip(),
+                candidate_message=str(self.candidate_message).strip(),
+                origin="DISCORD",
+                correlation_id=str(uuid.uuid4()),
+            )
+            public_url = await bot.services.settings.get(
+                actor.guild.id, "recruitment_public_url"
+            )
+            try:
+                await self.source_message.edit(
+                    embed=build_recruitment_review_embed(bot.config.branding, application),
+                    view=build_recruitment_review_view(application, public_url),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.DiscordException:
+                # The domain transition is already durable and its outbox
+                # refresh will converge the same card without publishing one.
+                LOGGER.exception(
+                    "Falha ao atualizar imediatamente a ficha de recrutamento %s",
+                    self.application_id,
+                )
+                await interaction.followup.send(
+                    "✅ Decisão registrada. A ficha será atualizada automaticamente em instantes.",
+                    ephemeral=True,
+                )
+                return
+            result = "aprovada" if self.approved else "reprovada"
+            await interaction.followup.send(
+                f"✅ Candidatura **{application['protocol']}** {result}. A ficha foi atualizada.",
+                ephemeral=True,
+            )
+        except Exception as exc:
+            await respond_error(interaction, exc)
+
+
+class RecruitmentDecisionButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"^choque:recruitment:decision:(?P<application_id>[0-9]+):(?P<action>approve|reject):v1$",
+):
+    """Persistent direct decision control for the private recruitment card."""
+
+    def __init__(self, application_id: int, action: str) -> None:
+        approved = action == "approve"
+        super().__init__(
+            discord.ui.Button(
+                label="Aprovar" if approved else "Reprovar",
+                emoji="✅" if approved else "❌",
+                style=discord.ButtonStyle.success if approved else discord.ButtonStyle.danger,
+                custom_id=f"choque:recruitment:decision:{application_id}:{action}:v1",
+            )
+        )
+        self.application_id = application_id
+        self.approved = approved
+
+    @classmethod
+    async def from_custom_id(
+        cls,
+        interaction: discord.Interaction,
+        item: discord.ui.Button,
+        match: re.Match[str],
+    ) -> RecruitmentDecisionButton:
+        return cls(int(match["application_id"]), str(match["action"]))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        try:
+            actor = await require_reviewer(
+                interaction,
+                "recruitment.approve" if self.approved else "recruitment.reject",
+                "RECRUITMENT",
+            )
+            bot = get_bot(interaction)
+            application = await bot.services.database.fetchone(
+                "SELECT * FROM recruitment_applications WHERE guild_id=? AND id=?",
+                (actor.guild.id, self.application_id),
+            )
+            if not application:
+                raise ValidationError("A candidatura desta ficha não existe mais.")
+            if str(application["status"]) not in RECRUITMENT_DECISION_STATUSES:
+                raise ValidationError("Esta candidatura não está pronta para decisão final.")
+            if int(application["discord_id"]) == actor.id:
+                raise PermissionDenied("Você não pode analisar ou decidir a própria candidatura.")
+            if not interaction.message:
+                raise ValidationError("A ficha original não está disponível para atualização.")
+            await interaction.response.send_modal(
+                RecruitmentDecisionModal(
+                    self.application_id,
+                    int(application["version"]),
+                    self.approved,
+                    interaction.message,
+                )
+            )
+        except Exception as exc:
+            await respond_error(interaction, exc)
+
+
 class RecruitmentAdminPanelView(ErrorView):
     def __init__(self) -> None:
         super().__init__(timeout=None)
@@ -1471,6 +1619,7 @@ class TicketCommands(commands.Cog):
         self.bot.add_view(TicketRoomView())
         self.bot.add_view(TransferLandingView())
         self.bot.add_view(PartnershipLandingView())
+        self.bot.add_dynamic_items(RecruitmentDecisionButton)
 
     async def _layout_category(
         self,

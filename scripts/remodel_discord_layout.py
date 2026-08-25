@@ -49,23 +49,20 @@ class ChannelSpec:
 CATEGORY_SPECS = (
     CategorySpec("reception", 1, "Recepcao", "public"),
     CategorySpec("ticket", 2, "Ticket", "public"),
-    CategorySpec("superiors", 3, "Superiores", "private"),
-    CategorySpec("admin", 4, "Administracao", "private", 1540540581728485597),
-    CategorySpec("member", 5, "Central do membro", "member", 1540546763939782676),
-    CategorySpec("registration", 6, "Registro", "member"),
-    CategorySpec("info", 7, "Informacoes", "member", 1161833335618801687),
-    CategorySpec("community", 8, "Membros choque", "member", 1146622065399566420),
-    CategorySpec("point", 9, "Bate ponto", "member"),
-    CategorySpec("events", 10, "Eventos", "member"),
-    CategorySpec("patrol", 11, "Patrulhas", "member", 1146622065647046776),
-    CategorySpec("management", 12, "Gerenciamento", "private"),
-    CategorySpec("partnerships", 13, "Transferencias e parcerias", "public"),
-    CategorySpec("recruitment", 14, "Recrutamento", "public", 1162263284108501092),
-    CategorySpec("courses", 15, "Cursos", "member", 1162114516318949529),
-    CategorySpec("away", 16, "Ausente", "member"),
-    CategorySpec("meeting", 17, "Reuniao", "member"),
-    CategorySpec("audit", 18, "Auditoria", "audit", 1146622066527850585),
-    CategorySpec("archive", 99, "Arquivo legado", "private", 1146622065110171669),
+    # A categoria dinamica 03 e reservada para Atendimentos ativos.
+    CategorySpec("superiors", 4, "Superiores", "private"),
+    CategorySpec("admin", 5, "Administracao", "private", 1540540581728485597),
+    CategorySpec("member", 6, "Central do membro", "member", 1540546763939782676),
+    CategorySpec("registration", 7, "Registro", "member"),
+    CategorySpec("info", 8, "Informacoes", "member", 1161833335618801687),
+    CategorySpec("community", 9, "Membros choque", "member", 1146622065399566420),
+    CategorySpec("patrol", 10, "Patrulhas", "member", 1146622065647046776),
+    CategorySpec("management", 11, "Gerenciamento", "private"),
+    CategorySpec("recruitment", 12, "Recrutamento", "public", 1162263284108501092),
+    CategorySpec("courses", 13, "Cursos", "member", 1162114516318949529),
+    CategorySpec("audit", 14, "Auditoria", "audit", 1146622066527850585),
+    # A categoria dinamica 15 e reservada para Tickets arquivados.
+    CategorySpec("partnerships", 16, "Transferencias e parcerias", "public"),
 )
 
 
@@ -85,14 +82,10 @@ CHANNEL_SPECS = (
     ),
     ChannelSpec("ticket.waiting", "ticket", "⏳", "Aguardando atendimento", "voice"),
     ChannelSpec("ticket.room.1", "ticket", "🎧", "Atendimento 1", "voice"),
-    ChannelSpec("ticket.room.2", "ticket", "🎧", "Atendimento 2", "voice"),
-    ChannelSpec("ticket.room.3", "ticket", "🎧", "Atendimento 3", "voice"),
     # 03 Superiores
     ChannelSpec("superiors.notices", "superiors", "📢", "Avisos do comando"),
     ChannelSpec("superiors.chat", "superiors", "💬", "Chat superiores"),
     ChannelSpec("superiors.records", "superiors", "📜", "Registros superiores"),
-    ChannelSpec("superiors.manual", "superiors", "📖", "Manual do comando"),
-    ChannelSpec("superiors.qa", "superiors", "🧪", "Area de qa"),
     # 04 Administracao
     ChannelSpec(
         "admin.central",
@@ -129,6 +122,7 @@ CHANNEL_SPECS = (
     # 07 Informacoes
     ChannelSpec("info.notices", "info", "📢", "Avisos", known_id=1161742911105421393),
     ChannelSpec("info.bgr", "info", "📣", "Anuncios bgr", known_id=1176911554629861396),
+    ChannelSpec("info.updates", "info", "🆕", "Atualizacoes do bot"),
     ChannelSpec("info.rules", "info", "📘", "Regras gerais", known_id=1146622064736882707),
     ChannelSpec(
         "info.regulations", "info", "📕", "Regulamento interno", known_id=1164287787898503228
@@ -136,8 +130,6 @@ CHANNEL_SPECS = (
     ChannelSpec(
         "info.patrol", "info", "📋", "Procedimentos patrulha", known_id=1146622065110171661
     ),
-    ChannelSpec("info.rocam", "info", "🏍️", "Doutrina rocam", known_id=1161833937232990330),
-    ChannelSpec("info.eagle", "info", "🚁", "Doutrina aguia", known_id=1161835204642603128),
     ChannelSpec("info.uniforms", "info", "👮", "Fardamentos", known_id=1146622065110171664),
     ChannelSpec("info.vehicles", "info", "🚓", "Viaturas", known_id=1146622065110171665),
     ChannelSpec("info.binds", "info", "⌨️", "Binds operacionais", known_id=1146622065110171667),
@@ -151,16 +143,12 @@ CHANNEL_SPECS = (
     ChannelSpec("community.member", "community", "💬", "Chat choque", known_id=1161830033858515035),
     ChannelSpec("community.suggestions", "community", "💡", "Sugestoes", known_id=1153774907088441354),
     ChannelSpec("community.media", "community", "📷", "Midia e instagram", known_id=1161829510627459172),
-    # 09 Bate ponto
-    ChannelSpec("point.panel", "point", "⏱️", "Bate ponto", known_id=1540546965362974731),
+    # Bate-ponto opera junto das patrulhas; a categoria historica foi removida.
+    ChannelSpec("point.panel", "patrol", "⏱️", "Bate ponto", known_id=1540546965362974731),
     ChannelSpec(
-        "point.active", "point", "👥", "Efetivo em servico", known_id=1540546967938011186
+        "point.active", "patrol", "👥", "Efetivo em servico", known_id=1540546967938011186
     ),
-    # 10 Eventos
-    ChannelSpec("events.notices", "events", "📣", "Notificacoes de eventos"),
-    ChannelSpec("events.waiting", "events", "⏳", "Aguardando evento", "voice"),
-    ChannelSpec("events.room", "events", "🎉", "Evento", "voice"),
-    # 11 Patrulhas
+    # 10 Patrulhas
     ChannelSpec(
         "patrol.availability",
         "patrol",
@@ -190,15 +178,15 @@ CHANNEL_SPECS = (
     ChannelSpec("patrol.eagle.2", "patrol", "🚁", "Aguia 2", "voice", 1161848786637828107),
     ChannelSpec("patrol.blitz.lv", "patrol", "🚧", "Blitz lv", "voice", 1146622065852563591),
     ChannelSpec("patrol.blitz.ls", "patrol", "🚧", "Blitz ls", "voice", 1161828293062967340),
-    # 12 Gerenciamento
+    # Configuracao centralizada na Administracao; Gerenciamento permanece vazio.
     ChannelSpec(
         "management.config",
-        "management",
+        "admin",
         "⚙️",
         "Configuracoes do bot",
         known_id=1166681424154333277,
     ),
-    # 13 Transferencias e parcerias
+    # 16 Transferencias e parcerias
     ChannelSpec(
         "partnerships.transfers",
         "partnerships",
@@ -208,7 +196,7 @@ CHANNEL_SPECS = (
     ),
     ChannelSpec("partnerships.partners", "partnerships", "🤝", "Parceiros"),
     ChannelSpec("partnerships.terms", "partnerships", "📜", "Termos institucionais"),
-    # 14 Recrutamento
+    # 12 Recrutamento
     ChannelSpec(
         "recruitment.requirements",
         "recruitment",
@@ -252,7 +240,7 @@ CHANNEL_SPECS = (
     ChannelSpec("recruitment.waiting", "recruitment", "⏳", "Aguardando recrutamento", "voice"),
     ChannelSpec("recruitment.interview", "recruitment", "🎙️", "Entrevista", "voice"),
     ChannelSpec("recruitment.result", "recruitment", "📣", "Resultado", "voice"),
-    # 15 Cursos
+    # 13 Cursos
     ChannelSpec("courses.panel", "courses", "🎯", "Treinamentos", known_id=1540546969649291376),
     ChannelSpec("courses.list", "courses", "📖", "Cursos", known_id=1162114694581059584),
     ChannelSpec("courses.chat", "courses", "💬", "Chat de formacao", known_id=1168335359990566912),
@@ -263,11 +251,7 @@ CHANNEL_SPECS = (
     ChannelSpec("courses.waiting", "courses", "🎓", "Aguardando formacao", "voice", 1162240695629795348),
     ChannelSpec("courses.room.1", "courses", "📚", "Sala de curso 1", "voice", 1162240256913965086),
     ChannelSpec("courses.room.2", "courses", "📚", "Sala de curso 2", "voice", 1162934172554367097),
-    # 16 Ausente
-    ChannelSpec("away.room", "away", "💤", "Ausente", "voice"),
-    # 17 Reuniao
-    ChannelSpec("meeting.room", "meeting", "📞", "Reuniao", "voice"),
-    # 18 Auditoria
+    # 14 Auditoria
     ChannelSpec("audit.bot", "audit", "📜", "Auditoria do bot", known_id=1146622066817253458),
     ChannelSpec(
         "audit.discord",
@@ -276,20 +260,8 @@ CHANNEL_SPECS = (
         "Moderacao discord",
         known_id=1146622066817253459,
     ),
-    # 99 Arquivo legado
-    ChannelSpec("archive.tags", "archive", "🔖", "Solicitacoes de tag legadas", known_id=1166194316935446539),
-    ChannelSpec("archive.referrals", "archive", "📩", "Indicacoes legadas", known_id=1164316808933822487),
-    ChannelSpec("archive.central", "archive", "🌐", "Central antiga", known_id=1147294527846092820),
-    ChannelSpec("archive.demotions", "archive", "🔻", "Rebaixamentos legados", known_id=1161766293628801034),
-    ChannelSpec("archive.exonerations", "archive", "🔙", "Exoneracoes legadas", known_id=1161766389116325978),
-    ChannelSpec("archive.blacklist", "archive", "⬛", "Blacklist legada", known_id=1167387428277981214),
-    ChannelSpec("archive.departures", "archive", "📤", "Pedidos de saida legados", known_id=1162977145426022400),
-    ChannelSpec("archive.absences", "archive", "💤", "Ausencias legadas", known_id=1147294480005877826),
-    ChannelSpec("archive.friends", "archive", "💭", "Chat amigos legado", known_id=1163015080141664378),
-    ChannelSpec("archive.point.rules", "archive", "🚨", "Regras antigas do ponto", known_id=1161811169795899412),
-    ChannelSpec("archive.point.panel", "archive", "📝", "Painel antigo do ponto", known_id=1147293613886283817),
-    ChannelSpec("archive.members", "archive", "📜", "Historico de membros", known_id=1147292121234161783),
-    ChannelSpec("archive.point.records", "archive", "💠", "Registros antigos do ponto", known_id=1161828543152541726),
+    # O unico historico preservado do antigo arquivo fica junto da Auditoria.
+    ChannelSpec("archive.members", "audit", "📜", "Historico de membros", known_id=1147292121234161783),
 )
 
 
@@ -376,13 +348,17 @@ class RemodelClient(ProvisionClient):
         stored = await self.settings.get(guild_id, REGISTRY_SETTING, {})
         if not isinstance(stored, dict):
             return
+        allowed = {
+            "categories": set(CATEGORY_BY_KEY),
+            "channels": set(CHANNEL_BY_KEY),
+        }
         for group in ("categories", "channels"):
             values = stored.get(group, {})
             if isinstance(values, dict):
                 self.registry[group] = {
                     str(key): int(value)
                     for key, value in values.items()
-                    if str(value).isdigit()
+                    if str(key) in allowed[group] and str(value).isdigit()
                 }
 
     def category_overwrites(
@@ -420,15 +396,15 @@ class RemodelClient(ProvisionClient):
             self.categories[spec.key] = category
             self.registry["categories"][spec.key] = category.id
 
-        for position, spec in enumerate(CATEGORY_SPECS):
-            await self.categories[spec.key].edit(position=position, reason=LAYOUT_REASON)
+        for spec in CATEGORY_SPECS:
+            await self.categories[spec.key].edit(position=spec.order - 1, reason=LAYOUT_REASON)
 
     async def test_name_separator(self, guild: discord.Guild) -> None:
         expected = format_channel_name("Canal de teste", "🧪")
         test_channel = await guild.create_text_channel(
             expected,
-            category=self.categories["archive"],
-            overwrites=self.categories["archive"].overwrites,
+            category=self.categories["audit"],
+            overwrites=self.categories["audit"].overwrites,
             reason=f"{LAYOUT_REASON} - teste de separador",
         )
         try:
@@ -527,14 +503,6 @@ class RemodelClient(ProvisionClient):
                 failures.append(f"format:{spec.key}")
         if failures:
             raise RuntimeError(f"Layout visual invalido: {failures}")
-        category_count = sum(
-            isinstance(channel, discord.CategoryChannel) for channel in fresh_channels.values()
-        )
-        if category_count != len(CATEGORY_SPECS):
-            raise RuntimeError(
-                f"Quantidade de categorias inesperada: {category_count} "
-                f"(esperado {len(CATEGORY_SPECS)})"
-            )
 
 
 def parse_args() -> argparse.Namespace:

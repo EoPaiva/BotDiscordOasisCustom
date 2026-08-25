@@ -6,6 +6,7 @@ from pathlib import Path
 
 from choque.activity import ActivityService
 from choque.audit import AuditService
+from choque.career import CareerService
 from choque.config import Branding
 from choque.database import Database
 from choque.discipline import DisciplineService
@@ -22,6 +23,7 @@ from choque.requests import RequestService
 from choque.security import SecurityService
 from choque.settings import SettingsService
 from choque.shifts import ShiftService
+from choque.tags import TagService
 from choque.tickets import TicketService
 from choque.training import TrainingService
 
@@ -36,6 +38,7 @@ class CommandCenterServices:
     modules: ModuleFlagService
     shifts: ShiftService
     personnel: PersonnelService
+    career: CareerService
     discipline: DisciplineService
     training: TrainingService
     activity: ActivityService
@@ -46,6 +49,7 @@ class CommandCenterServices:
     recruitment: RecruitmentService
     recruitment_analysis: RecruitmentAnalysisService
     registration_gate: RegistrationGateService
+    tags: TagService
     security: SecurityService
 
     @classmethod
@@ -59,6 +63,7 @@ class CommandCenterServices:
         permissions = PermissionService(settings)
         shifts = ShiftService(database, settings, audit)
         personnel = PersonnelService(database, audit)
+        career = CareerService(database, settings, audit, personnel, shifts)
         discipline = DisciplineService(database, audit)
         training = TrainingService(database, audit)
         activity = ActivityService(database, settings, audit, shifts)
@@ -80,6 +85,7 @@ class CommandCenterServices:
         )
         recruitment_analysis = RecruitmentAnalysisService(database, settings, audit)
         registration_gate = RegistrationGateService(database, settings, audit)
+        tags = TagService(database, audit)
         security = SecurityService(database, settings, audit)
         recruitment.analysis_service = recruitment_analysis
         return cls(
@@ -91,6 +97,7 @@ class CommandCenterServices:
             modules,
             shifts,
             personnel,
+            career,
             discipline,
             training,
             activity,
@@ -101,6 +108,7 @@ class CommandCenterServices:
             recruitment,
             recruitment_analysis,
             registration_gate,
+            tags,
             security,
         )
 

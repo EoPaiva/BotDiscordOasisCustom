@@ -1,7 +1,7 @@
 # Fontes originais preservadas
 
-Esta pasta contém quinze prompts longos enviados durante o projeto. Os doze primeiros foram
-preservados byte a byte; os três mais recentes foram normalizados para UTF-8/LF pelo mecanismo de
+Esta pasta contém dezesseis prompts longos importados durante o projeto e uma fonte financeira externa
+preservada por caminho e hash. Os doze primeiros foram preservados byte a byte; os quatro mais recentes foram normalizados para UTF-8/LF pelo mecanismo de
 patch, sem alterar o conteúdo textual. Ela existe
 para impedir que regras sejam perdidas quando a conversa for compactada ou encerrada. Os arquivos
 são fonte de requisitos, não prova de implementação. O estado real continua documentado em
@@ -26,3 +26,5 @@ Nenhum token ou endereço de e-mail foi encontrado nessas fontes antes da cópia
 | `13-patrol-commander-original.md` | `B6552F54FF06B8DB9DDCA1B3CECDD0650BE9B6451BBE79CDE7CBC806C728EE48` |
 | `14-registration-gate-original.md` | `A5082CC94F07A360DDA32E9AB84D143223D459CBF8EFCB8D890A44F1570E7AFE` |
 | `15-discord-role-access-sync-original.md` | `474E97E28C350105594221BBE4A8CABDA33D2E75AC74377D3FA07B75D0A5E426` |
+| `16-vehicle-operation-ptr-career-merit-officer-original.md` | `11EC9D26F62AB5C646C66CAE7215F633C6748A7E884AB9BAC020C15A5F12AD15` |
+| `C:\Users\mpaii\.codex\attachments\dbcc3e73-3d46-4cc6-a021-2680bab85abc\pasted-text.txt` (Auxílio Financeiro, 40 blocos) | `EC9FA0507AC4CC2F43C1CAD93BF739A050488FB57A8584573273CB7AF70F75B2` |

@@ -12,8 +12,7 @@ from scripts.validate_live_phase6 import components, panel
 EXPECTED_COMPONENTS = {
     "MEMBER": {
         "choque:member:identify:v2",
-        "choque:registration:status:v1",
-        "choque:registration:help:v1",
+        "choque:member:register:v3",
     },
     "RECRUITMENT": {
         "choque:recruitment:requirements:v1",
@@ -110,11 +109,15 @@ def main() -> int:
         missing = expected - custom_ids
         if missing:
             failures.append(f"{panel_type.lower()}_missing={sorted(missing)}")
+        if panel_type == "MEMBER" and custom_ids != expected:
+            failures.append(f"member_components_unexpected={sorted(custom_ids - expected)}")
         embeds = message.get("embeds", [])
         if panel_type == "MEMBER" and (
-            not embeds or "Candidatar-me agora" not in str(embeds[0].get("description", ""))
+            not embeds
+            or "Realizar cadastro" not in str(embeds[0].get("description", ""))
+            or "Candidatar-me agora" in str(embeds[0].get("description", ""))
         ):
-            failures.append("member_recruitment_guidance_missing")
+            failures.append("member_registration_guidance_invalid")
         if panel_type == "RECRUITMENT" and (
             not embeds
             or embeds[0].get("title") != "🪖 QUERO ENTRAR PARA A CHOQUE - BGR"
@@ -123,27 +126,21 @@ def main() -> int:
         ):
             failures.append("recruitment_guidance_missing")
 
-    member_recruitment_links = {
-        url for url in found_links["MEMBER"] if url.startswith("https://")
-    }
-    if len(member_recruitment_links) != 1:
-        failures.append("member_recruitment_link_invalid")
+    if found_links["MEMBER"]:
+        failures.append("member_panel_must_not_link_to_recruitment")
+    recruitment_links = {url for url in found_links["RECRUITMENT"] if url.startswith("https://")}
+    if len(recruitment_links) != 2:
+        failures.append("recruitment_links_invalid")
     else:
-        member_recruitment_url = member_recruitment_links.pop()
-        if not member_recruitment_url.endswith("/recrutamento"):
-            failures.append("member_recruitment_link_invalid")
-        root = member_recruitment_url.removesuffix("/recrutamento").rstrip("/")
-        expected_links = {
-            "MEMBER": {f"{root}/recrutamento"},
-            "RECRUITMENT": {
-                f"{root}/recrutamento",
-                f"{root}/minha-candidatura",
-            },
-        }
-        for panel_type, expected in expected_links.items():
-            missing = expected - found_links[panel_type]
-            if missing:
-                failures.append(f"{panel_type.lower()}_links_missing={sorted(missing)}")
+        recruitment_url = next(
+            (url for url in recruitment_links if url.endswith("/recrutamento")), None
+        )
+        if recruitment_url is None:
+            failures.append("recruitment_links_invalid")
+        else:
+            root = recruitment_url.removesuffix("/recrutamento").rstrip("/")
+            if recruitment_links != {f"{root}/recrutamento", f"{root}/minha-candidatura"}:
+                failures.append("recruitment_links_invalid")
 
     missing_settings = EXPECTED_SETTINGS - {
         key for key, value in settings.items() if isinstance(value, int) and value > 0

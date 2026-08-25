@@ -173,6 +173,9 @@ class RegistrationGateSystem(commands.Cog):
         channel = await self._review_channel(guild)
         lock = self._review_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
+            record = await self.services.registration_gate.prepare_pending_review_delivery(
+                int(record["id"])
+            )
             message = None
             if record["review_channel_id"] and record["review_message_id"]:
                 existing_channel = guild.get_channel(int(record["review_channel_id"]))
@@ -205,47 +208,102 @@ class RegistrationGateSystem(commands.Cog):
         record,
         *,
         actor_id: int | None,
-    ) -> discord.Message:
-        destination = await self._history_channel(guild)
-        lock = self._review_locks.setdefault(guild.id, asyncio.Lock())
-        async with lock:
-            result_message = None
-            if record["result_channel_id"] and record["result_message_id"]:
-                existing_channel = guild.get_channel(int(record["result_channel_id"]))
+    ) -> discord.Message | None:
+        registration_id = int(record["id"])
+        claim_token = await self.services.registration_gate.claim_review_result_delivery(
+            registration_id
+        )
+        if claim_token is None:
+            current = await self.services.registration_gate.get(registration_id)
+            if current and current["result_channel_id"] and current["result_message_id"]:
+                existing_channel = guild.get_channel(int(current["result_channel_id"]))
                 if isinstance(existing_channel, discord.TextChannel):
                     try:
-                        result_message = await existing_channel.fetch_message(
-                            int(record["result_message_id"])
+                        result = await existing_channel.fetch_message(
+                            int(current["result_message_id"])
                         )
                     except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                        result_message = None
-            if result_message is None:
-                result_message = await destination.send(
-                    embed=registration_result_embed(self.bot, record),
-                    allowed_mentions=discord.AllowedMentions.none(),
+                        result = None
+                    await self.cleanup_registration_review_card(guild, current, result)
+                    return result
+            return None
+        destination = await self._history_channel(guild)
+        lock = self._review_locks.setdefault(guild.id, asyncio.Lock())
+        try:
+            async with lock:
+                result_message = None
+                if record["result_channel_id"] and record["result_message_id"]:
+                    existing_channel = guild.get_channel(int(record["result_channel_id"]))
+                    if isinstance(existing_channel, discord.TextChannel):
+                        try:
+                            result_message = await existing_channel.fetch_message(
+                                int(record["result_message_id"])
+                            )
+                        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                            result_message = None
+                if result_message is None:
+                    result_message = await destination.send(
+                        embed=registration_result_embed(self.bot, record),
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                else:
+                    await result_message.edit(embed=registration_result_embed(self.bot, record))
+                await self.services.registration_gate.mark_review_result_delivered(
+                    registration_id,
+                    actor_id=actor_id,
+                    channel_id=result_message.channel.id,
+                    message_id=result_message.id,
+                    claim_token=claim_token,
                 )
-            else:
-                await result_message.edit(embed=registration_result_embed(self.bot, record))
-            await self.services.registration_gate.mark_review_result_delivered(
-                int(record["id"]),
-                actor_id=actor_id,
-                channel_id=result_message.channel.id,
-                message_id=result_message.id,
+        except Exception:
+            await self.services.registration_gate.release_delivery_claim(
+                registration_id, "RESULT", claim_token
             )
-            if record["review_channel_id"] and record["review_message_id"]:
-                source_channel = guild.get_channel(int(record["review_channel_id"]))
-                if isinstance(source_channel, discord.TextChannel):
-                    try:
-                        source = await source_channel.fetch_message(int(record["review_message_id"]))
-                        if source.id != result_message.id:
-                            await source.delete()
-                    except discord.NotFound:
-                        pass
-                    except (discord.Forbidden, discord.HTTPException):
-                        LOGGER.exception(
-                            "Falha ao retirar cadastro da Portaria %s da fila", record["id"]
-                        )
-            return result_message
+            raise
+        await self.cleanup_registration_review_card(guild, record, result_message)
+        return result_message
+
+    async def cleanup_registration_review_card(
+        self,
+        guild: discord.Guild,
+        record,
+        result_message: discord.Message | None = None,
+    ) -> bool:
+        """Remove exactly the persisted temporary card, never a panel or purge."""
+        if not record["review_channel_id"] or not record["review_message_id"]:
+            return False
+        registration_id = int(record["id"])
+        claim_token = await self.services.registration_gate.claim_review_cleanup(registration_id)
+        if claim_token is None:
+            return False
+        try:
+            source_channel = guild.get_channel(int(record["review_channel_id"]))
+            if isinstance(source_channel, discord.TextChannel):
+                try:
+                    source = await source_channel.fetch_message(int(record["review_message_id"]))
+                    if result_message is None or source.id != result_message.id:
+                        await source.delete()
+                except discord.NotFound:
+                    pass
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    LOGGER.warning(
+                        "Falha ao retirar ficha temporária da Portaria %s: %s",
+                        registration_id,
+                        exc,
+                    )
+                    await self.services.registration_gate.release_delivery_claim(
+                        registration_id, "CLEANUP", claim_token
+                    )
+                    return False
+            await self.services.registration_gate.mark_review_cleanup_completed(
+                registration_id, claim_token=claim_token
+            )
+            return True
+        except Exception:
+            await self.services.registration_gate.release_delivery_claim(
+                registration_id, "CLEANUP", claim_token
+            )
+            raise
 
     async def reconcile_review_notifications(self, guild: discord.Guild) -> None:
         for record in await self.services.registration_gate.pending_review_notifications(
@@ -264,6 +322,15 @@ class RegistrationGateSystem(commands.Cog):
                 )
             except Exception:
                 LOGGER.exception("Falha ao arquivar cadastro da Portaria %s", record["id"])
+        for record in await self.services.registration_gate.pending_review_cleanup(
+            guild.id, limit=100
+        ):
+            try:
+                await self.cleanup_registration_review_card(guild, record)
+            except Exception:
+                LOGGER.exception(
+                    "Falha ao recuperar limpeza da ficha temporária %s", record["id"]
+                )
 
     async def _expected_role_state(
         self, member: discord.Member, record

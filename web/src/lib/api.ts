@@ -4,7 +4,9 @@ import { createHash, createHmac, randomUUID } from "node:crypto";
 
 import { normalizeAccessContext, type AccessContext } from "@/lib/access";
 import { getDiscordSessionIdentity, getRecruitmentCandidateIdentity } from "@/lib/identity";
+import { normalizeCommandCenterPath } from "@/lib/request-target";
 export type { AccessContext } from "@/lib/access";
+export { normalizeCommandCenterPath } from "@/lib/request-target";
 
 export class CommandCenterApiError extends Error {
   constructor(
@@ -109,11 +111,12 @@ export async function commandCenterFetch<T>(
   }
   const correlationId = randomUUID();
   const configuration = { internalSecret, guildId };
-  const response = await fetch(`${apiUrl.replace(/\/$/, "")}${path}`, {
+  const target = normalizeCommandCenterPath(path);
+  const response = await fetch(`${apiUrl.replace(/\/$/, "")}${target}`, {
     ...init,
     cache: "no-store",
     signal: init.signal ?? AbortSignal.timeout(15_000),
-    headers: signedRequestHeaders(path, init, configuration, correlationId, identity),
+    headers: signedRequestHeaders(target, init, configuration, correlationId, identity),
   });
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -173,11 +176,12 @@ export async function recruitmentPublicFetch<T>(
 ): Promise<T> {
   const { apiUrl, internalSecret, guildId } = integrationConfiguration();
   const correlationId = randomUUID();
-  const response = await fetch(`${apiUrl}${path}`, {
+  const target = normalizeCommandCenterPath(path);
+  const response = await fetch(`${apiUrl}${target}`, {
     ...init,
     cache: "no-store",
     signal: init.signal ?? AbortSignal.timeout(15_000),
-    headers: signedRequestHeaders(path, init, { internalSecret, guildId }, correlationId),
+    headers: signedRequestHeaders(target, init, { internalSecret, guildId }, correlationId),
   });
   return decodeResponse<T>(response, correlationId);
 }
@@ -192,12 +196,13 @@ export async function recruitmentCandidateFetch<T>(
   }
   const { apiUrl, internalSecret, guildId } = integrationConfiguration();
   const correlationId = randomUUID();
-  const response = await fetch(`${apiUrl}${path}`, {
+  const target = normalizeCommandCenterPath(path);
+  const response = await fetch(`${apiUrl}${target}`, {
     ...init,
     cache: "no-store",
     signal: init.signal ?? AbortSignal.timeout(15_000),
     headers: signedRequestHeaders(
-      path,
+      target,
       init,
       { internalSecret, guildId },
       correlationId,

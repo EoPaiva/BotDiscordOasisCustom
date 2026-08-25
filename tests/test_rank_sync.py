@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import discord
@@ -355,6 +357,60 @@ async def test_03_corporal_to_soldier_is_a_demotion(service_bundle):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("current_level", "target_level", "notification_type", "channel_key"),
+    (
+        (1, 2, "PROMOTION", "career_promotion_channel_id"),
+        (3, 2, "DEMOTION", "career_demotion_channel_id"),
+    ),
+)
+async def test_direct_rank_role_change_enqueues_one_attributed_announcement(
+    service_bundle,
+    current_level: int,
+    target_level: int,
+    notification_type: str,
+    channel_key: str,
+) -> None:
+    ranks, _ = await seed_ranks(service_bundle, current_level=current_level)
+    correlation_id = f"manual-role-change-{notification_type.lower()}"
+
+    await service_bundle["rank_sync"].sync_from_discord(
+        GUILD_ID,
+        DISCORD_ID,
+        {ranks[target_level].id},
+        None,
+        source="DISCORD_ROLE_CHANGE",
+        actor_id=999,
+        correlation_id=correlation_id,
+    )
+    await service_bundle["rank_sync"].sync_from_discord(
+        GUILD_ID,
+        DISCORD_ID,
+        {ranks[target_level].id},
+        None,
+        source="DISCORD_ROLE_CHANGE",
+        actor_id=999,
+        correlation_id=correlation_id,
+    )
+
+    rows = await service_bundle["database"].fetchall(
+        "SELECT * FROM career_notifications WHERE correlation_id=?",
+        (f"rank-role-notification-{correlation_id}",),
+    )
+    assert len(rows) == 1
+    notification = rows[0]
+    assert notification["notification_type"] == notification_type
+    assert notification["channel_setting_key"] == channel_key
+    assert notification["status"] == "PENDING"
+    payload = json.loads(notification["payload_json"])
+    assert payload["actor_id"] == 999
+    assert payload["from_rank_name"] == ranks[current_level].name
+    assert payload["to_rank_name"] == ranks[target_level].name
+    assert "determinad" in payload["reason"]
+    assert "Comando" in payload["reason"]
+
+
+@pytest.mark.asyncio
 async def test_04_unrelated_role_change_is_ignored(service_bundle):
     ranks, _ = await seed_ranks(service_bundle)
     service = service_bundle["rank_sync"]
@@ -481,6 +537,45 @@ async def test_11_nickname_permission_failure_is_audited_without_rolling_back_da
         "SELECT action FROM audit_logs WHERE action='NICKNAME_PERMISSION_ERROR'"
     )
     assert audit is not None
+
+
+@pytest.mark.asyncio
+async def test_audit_recovery_fetches_uncached_offline_member_and_is_idempotent(
+    service_bundle,
+) -> None:
+    ranks, _ = await seed_ranks(service_bundle, current_level=1)
+    guild = FakeGuild(list(ranks.values()))
+    member = FakeMember(guild, DISCORD_ID, [ranks[2]], nick="nome antigo")
+
+    guild.get_member = lambda _discord_id: None
+
+    async def fetch_member(_discord_id: int):
+        return member
+
+    entry = SimpleNamespace(
+        id=987_654_321,
+        created_at=datetime.now(UTC),
+        target=SimpleNamespace(id=DISCORD_ID),
+        user=SimpleNamespace(id=999),
+    )
+
+    async def audit_logs(*, limit: int, action):
+        del limit
+        if action == discord.AuditLogAction.member_role_update:
+            yield entry
+
+    guild.fetch_member = fetch_member
+    guild.audit_logs = audit_logs
+    cog = RankSyncSystem(FakeBot(SimpleNamespace(**service_bundle)))
+
+    assert await cog._recover_recent_member_audits(guild) == 1
+    assert await cog._recover_recent_member_audits(guild) == 0
+    assert await rank_level(service_bundle) == 2
+    assert member.nick == "[SD] Choque_User [77]"
+    notifications = await service_bundle["database"].fetchall(
+        "SELECT notification_type, status FROM career_notifications"
+    )
+    assert [tuple(row) for row in notifications] == [("PROMOTION", "PENDING")]
 
 
 @pytest.mark.asyncio

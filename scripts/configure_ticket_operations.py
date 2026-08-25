@@ -349,7 +349,11 @@ class TicketOperationsConfigurator(discord.Client):
             )
             snapshot["created_category_ids"].append(category.id)
         else:
-            await category.edit(overwrites=overwrites, reason=REASON)
+            await category.edit(
+                name=format_category_name(order, name),
+                overwrites=overwrites,
+                reason=REASON,
+            )
         return category
 
     async def apply(self, guild: discord.Guild, snapshot: dict[str, Any]) -> None:
@@ -359,7 +363,7 @@ class TicketOperationsConfigurator(discord.Client):
             guild,
             "ticket_active_category_id",
             "Atendimentos ativos",
-            2,
+            3,
             await self._staff_overwrites(guild, responsible),
             snapshot,
         )
@@ -367,7 +371,7 @@ class TicketOperationsConfigurator(discord.Client):
             guild,
             "ticket_archive_category_id",
             "Tickets arquivados",
-            98,
+            16,
             await self._staff_overwrites(guild, None),
             snapshot,
         )

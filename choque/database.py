@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import logging
 import shutil
@@ -8,6 +9,7 @@ import sqlite3
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import aiosqlite
@@ -2684,6 +2686,1149 @@ SET minimum_age=15,
 WHERE status != 'ARCHIVED' AND minimum_age != 15;
 """
 
+MIGRATION_028 = """
+-- Delivery claims make Discord publication safe across concurrent callbacks,
+-- reconnects and a controlled restart.  They intentionally live outside the
+-- business rows, so audit and member-history records remain append-only.
+CREATE TABLE audit_delivery_claims (
+    audit_id INTEGER PRIMARY KEY REFERENCES audit_logs(id) ON DELETE CASCADE,
+    claim_token TEXT NOT NULL UNIQUE,
+    claimed_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_audit_delivery_claims_stale
+ON audit_delivery_claims(claimed_at, audit_id);
+
+CREATE TABLE registration_delivery_claims (
+    registration_id INTEGER NOT NULL REFERENCES registration_gate_records(id) ON DELETE CASCADE,
+    phase TEXT NOT NULL CHECK (phase IN ('RESULT','CLEANUP')),
+    claim_token TEXT NOT NULL UNIQUE,
+    claimed_at INTEGER NOT NULL,
+    PRIMARY KEY (registration_id, phase)
+);
+
+CREATE INDEX ix_registration_delivery_claims_stale
+ON registration_delivery_claims(claimed_at, registration_id);
+
+CREATE TABLE member_application_delivery_claims (
+    application_id INTEGER NOT NULL REFERENCES member_applications(id) ON DELETE CASCADE,
+    phase TEXT NOT NULL CHECK (phase IN ('RESULT','CLEANUP')),
+    claim_token TEXT NOT NULL UNIQUE,
+    claimed_at INTEGER NOT NULL,
+    PRIMARY KEY (application_id, phase)
+);
+
+CREATE INDEX ix_member_application_delivery_claims_stale
+ON member_application_delivery_claims(claimed_at, application_id);
+"""
+
+MIGRATION_029 = """
+-- Central de Tags: the request is the durable aggregate.  Identity remains
+-- canonical in members/registration_gate_records; immutable snapshots make
+-- each tag history explainable even if the profile changes later.
+CREATE TABLE tag_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    mta_nick_snapshot TEXT NOT NULL,
+    character_id_snapshot TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN (
+        'SOLICITADO','AGUARDANDO_SET','ATENDIMENTO_ASSUMIDO','SET_REALIZADO',
+        'AGUARDANDO_CONFIRMACAO','CONCLUIDO','PENDENCIA','RECUSADO',
+        'CANCELADO','EXPIRADO'
+    )),
+    version INTEGER NOT NULL DEFAULT 1,
+    requested_at INTEGER NOT NULL,
+    requested_by INTEGER NOT NULL,
+    claimed_by INTEGER,
+    claimed_at INTEGER,
+    set_by INTEGER,
+    set_at INTEGER,
+    set_character_id TEXT,
+    confirmation_requested_at INTEGER,
+    confirmed_by INTEGER,
+    confirmed_at INTEGER,
+    terminal_by INTEGER,
+    terminal_at INTEGER,
+    terminal_reason TEXT,
+    identity_conflict_json TEXT,
+    expires_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- SQLite partial uniqueness is the final guard even when bot/API callbacks
+-- race or a runtime reconnects while a click is in flight.
+CREATE UNIQUE INDEX ux_tag_requests_one_active_member
+ON tag_requests(guild_id, member_id)
+WHERE status IN (
+    'SOLICITADO','AGUARDANDO_SET','ATENDIMENTO_ASSUMIDO','SET_REALIZADO',
+    'AGUARDANDO_CONFIRMACAO','PENDENCIA'
+);
+
+CREATE INDEX ix_tag_requests_queue
+ON tag_requests(guild_id, status, requested_at, id);
+
+CREATE INDEX ix_tag_requests_discord
+ON tag_requests(guild_id, discord_id, requested_at DESC, id DESC);
+
+CREATE TABLE tag_request_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tag_request_id INTEGER NOT NULL REFERENCES tag_requests(id) ON DELETE RESTRICT,
+    guild_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    previous_status TEXT,
+    next_status TEXT,
+    actor_id INTEGER,
+    reason TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    correlation_id TEXT NOT NULL UNIQUE,
+    occurred_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_tag_request_events_timeline
+ON tag_request_events(tag_request_id, occurred_at, id);
+
+-- Desired/applied state separates the domain transition from Discord role I/O.
+-- The generic outbox claims delivery, while this row prevents an old request
+-- version from correcting roles after a newer transition.
+CREATE TABLE tag_role_sync_state (
+    tag_request_id INTEGER PRIMARY KEY REFERENCES tag_requests(id) ON DELETE CASCADE,
+    requested_version INTEGER NOT NULL,
+    applied_version INTEGER,
+    last_error TEXT,
+    updated_at INTEGER NOT NULL
+);
+
+ALTER TABLE web_action_outbox RENAME TO web_action_outbox_v29;
+DROP INDEX IF EXISTS ix_web_action_outbox_delivery;
+
+CREATE TABLE web_action_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    action_type TEXT NOT NULL CHECK (
+        action_type IN (
+            'RANK_SYNC','MEMBER_SYNC','PANEL_REFRESH',
+            'IDENTITY_SYNC','IDENTITY_RECONCILE_BULK','QUALIFICATION_SYNC',
+            'TAG_ROLE_SYNC'
+        )
+    ),
+    target_discord_id INTEGER,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    requested_by INTEGER NOT NULL,
+    correlation_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','PROCESSING','COMPLETED','FAILED')
+    ),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    available_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    processed_at INTEGER,
+    last_error TEXT
+);
+
+INSERT INTO web_action_outbox(
+    id, guild_id, action_type, target_discord_id, payload_json,
+    requested_by, correlation_id, status, attempts, available_at,
+    created_at, processed_at, last_error
+)
+SELECT id, guild_id, action_type, target_discord_id, payload_json,
+       requested_by, correlation_id, status, attempts, available_at,
+       created_at, processed_at, last_error
+FROM web_action_outbox_v29;
+
+DROP TABLE web_action_outbox_v29;
+
+CREATE INDEX ix_web_action_outbox_delivery
+ON web_action_outbox(status, available_at, created_at);
+"""
+
+MIGRATION_030 = """
+-- Confirmation delivery belongs to the tag aggregate rather than process RAM.
+-- The claim state makes normal retries/reconnects idempotent and leaves a
+-- recoverable trail when Discord is temporarily unavailable.
+ALTER TABLE tag_requests ADD COLUMN confirmation_delivery_status TEXT NOT NULL
+    DEFAULT 'NOT_REQUESTED' CHECK (confirmation_delivery_status IN (
+        'NOT_REQUESTED','PENDING','PROCESSING','DELIVERED','FAILED'
+    ));
+ALTER TABLE tag_requests ADD COLUMN confirmation_delivery_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tag_requests ADD COLUMN confirmation_delivery_claimed_at INTEGER;
+ALTER TABLE tag_requests ADD COLUMN confirmation_delivery_message_id INTEGER;
+ALTER TABLE tag_requests ADD COLUMN confirmation_delivery_error TEXT;
+
+UPDATE tag_requests
+SET confirmation_delivery_status='PENDING'
+WHERE status='AGUARDANDO_CONFIRMACAO'
+  AND confirmation_delivery_status='NOT_REQUESTED';
+
+CREATE INDEX ix_tag_requests_confirmation_delivery
+ON tag_requests(guild_id, status, confirmation_delivery_status, confirmation_requested_at, id);
+
+-- These fields are a denormalized, auditable projection of the latest tag
+-- state.  The request/event tables remain the complete historical authority.
+ALTER TABLE members ADD COLUMN tag_status TEXT;
+ALTER TABLE members ADD COLUMN tag_completed_at INTEGER;
+ALTER TABLE members ADD COLUMN tag_set_by INTEGER;
+ALTER TABLE members ADD COLUMN tag_last_confirmed_at INTEGER;
+"""
+
+MIGRATION_031 = """
+-- Rate-limit reconciliation requests independently from the normal versioned
+-- domain transitions.  A manual Discord-side role edit is repairable without
+-- creating an unbounded outbox stream every worker tick.
+ALTER TABLE tag_role_sync_state ADD COLUMN last_reconcile_requested_at INTEGER;
+"""
+
+MIGRATION_032 = """
+-- A durable call reservation enforces the anti-spam window across restart and
+-- concurrent responsible users.  The actual successful DM remains a separate
+-- immutable event in tag_request_events.
+ALTER TABLE tag_requests ADD COLUMN last_call_at INTEGER;
+ALTER TABLE tag_requests ADD COLUMN last_call_by INTEGER;
+"""
+
+MIGRATION_033 = """
+-- A role notification is a durable delivery, not a best-effort side effect of
+-- a button callback.  It is intentionally separate from the member's later
+-- confirmation notice, because a restart between these two phases must not
+-- duplicate either message.
+ALTER TABLE tag_requests ADD COLUMN responsible_notification_status TEXT NOT NULL
+    DEFAULT 'NOT_REQUESTED' CHECK (responsible_notification_status IN (
+        'NOT_REQUESTED','PENDING','PROCESSING','DELIVERED','FAILED'
+    ));
+ALTER TABLE tag_requests ADD COLUMN responsible_notification_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tag_requests ADD COLUMN responsible_notification_claimed_at INTEGER;
+ALTER TABLE tag_requests ADD COLUMN responsible_notification_message_id INTEGER;
+ALTER TABLE tag_requests ADD COLUMN responsible_notification_error TEXT;
+
+CREATE INDEX ix_tag_requests_responsible_delivery
+ON tag_requests(guild_id, status, responsible_notification_status, requested_at, id);
+"""
+
+MIGRATION_034 = """
+-- Terminal outcomes have their own recoverable member notice.  A recusal,
+-- cancellation or expiration must remain explainable even if Discord was down
+-- at the moment the domain decision committed.
+ALTER TABLE tag_requests ADD COLUMN terminal_notification_status TEXT NOT NULL
+    DEFAULT 'NOT_REQUESTED' CHECK (terminal_notification_status IN (
+        'NOT_REQUESTED','PENDING','PROCESSING','DELIVERED','FAILED'
+    ));
+ALTER TABLE tag_requests ADD COLUMN terminal_notification_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tag_requests ADD COLUMN terminal_notification_claimed_at INTEGER;
+ALTER TABLE tag_requests ADD COLUMN terminal_notification_message_id INTEGER;
+ALTER TABLE tag_requests ADD COLUMN terminal_notification_error TEXT;
+
+CREATE INDEX ix_tag_requests_terminal_delivery
+ON tag_requests(guild_id, status, terminal_notification_status, terminal_at, id);
+"""
+
+MIGRATION_035 = """
+-- Distinguish a normal request from a member declaration that the MTA tag is
+-- already present.  Both paths remain subject to responsible validation; the
+-- declaration must never grant TAG SETADA directly from a member click.
+ALTER TABLE tag_requests ADD COLUMN request_origin TEXT NOT NULL
+    DEFAULT 'SET_REQUEST' CHECK (request_origin IN (
+        'SET_REQUEST','EXISTING_DECLARATION'
+    ));
+
+CREATE INDEX ix_tag_requests_origin_queue
+ON tag_requests(guild_id, request_origin, status, requested_at, id);
+"""
+
+MIGRATION_036 = """
+-- Public operational status is durable and independent from Discord message
+-- state. Manual overrides and automatic observations coexist; the effective
+-- projection is rebuilt after restart instead of trusting process memory.
+CREATE TABLE system_status_components (
+    guild_id INTEGER NOT NULL,
+    component_key TEXT NOT NULL,
+    detected_state TEXT NOT NULL DEFAULT 'OPERACIONAL' CHECK (detected_state IN (
+        'OPERACIONAL','ATUALIZANDO','EM_MANUTENCAO','INSTAVEL_DEGRADADO',
+        'TEMPORARIAMENTE_DESATIVADO','INDISPONIVEL'
+    )),
+    detected_summary TEXT NOT NULL DEFAULT 'Monitoramento iniciado.',
+    detected_at INTEGER NOT NULL,
+    candidate_state TEXT,
+    candidate_summary TEXT,
+    candidate_streak INTEGER NOT NULL DEFAULT 0,
+    last_signal_at INTEGER,
+    last_success_at INTEGER,
+    override_state TEXT CHECK (override_state IS NULL OR override_state IN (
+        'ATUALIZANDO','EM_MANUTENCAO','INSTAVEL_DEGRADADO',
+        'TEMPORARIAMENTE_DESATIVADO','INDISPONIVEL'
+    )),
+    override_reason TEXT,
+    override_responsible_id INTEGER,
+    override_started_at INTEGER,
+    override_expected_at INTEGER,
+    override_expires_at INTEGER,
+    last_notification_at INTEGER,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, component_key)
+);
+
+CREATE INDEX ix_system_status_effective
+ON system_status_components(guild_id, override_state, detected_state, updated_at);
+
+CREATE TABLE system_status_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    component_key TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    previous_state TEXT,
+    next_state TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    reason TEXT,
+    actor_id INTEGER,
+    responsible_id INTEGER,
+    expected_at INTEGER,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    correlation_id TEXT NOT NULL UNIQUE,
+    notification_status TEXT NOT NULL DEFAULT 'NOT_REQUESTED' CHECK (
+        notification_status IN ('NOT_REQUESTED','PENDING','PROCESSING','DELIVERED','FAILED','SUPPRESSED')
+    ),
+    notification_attempts INTEGER NOT NULL DEFAULT 0,
+    notification_claimed_at INTEGER,
+    notification_message_id INTEGER,
+    notification_error TEXT,
+    occurred_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_system_status_timeline
+ON system_status_events(guild_id, component_key, occurred_at DESC, id DESC);
+
+CREATE INDEX ix_system_status_notifications
+ON system_status_events(guild_id, notification_status, occurred_at, id);
+"""
+
+MIGRATION_037 = """
+-- Automatic duty is an additive evolution of shifts and patrols.  Shifts
+-- remain the official source of service time; patrols become the durable
+-- vehicle aggregate for both queue formations and direct voice presence.
+ALTER TABLE shifts ADD COLUMN start_source TEXT NOT NULL DEFAULT 'MANUAL' CHECK (
+    start_source IN ('MANUAL','VOICE_AUTO','ADMIN','RECOVERY')
+);
+ALTER TABLE shifts ADD COLUMN initial_voice_channel_id INTEGER;
+ALTER TABLE shifts ADD COLUMN current_patrol_id INTEGER
+    REFERENCES patrols(id) ON DELETE SET NULL;
+ALTER TABLE shifts ADD COLUMN role_snapshot TEXT;
+ALTER TABLE shifts ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+
+ALTER TABLE patrols ADD COLUMN creation_source TEXT NOT NULL DEFAULT 'QUEUE_AUTO' CHECK (
+    creation_source IN ('VOICE_AUTO','QUEUE_AUTO','ADMIN','RECOVERY')
+);
+ALTER TABLE patrols ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+
+UPDATE patrols
+SET creation_source=CASE WHEN origin='ADMIN' THEN 'ADMIN' ELSE 'QUEUE_AUTO' END;
+
+ALTER TABLE patrol_channels ADD COLUMN logical_key TEXT;
+ALTER TABLE patrol_channels ADD COLUMN capacity INTEGER NOT NULL DEFAULT 0
+    CHECK (capacity BETWEEN 0 AND 99);
+ALTER TABLE patrol_channels ADD COLUMN allowed_role_ids_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE patrol_channels ADD COLUMN automatic_clock INTEGER NOT NULL DEFAULT 1
+    CHECK (automatic_clock IN (0,1));
+
+UPDATE patrol_channels SET logical_key='voice:' || channel_id WHERE logical_key IS NULL;
+
+CREATE UNIQUE INDEX ux_patrol_channel_logical_key
+ON patrol_channels(guild_id, logical_key)
+WHERE logical_key IS NOT NULL;
+
+CREATE TABLE patrol_composition_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    patrol_id INTEGER NOT NULL REFERENCES patrols(id) ON DELETE RESTRICT,
+    event_type TEXT NOT NULL CHECK (event_type IN (
+        'VEHICLE_CREATED','MEMBER_JOINED','MEMBER_LEFT','MEMBER_MOVED',
+        'COMMANDER_CHANGED','CHANNEL_CHANGED','VEHICLE_CLOSED','ADMIN_ADJUSTED'
+    )),
+    member_id INTEGER REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER,
+    before_channel_id INTEGER,
+    after_channel_id INTEGER,
+    previous_commander_id INTEGER REFERENCES members(id) ON DELETE RESTRICT,
+    next_commander_id INTEGER REFERENCES members(id) ON DELETE RESTRICT,
+    actor_id INTEGER,
+    reason TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    event_key TEXT NOT NULL UNIQUE,
+    occurred_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_patrol_composition_timeline
+ON patrol_composition_events(guild_id, patrol_id, occurred_at, id);
+
+CREATE TABLE patrol_occurrence_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    created_by INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, code)
+);
+
+CREATE TABLE patrol_articles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    severity TEXT NOT NULL DEFAULT 'NORMAL' CHECK (
+        severity IN ('LOW','NORMAL','HIGH','CRITICAL')
+    ),
+    category_id INTEGER REFERENCES patrol_occurrence_categories(id) ON DELETE RESTRICT,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    created_by INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, code)
+);
+
+CREATE TABLE patrol_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    patrol_id INTEGER NOT NULL REFERENCES patrols(id) ON DELETE RESTRICT,
+    status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','FINALIZED','VOID')),
+    vehicle_number INTEGER NOT NULL,
+    voice_channel_id INTEGER NOT NULL,
+    commander_member_id INTEGER REFERENCES members(id) ON DELETE RESTRICT,
+    commander_discord_id INTEGER,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL CHECK (duration_ms>=0),
+    responsible_id INTEGER,
+    description TEXT,
+    observations TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    finalized_at INTEGER,
+    UNIQUE(guild_id, patrol_id)
+);
+
+CREATE INDEX ix_patrol_reports_queue
+ON patrol_reports(guild_id, status, ended_at DESC, id DESC);
+
+CREATE TABLE patrol_report_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    report_id INTEGER NOT NULL REFERENCES patrol_reports(id) ON DELETE RESTRICT,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    display_name TEXT NOT NULL,
+    rank_name TEXT,
+    member_role TEXT NOT NULL,
+    joined_at INTEGER,
+    left_at INTEGER,
+    UNIQUE(report_id, member_id)
+);
+
+CREATE INDEX ix_patrol_report_members_member
+ON patrol_report_members(guild_id, member_id, report_id DESC);
+
+CREATE TABLE patrol_report_occurrences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    report_id INTEGER NOT NULL REFERENCES patrol_reports(id) ON DELETE RESTRICT,
+    subject_member_id INTEGER REFERENCES members(id) ON DELETE RESTRICT,
+    subject_discord_id INTEGER,
+    subject_name TEXT,
+    subject_rank TEXT,
+    category_id INTEGER NOT NULL REFERENCES patrol_occurrence_categories(id) ON DELETE RESTRICT,
+    article_id INTEGER REFERENCES patrol_articles(id) ON DELETE RESTRICT,
+    occurred_at INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    description TEXT NOT NULL,
+    responsible_id INTEGER NOT NULL,
+    observations TEXT,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_patrol_report_occurrences_report
+ON patrol_report_occurrences(guild_id, report_id, occurred_at, id);
+
+CREATE TABLE patrol_report_evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    report_id INTEGER NOT NULL REFERENCES patrol_reports(id) ON DELETE RESTRICT,
+    occurrence_id INTEGER REFERENCES patrol_report_occurrences(id) ON DELETE RESTRICT,
+    evidence_type TEXT NOT NULL CHECK (evidence_type IN ('IMAGE','LINK','FILE','NOTE')),
+    locator TEXT NOT NULL,
+    description TEXT,
+    author_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_patrol_report_evidence_report
+ON patrol_report_evidence(guild_id, report_id, occurrence_id, created_at, id);
+
+CREATE TABLE patrol_admin_adjustments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    action_type TEXT NOT NULL CHECK (action_type IN (
+        'SHIFT_OPENED','SHIFT_CLOSED','SHIFT_CORRECTED','SHIFT_INVALIDATED',
+        'MEMBER_ASSIGNED','MEMBER_REMOVED','COMMANDER_OVERRIDDEN','REPORT_VOIDED'
+    )),
+    patrol_id INTEGER REFERENCES patrols(id) ON DELETE RESTRICT,
+    shift_id INTEGER REFERENCES shifts(id) ON DELETE RESTRICT,
+    target_discord_id INTEGER,
+    actor_id INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    before_json TEXT NOT NULL DEFAULT '{}',
+    after_json TEXT NOT NULL DEFAULT '{}',
+    correlation_id TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_patrol_admin_adjustments_timeline
+ON patrol_admin_adjustments(guild_id, created_at DESC, id DESC);
+"""
+
+MIGRATION_038 = """
+-- Career progression, merit and officer candidacy extend the canonical member,
+-- rank and shift sources. No parallel identity or hour counter is introduced.
+-- Some supported legacy snapshots start their recorded migration history at v8
+-- and may not contain optional v3 personnel tables. Recreate the canonical
+-- action table before extending it so those snapshots can still reach v38.
+CREATE TABLE IF NOT EXISTS personnel_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    action_type TEXT NOT NULL CHECK (action_type IN ('PROMOTION','DEMOTION')),
+    from_rank_id INTEGER REFERENCES ranks(id),
+    to_rank_id INTEGER NOT NULL REFERENCES ranks(id),
+    reason TEXT NOT NULL,
+    actor_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_personnel_actions_member_time
+ON personnel_actions(guild_id, discord_id, created_at DESC);
+
+ALTER TABLE personnel_actions ADD COLUMN source TEXT NOT NULL DEFAULT 'MANUAL' CHECK (
+    source IN ('MANUAL','AUTOMATIC_HOURS','OFFICER_DECISION','DISCORD_SYNC')
+);
+ALTER TABLE personnel_actions ADD COLUMN evidence_locator TEXT;
+ALTER TABLE personnel_actions ADD COLUMN observations TEXT;
+ALTER TABLE personnel_actions ADD COLUMN article_code TEXT;
+ALTER TABLE personnel_actions ADD COLUMN correlation_id TEXT;
+
+CREATE UNIQUE INDEX ux_personnel_actions_correlation
+ON personnel_actions(correlation_id) WHERE correlation_id IS NOT NULL;
+
+CREATE TABLE career_progression_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    sequence_number INTEGER NOT NULL CHECK (sequence_number BETWEEN 1 AND 100),
+    from_rank_id INTEGER NOT NULL REFERENCES ranks(id) ON DELETE RESTRICT,
+    to_rank_id INTEGER NOT NULL REFERENCES ranks(id) ON DELETE RESTRICT,
+    target_total_ms INTEGER NOT NULL CHECK (target_total_ms>=0),
+    minimum_tenure_ms INTEGER NOT NULL DEFAULT 0 CHECK (minimum_tenure_ms>=0),
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+    created_by INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_by INTEGER,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, sequence_number),
+    UNIQUE(guild_id, from_rank_id)
+);
+
+CREATE TABLE career_progression_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    rule_id INTEGER NOT NULL REFERENCES career_progression_rules(id) ON DELETE RESTRICT,
+    personnel_action_id INTEGER NOT NULL UNIQUE REFERENCES personnel_actions(id) ON DELETE RESTRICT,
+    from_rank_id INTEGER NOT NULL REFERENCES ranks(id) ON DELETE RESTRICT,
+    to_rank_id INTEGER NOT NULL REFERENCES ranks(id) ON DELETE RESTRICT,
+    valid_hours_ms INTEGER NOT NULL,
+    rank_tenure_ms INTEGER NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('AUTOMATIC_HOURS','RECOVERY')),
+    idempotency_key TEXT NOT NULL UNIQUE,
+    correlation_id TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    published_at INTEGER
+);
+
+CREATE INDEX ix_career_progression_member_time
+ON career_progression_events(guild_id, member_id, created_at DESC, id DESC);
+
+CREATE TABLE career_merits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    merit_type TEXT NOT NULL CHECK (merit_type IN ('POSITIVE','NEGATIVE')),
+    category TEXT NOT NULL,
+    weight INTEGER NOT NULL CHECK (weight BETWEEN 1 AND 10),
+    reason TEXT NOT NULL,
+    evidence_locator TEXT,
+    observation TEXT,
+    actor_id INTEGER NOT NULL,
+    correlation_id TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_career_merits_member_time
+ON career_merits(guild_id, member_id, created_at DESC, id DESC);
+
+CREATE TABLE officer_questionnaire_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    version_number INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','ACTIVE','RETIRED')),
+    title TEXT NOT NULL,
+    weights_json TEXT NOT NULL,
+    criteria_json TEXT NOT NULL DEFAULT '{}',
+    created_by INTEGER,
+    created_at INTEGER NOT NULL,
+    activated_at INTEGER,
+    UNIQUE(guild_id, version_number)
+);
+
+CREATE UNIQUE INDEX ux_active_officer_questionnaire
+ON officer_questionnaire_versions(guild_id) WHERE status='ACTIVE';
+
+CREATE TABLE officer_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    questionnaire_version_id INTEGER NOT NULL
+        REFERENCES officer_questionnaire_versions(id) ON DELETE RESTRICT,
+    question_number INTEGER NOT NULL CHECK (question_number BETWEEN 1 AND 30),
+    competency TEXT NOT NULL,
+    question_type TEXT NOT NULL CHECK (
+        question_type IN ('SCENARIO','OPEN','PRIORITIZATION','CONFLICT','ETHICAL','COMMAND','MANAGEMENT')
+    ),
+    prompt TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 1 CHECK (weight>0),
+    red_flag_rules_json TEXT NOT NULL DEFAULT '[]',
+    UNIQUE(questionnaire_version_id, question_number)
+);
+
+CREATE TABLE officer_applications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    questionnaire_version_id INTEGER NOT NULL
+        REFERENCES officer_questionnaire_versions(id) ON DELETE RESTRICT,
+    status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (
+        status IN ('DRAFT','SUBMITTED','IN_REVIEW','INTERVIEW_REQUIRED',
+                   'APPROVED_CONDITIONAL','APPROVED','REJECTED','RETURNED','CANCELLED')
+    ),
+    identity_snapshot_json TEXT NOT NULL,
+    career_snapshot_json TEXT NOT NULL,
+    score_summary_json TEXT,
+    analysis_report_json TEXT,
+    assigned_to INTEGER,
+    assigned_at INTEGER,
+    submitted_at INTEGER,
+    reviewed_by INTEGER,
+    reviewed_at INTEGER,
+    decision_reason TEXT,
+    result_released_at INTEGER,
+    resubmit_after INTEGER,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX ux_open_officer_application
+ON officer_applications(guild_id, member_id)
+WHERE status IN ('DRAFT','SUBMITTED','IN_REVIEW','INTERVIEW_REQUIRED','RETURNED');
+
+CREATE INDEX ix_officer_application_queue
+ON officer_applications(guild_id, status, submitted_at, id);
+
+CREATE TABLE officer_answers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id INTEGER NOT NULL REFERENCES officer_applications(id) ON DELETE RESTRICT,
+    question_id INTEGER NOT NULL REFERENCES officer_questions(id) ON DELETE RESTRICT,
+    answer_text TEXT NOT NULL,
+    answered_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(application_id, question_id)
+);
+
+CREATE TABLE officer_question_scores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id INTEGER NOT NULL REFERENCES officer_applications(id) ON DELETE RESTRICT,
+    question_id INTEGER NOT NULL REFERENCES officer_questions(id) ON DELETE RESTRICT,
+    score INTEGER NOT NULL CHECK (score BETWEEN 1 AND 10),
+    rationale TEXT NOT NULL,
+    evaluator_id INTEGER,
+    source TEXT NOT NULL CHECK (source IN ('RULES','ASSISTANT','HUMAN')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(application_id, question_id, source)
+);
+
+CREATE TABLE officer_interviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id INTEGER NOT NULL REFERENCES officer_applications(id) ON DELETE RESTRICT,
+    interviewer_id INTEGER NOT NULL,
+    scheduled_at INTEGER,
+    completed_at INTEGER,
+    result TEXT CHECK (result IN ('PENDING','POSITIVE','NEUTRAL','NEGATIVE')),
+    observations TEXT,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE officer_conditions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id INTEGER NOT NULL REFERENCES officer_applications(id) ON DELETE RESTRICT,
+    condition_text TEXT NOT NULL,
+    due_at INTEGER,
+    responsible_id INTEGER,
+    observation TEXT,
+    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','MET','FAILED','CANCELLED')),
+    created_at INTEGER NOT NULL,
+    resolved_at INTEGER
+);
+
+CREATE TABLE officer_application_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id INTEGER NOT NULL REFERENCES officer_applications(id) ON DELETE RESTRICT,
+    event_type TEXT NOT NULL,
+    previous_status TEXT,
+    next_status TEXT,
+    actor_id INTEGER,
+    reason TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    correlation_id TEXT NOT NULL UNIQUE,
+    occurred_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_officer_application_timeline
+ON officer_application_events(application_id, occurred_at, id);
+"""
+
+MIGRATION_039 = """
+-- Durable Discord/channel delivery for career, merit and officer events. Kept
+-- separate from migration 38 so an environment that already opened the new
+-- domain schema still receives the delivery outbox.
+CREATE TABLE career_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    notification_type TEXT NOT NULL CHECK (
+        notification_type IN (
+            'PROMOTION','DEMOTION','MERIT','OFFICER_SUBMITTED','OFFICER_DECISION'
+        )
+    ),
+    subject_id INTEGER NOT NULL,
+    target_discord_id INTEGER,
+    channel_setting_key TEXT,
+    payload_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','PROCESSING','DELIVERED','FAILED')
+    ),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts>=0),
+    available_at INTEGER NOT NULL,
+    delivered_at INTEGER,
+    channel_message_id INTEGER,
+    dm_message_id INTEGER,
+    last_error TEXT,
+    correlation_id TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_career_notifications_delivery
+ON career_notifications(status, available_at, id);
+"""
+
+MIGRATION_040 = """
+-- Central de Auxílio Financeiro. Valores são sempre inteiros em centavos;
+-- não há FLOAT nem saldo mutável sem lançamento correspondente. A base é
+-- append-only: cancelamentos/estornos acrescentam eventos e lançamentos.
+CREATE TABLE financial_projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    public_code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT NOT NULL,
+    target_cents INTEGER NOT NULL CHECK (target_cents > 0),
+    collected_cents INTEGER NOT NULL DEFAULT 0 CHECK (collected_cents >= 0),
+    status TEXT NOT NULL DEFAULT 'EM_PLANEJAMENTO' CHECK (status IN (
+        'EM_PLANEJAMENTO','EM_ANDAMENTO','CONCLUIDA','CANCELADA','SUSPENSA'
+    )),
+    deadline_at INTEGER,
+    responsible_id INTEGER,
+    notes TEXT,
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    version INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(guild_id, public_code)
+);
+
+CREATE INDEX ix_financial_projects_active
+ON financial_projects(guild_id, status, created_at DESC, id DESC);
+
+CREATE TABLE financial_contributions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+    destination_kind TEXT NOT NULL CHECK (destination_kind IN ('FUNDO_GERAL','PROJETO')),
+    project_id INTEGER REFERENCES financial_projects(id) ON DELETE RESTRICT,
+    visibility TEXT NOT NULL CHECK (visibility IN ('PUBLICO','ANONIMO')),
+    observation TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDENTE' CHECK (status IN (
+        'PENDENTE','CONFIRMADA','NAO_CONFIRMADA','CANCELADA'
+    )),
+    declared_at INTEGER NOT NULL,
+    confirmed_at INTEGER,
+    confirmed_by INTEGER,
+    final_reason TEXT,
+    reversed_at INTEGER,
+    reversed_by INTEGER,
+    reversal_reason TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    idempotency_key TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK (
+        (destination_kind='FUNDO_GERAL' AND project_id IS NULL)
+        OR (destination_kind='PROJETO' AND project_id IS NOT NULL)
+    ),
+    UNIQUE(guild_id, idempotency_key)
+);
+
+CREATE INDEX ix_financial_contributions_review
+ON financial_contributions(guild_id, status, declared_at, id);
+CREATE INDEX ix_financial_contributions_member
+ON financial_contributions(guild_id, member_id, declared_at DESC, id DESC);
+
+CREATE TABLE financial_contribution_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contribution_id INTEGER NOT NULL REFERENCES financial_contributions(id) ON DELETE RESTRICT,
+    event_type TEXT NOT NULL CHECK (event_type IN (
+        'DECLARED','CONFIRMED','NOT_CONFIRMED','CANCELLED','REVERSED'
+    )),
+    actor_id INTEGER,
+    reason TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    correlation_id TEXT NOT NULL UNIQUE,
+    occurred_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_financial_contribution_events_timeline
+ON financial_contribution_events(contribution_id, occurred_at, id);
+
+CREATE TABLE financial_ledger_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    entry_type TEXT NOT NULL CHECK (entry_type IN (
+        'CONTRIBUICAO_CONFIRMADA','DESPESA','ESTORNO_CONTRIBUICAO','ESTORNO_DESPESA'
+    )),
+    amount_cents INTEGER NOT NULL CHECK (amount_cents <> 0),
+    fund_code TEXT NOT NULL DEFAULT 'FUNDO_GERAL',
+    project_id INTEGER REFERENCES financial_projects(id) ON DELETE RESTRICT,
+    contribution_id INTEGER REFERENCES financial_contributions(id) ON DELETE RESTRICT,
+    expense_id INTEGER,
+    reverses_entry_id INTEGER REFERENCES financial_ledger_entries(id) ON DELETE RESTRICT,
+    description TEXT NOT NULL,
+    actor_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'POSTADO' CHECK (status IN ('POSTADO','ESTORNADO')),
+    correlation_id TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX ux_financial_ledger_confirmed_contribution
+ON financial_ledger_entries(contribution_id)
+WHERE entry_type='CONTRIBUICAO_CONFIRMADA';
+CREATE UNIQUE INDEX ux_financial_ledger_reversal
+ON financial_ledger_entries(reverses_entry_id)
+WHERE reverses_entry_id IS NOT NULL;
+CREATE INDEX ix_financial_ledger_project_time
+ON financial_ledger_entries(guild_id, project_id, created_at DESC, id DESC);
+
+CREATE TABLE financial_expenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    project_id INTEGER REFERENCES financial_projects(id) ON DELETE RESTRICT,
+    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+    category TEXT NOT NULL,
+    description TEXT NOT NULL,
+    recorded_by INTEGER NOT NULL,
+    recorded_at INTEGER NOT NULL,
+    reversed_at INTEGER,
+    reversed_by INTEGER,
+    reversal_reason TEXT,
+    ledger_entry_id INTEGER UNIQUE REFERENCES financial_ledger_entries(id) ON DELETE RESTRICT,
+    version INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX ix_financial_expenses_project_time
+ON financial_expenses(guild_id, project_id, recorded_at DESC, id DESC);
+
+CREATE TABLE financial_project_sponsors (
+    project_id INTEGER NOT NULL REFERENCES financial_projects(id) ON DELETE RESTRICT,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    visibility TEXT NOT NULL CHECK (visibility IN ('PUBLICO','ANONIMO')),
+    declared_at INTEGER NOT NULL,
+    withdrawn_at INTEGER,
+    PRIMARY KEY(project_id, member_id)
+);
+
+CREATE TABLE financial_suggestions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL,
+    description TEXT NOT NULL,
+    estimated_cents INTEGER CHECK (estimated_cents IS NULL OR estimated_cents >= 0),
+    motivation TEXT NOT NULL,
+    reference_url TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDENTE' CHECK (status IN (
+        'PENDENTE','EM_ANALISE','ACEITA','RECUSADA','ARQUIVADA'
+    )),
+    reviewed_by INTEGER,
+    reviewed_at INTEGER,
+    review_reason TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX ix_financial_suggestions_queue
+ON financial_suggestions(guild_id, status, created_at, id);
+
+CREATE TABLE financial_honor_definitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    honor_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    discord_role_id INTEGER,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    symbolic_only INTEGER NOT NULL DEFAULT 1 CHECK (symbolic_only=1),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, honor_key)
+);
+
+CREATE TABLE financial_member_honors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    honor_definition_id INTEGER NOT NULL REFERENCES financial_honor_definitions(id) ON DELETE RESTRICT,
+    source TEXT NOT NULL CHECK (source IN ('AUTOMATICA','MANUAL')),
+    justification TEXT NOT NULL,
+    granted_by INTEGER,
+    granted_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    removed_by INTEGER,
+    removed_at INTEGER,
+    removal_reason TEXT,
+    correlation_id TEXT NOT NULL UNIQUE,
+    version INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE UNIQUE INDEX ux_financial_member_honor_active
+ON financial_member_honors(guild_id, member_id, honor_definition_id)
+WHERE removed_at IS NULL;
+CREATE INDEX ix_financial_member_honors_member
+ON financial_member_honors(guild_id, member_id, granted_at DESC, id DESC);
+
+CREATE TABLE financial_achievement_definitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    achievement_key TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE financial_member_achievements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    achievement_definition_id INTEGER NOT NULL REFERENCES financial_achievement_definitions(id) ON DELETE RESTRICT,
+    source TEXT NOT NULL CHECK (source IN ('AUTOMATICA','MANUAL')),
+    reason TEXT NOT NULL,
+    awarded_by INTEGER,
+    awarded_at INTEGER NOT NULL,
+    correlation_id TEXT NOT NULL UNIQUE,
+    UNIQUE(guild_id, member_id, achievement_definition_id)
+);
+
+CREATE TABLE financial_certificates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    honor_id INTEGER REFERENCES financial_member_honors(id) ON DELETE RESTRICT,
+    project_id INTEGER REFERENCES financial_projects(id) ON DELETE RESTRICT,
+    validation_code TEXT NOT NULL UNIQUE,
+    issued_by INTEGER NOT NULL,
+    issued_at INTEGER NOT NULL,
+    revoked_by INTEGER,
+    revoked_at INTEGER,
+    revocation_reason TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE financial_audit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    actor_id INTEGER,
+    target_member_id INTEGER REFERENCES members(id) ON DELETE RESTRICT,
+    contribution_id INTEGER REFERENCES financial_contributions(id) ON DELETE RESTRICT,
+    project_id INTEGER REFERENCES financial_projects(id) ON DELETE RESTRICT,
+    ledger_entry_id INTEGER REFERENCES financial_ledger_entries(id) ON DELETE RESTRICT,
+    honor_id INTEGER REFERENCES financial_member_honors(id) ON DELETE RESTRICT,
+    before_json TEXT,
+    after_json TEXT,
+    reason TEXT,
+    correlation_id TEXT NOT NULL UNIQUE,
+    occurred_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_financial_audit_timeline
+ON financial_audit_events(guild_id, occurred_at DESC, id DESC);
+"""
+
+MIGRATION_041 = """
+-- Durable, privacy-minimized financial notifications. The payment and audit
+-- transaction writes the intent; Discord delivery is retried by the sole
+-- Gateway process after commit and never determines a financial decision.
+CREATE TABLE financial_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    notification_type TEXT NOT NULL CHECK (notification_type IN (
+        'CONTRIBUTION_DECIDED','PROJECT_COMPLETED','HONOR_GRANTED',
+        'HONOR_REMOVED','CERTIFICATE_ISSUED','SUGGESTION_REVIEWED'
+    )),
+    subject_type TEXT NOT NULL,
+    subject_id INTEGER NOT NULL,
+    target_discord_id INTEGER,
+    channel_setting_key TEXT,
+    payload_json TEXT NOT NULL,
+    event_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','PROCESSING','DELIVERED','FAILED')),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts>=0),
+    available_at INTEGER NOT NULL,
+    delivered_at INTEGER,
+    channel_message_id INTEGER,
+    dm_message_id INTEGER,
+    last_error TEXT,
+    correlation_id TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, event_key)
+);
+
+CREATE INDEX ix_financial_notifications_delivery
+ON financial_notifications(status, available_at, id);
+"""
+
+MIGRATION_042 = """
+-- Destaques financeiros são uma projeção pública opt-in e recuperável. A
+-- identidade continua controlada por visibility; o valor individual exige um
+-- consentimento separado, que é falso para todo registro preexistente.
+ALTER TABLE financial_contributions ADD COLUMN public_amount INTEGER NOT NULL
+    DEFAULT 0 CHECK (public_amount IN (0,1));
+
+-- Recrie a outbox para acrescentar o destaque e uma revisão compare-and-set.
+-- O event_key permanece único por contribuição e o channel_message_id é
+-- preservado quando um estorno rearma a mesma publicação para edição.
+ALTER TABLE financial_notifications RENAME TO financial_notifications_v41;
+DROP INDEX IF EXISTS ix_financial_notifications_delivery;
+
+CREATE TABLE financial_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    notification_type TEXT NOT NULL CHECK (notification_type IN (
+        'CONTRIBUTION_DECIDED','CONTRIBUTION_HIGHLIGHT','PROJECT_COMPLETED',
+        'HONOR_GRANTED','HONOR_REMOVED','CERTIFICATE_ISSUED','SUGGESTION_REVIEWED'
+    )),
+    subject_type TEXT NOT NULL,
+    subject_id INTEGER NOT NULL,
+    target_discord_id INTEGER,
+    channel_setting_key TEXT,
+    payload_json TEXT NOT NULL,
+    event_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','PROCESSING','DELIVERED','FAILED')),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts>=0),
+    available_at INTEGER NOT NULL,
+    delivered_at INTEGER,
+    channel_message_id INTEGER,
+    dm_message_id INTEGER,
+    last_error TEXT,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision>=1),
+    correlation_id TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, event_key)
+);
+
+INSERT INTO financial_notifications(
+    id, guild_id, notification_type, subject_type, subject_id,
+    target_discord_id, channel_setting_key, payload_json, event_key,
+    status, attempts, available_at, delivered_at, channel_message_id,
+    dm_message_id, last_error, revision, correlation_id, created_at, updated_at
+)
+SELECT id, guild_id, notification_type, subject_type, subject_id,
+       target_discord_id, channel_setting_key, payload_json, event_key,
+       status, attempts, available_at, delivered_at, channel_message_id,
+       dm_message_id, last_error, 1, correlation_id, created_at, updated_at
+FROM financial_notifications_v41;
+
+DROP TABLE financial_notifications_v41;
+
+CREATE INDEX ix_financial_notifications_delivery
+ON financial_notifications(status, available_at, id);
+
+-- Alinhe somente os títulos canônicos anteriores; concessões e histórico não
+-- são tocados e Patrono continua estritamente manual.
+UPDATE financial_honor_definitions
+SET title=CASE honor_key
+    WHEN 'APOIADOR' THEN '💎 Apoiador da CHOQUE'
+    WHEN 'COLABORADOR' THEN '🌟 Colaborador da CHOQUE'
+    WHEN 'BENFEITOR' THEN '🏅 Benfeitor da CHOQUE'
+    WHEN 'PATRONO' THEN '👑 Patrono da CHOQUE'
+    ELSE title
+END
+WHERE honor_key IN ('APOIADOR','COLABORADOR','BENFEITOR','PATRONO');
+"""
+
+MIGRATION_043 = """
+-- A ficha única da Central de Tags é uma projeção versionada do agregado.
+-- Somente solicitações ativas preexistentes precisam de uma primeira
+-- atualização visual; fichas futuras avançam junto com a versão do pedido.
+ALTER TABLE tag_requests ADD COLUMN request_card_rendered_version INTEGER;
+
+UPDATE tag_requests
+SET request_card_rendered_version=version
+WHERE responsible_notification_message_id IS NOT NULL
+  AND status IN ('CONCLUIDO','RECUSADO','CANCELADO','EXPIRADO');
+
+CREATE INDEX ix_tag_requests_card_refresh
+ON tag_requests(guild_id, responsible_notification_message_id,
+                request_card_rendered_version, version, updated_at, id);
+"""
+
 MIGRATIONS = (
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -2712,7 +3857,33 @@ MIGRATIONS = (
     (25, MIGRATION_025),
     (26, MIGRATION_026),
     (27, MIGRATION_027),
+    (28, MIGRATION_028),
+    (29, MIGRATION_029),
+    (30, MIGRATION_030),
+    (31, MIGRATION_031),
+    (32, MIGRATION_032),
+    (33, MIGRATION_033),
+    (34, MIGRATION_034),
+    (35, MIGRATION_035),
+    (36, MIGRATION_036),
+    (37, MIGRATION_037),
+    (38, MIGRATION_038),
+    (39, MIGRATION_039),
+    (40, MIGRATION_040),
+    (41, MIGRATION_041),
+    (42, MIGRATION_042),
+    (43, MIGRATION_043),
 )
+
+
+@dataclass
+class _TransactionState:
+    """Task-local ownership of the single aiosqlite connection."""
+
+    depth: int = 1
+    rollback_only: bool = False
+    callbacks: list[Callable[[], Awaitable[object] | object]] = field(default_factory=list)
+    owner_task: asyncio.Task[object] | None = None
 
 
 class Database:
@@ -2720,8 +3891,16 @@ class Database:
         self.path = path
         self.legacy_path = legacy_path
         self.connection: aiosqlite.Connection | None = None
-        self._write_lock = asyncio.Lock()
-        self._after_commit_callbacks: list[Callable[[], Awaitable[object] | object]] | None = None
+        # One aiosqlite connection is shared by many Discord callbacks.  A
+        # normal asyncio.Lock around only BEGIN is insufficient: reads from a
+        # different callback can interleave with an open write transaction and
+        # a nested service call can attempt a second BEGIN.  Keep ownership in
+        # a ContextVar so the owning task can compose transactions while all
+        # other tasks wait for the connection to become idle.
+        self._connection_lock = asyncio.Lock()
+        self._transaction_state: contextvars.ContextVar[_TransactionState | None] = (
+            contextvars.ContextVar("database_transaction_state", default=None)
+        )
 
     async def open(self) -> None:
         if self.connection:
@@ -2755,16 +3934,24 @@ class Database:
         row = await self.fetchone(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
         )
-        version = 0
+        applied_versions: set[int] = set()
         if row:
-            current = await self.fetchone(
-                "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"
-            )
-            version = int(current["version"])
+            # Do not infer the full migration history from MAX(version).  A
+            # restored/partially-repaired database can have a non-terminal
+            # gap (for example 28 recorded while 27 is absent); skipping that
+            # gap silently leaves its data migration unapplied.
+            applied_rows = await self.fetchall("SELECT version FROM schema_migrations")
+            applied_versions = {int(item["version"]) for item in applied_rows}
+        # A few pre-versioned legacy snapshots begin their history at a
+        # migration floor (for example, only v8 is recorded).  Versions below
+        # that floor are intentionally implicit in those snapshots.  From the
+        # first recorded version onward, however, every absent version is a
+        # real gap and must be executed even if a later version exists.
+        migration_floor = min(applied_versions) if applied_versions else 1
         for migration_version, script in MIGRATIONS:
-            if migration_version <= version:
+            if migration_version < migration_floor or migration_version in applied_versions:
                 continue
-            async with self._write_lock:
+            async with self._connection_lock:
                 try:
                     await self.connection.executescript("BEGIN IMMEDIATE;\n" + script)
                     await self.connection.execute(
@@ -2775,7 +3962,7 @@ class Database:
                 except Exception:
                     await self.connection.rollback()
                     raise
-            version = migration_version
+            applied_versions.add(migration_version)
 
     async def close(self) -> None:
         if self.connection:
@@ -2786,20 +3973,39 @@ class Database:
     async def transaction(self) -> AsyncIterator[aiosqlite.Connection]:
         if not self.connection:
             raise RuntimeError("Banco nao inicializado")
-        callbacks: list[Callable[[], Awaitable[object] | object]] = []
-        async with self._write_lock:
-            await self.connection.execute("BEGIN IMMEDIATE")
-            self._after_commit_callbacks = callbacks
+        state = self._owned_transaction_state()
+        if state is not None:
+            state.depth += 1
             try:
                 yield self.connection
             except Exception:
-                await self.connection.rollback()
+                state.rollback_only = True
                 raise
-            else:
-                await self.connection.commit()
             finally:
-                self._after_commit_callbacks = None
-        for callback in callbacks:
+                state.depth -= 1
+            return
+
+        state = _TransactionState(owner_task=asyncio.current_task())
+        async with self._connection_lock:
+            token = self._transaction_state.set(state)
+            try:
+                await self.connection.execute("BEGIN IMMEDIATE")
+                try:
+                    yield self.connection
+                except Exception:
+                    state.rollback_only = True
+                    await self.connection.rollback()
+                    raise
+                else:
+                    if state.rollback_only:
+                        await self.connection.rollback()
+                        raise RuntimeError("Transação marcada para rollback por uma operação aninhada.")
+                    await self.connection.commit()
+            except Exception:
+                raise
+            finally:
+                self._transaction_state.reset(token)
+        for callback in state.callbacks:
             try:
                 result = callback()
                 if inspect.isawaitable(result):
@@ -2808,21 +4014,30 @@ class Database:
                 LOGGER.exception("Falha em callback pós-commit")
 
     def after_commit(self, callback: Callable[[], Awaitable[object] | object]) -> None:
-        if self._after_commit_callbacks is None:
+        state = self._owned_transaction_state()
+        if state is None:
             raise RuntimeError("Callback pós-commit registrado fora de uma transação")
-        self._after_commit_callbacks.append(callback)
+        state.callbacks.append(callback)
 
     async def fetchone(self, sql: str, params: tuple = ()) -> aiosqlite.Row | None:
         if not self.connection:
             raise RuntimeError("Banco nao inicializado")
-        async with self.connection.execute(sql, params) as cursor:
-            return await cursor.fetchone()
+        if self._owned_transaction_state() is not None:
+            async with self.connection.execute(sql, params) as cursor:
+                return await cursor.fetchone()
+        async with self._connection_lock:
+            async with self.connection.execute(sql, params) as cursor:
+                return await cursor.fetchone()
 
     async def fetchall(self, sql: str, params: tuple = ()) -> list[aiosqlite.Row]:
         if not self.connection:
             raise RuntimeError("Banco nao inicializado")
-        async with self.connection.execute(sql, params) as cursor:
-            return list(await cursor.fetchall())
+        if self._owned_transaction_state() is not None:
+            async with self.connection.execute(sql, params) as cursor:
+                return list(await cursor.fetchall())
+        async with self._connection_lock:
+            async with self.connection.execute(sql, params) as cursor:
+                return list(await cursor.fetchall())
 
     async def fetchall_fresh(self, sql: str, params: tuple = ()) -> list[aiosqlite.Row]:
         """Read through a short-lived connection for cross-process live views.
@@ -2850,3 +4065,13 @@ class Database:
         async with self.transaction() as connection:
             cursor = await connection.execute(sql, params)
             return int(cursor.lastrowid or 0)
+
+    def _owned_transaction_state(self) -> _TransactionState | None:
+        """Return a transaction only to the task that opened it.
+
+        asyncio copies ContextVars into child tasks.  Without the explicit
+        owner check, a task created during a transaction would bypass the
+        connection lock and issue SQL in somebody else's transaction.
+        """
+        state = self._transaction_state.get()
+        return state if state and state.owner_task is asyncio.current_task() else None

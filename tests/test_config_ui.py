@@ -80,7 +80,7 @@ async def test_configuration_submenus_fit_discord_component_limits():
     assert len(CHANNEL_SETTINGS) == 25
     assert len(roles.children) == 8
     assert len(panels.children) == 14
-    assert len(modules.children) == 11
+    assert len(modules.children) == 12
     for view in (channels, roles, panels, modules):
         assert all(0 <= (item.row or 0) <= 4 for item in view.children)
 
@@ -477,7 +477,7 @@ async def test_phase_four_and_five_panels_are_persistent_and_have_stable_custom_
         5,
         3,
         8,
-        3,
+        4,
         2,
         4,
         4,
@@ -499,6 +499,10 @@ async def test_phase_four_and_five_panels_are_persistent_and_have_stable_custom_
 
     ticket_panel = TicketPanelView()
     assert "choque:ticket:other:v1" in {item.custom_id for item in ticket_panel.children}
+    career_panel = CareerPanelView()
+    assert "choque:career:officer:v1" in {
+        item.custom_id for item in career_panel.children
+    }
 
 
 @pytest.mark.asyncio

@@ -1370,13 +1370,22 @@ class RecruitmentService:
         return [dict(row) for row in await self.database.fetchall(query, (guild_id,))]
 
     async def list_applications(
-        self, guild_id: int, *, status: str | None = None, search: str = "", limit: int = 100
+        self,
+        guild_id: int,
+        *,
+        status: str | None = None,
+        search: str = "",
+        assigned_to: int | None = None,
+        limit: int = 100,
     ) -> list[dict[str, object]]:
         filters = ["a.guild_id=?"]
         params: list[object] = [guild_id]
         if status:
             filters.append("a.status=?")
             params.append(status.upper())
+        if assigned_to is not None:
+            filters.append("a.assigned_to=?")
+            params.append(assigned_to)
         if search.strip():
             filters.append("(a.protocol LIKE ? OR a.candidate_nick LIKE ? OR a.bgr_id LIKE ? OR CAST(a.discord_id AS TEXT) LIKE ?)")
             term = f"%{search.strip()}%"
@@ -1734,11 +1743,17 @@ class RecruitmentService:
         approved: bool,
         internal_reason: str,
         candidate_message: str,
+        origin: str = "WEB",
+        correlation_id: str | None = None,
     ) -> dict[str, object]:
         internal = internal_reason.strip()
         public = candidate_message.strip()
         if len(internal) < 3 or len(public) < 3:
             raise ValidationError("Informe motivo interno e mensagem ao candidato.")
+        normalized_origin = origin.strip().upper()
+        if normalized_origin not in {"WEB", "DISCORD"}:
+            raise ValidationError("Origem de decisão de recrutamento inválida.")
+        correlation = correlation_id.strip() if correlation_id else str(uuid.uuid4())
         target = "APPROVED" if approved else "REJECTED"
         existing = await self.database.fetchone(
             "SELECT * FROM recruitment_applications WHERE guild_id=? AND id=?",
@@ -1753,7 +1768,22 @@ class RecruitmentService:
             raise ConflictError("A candidatura já possui uma decisão final diferente.")
         now = self.clock()
         async with self.database.transaction() as connection:
-            application = await self._application_for_update(connection, guild_id, application_id, expected_version)
+            try:
+                application = await self._application_for_update(
+                    connection, guild_id, application_id, expected_version
+                )
+            except ConflictError:
+                # A repeated click may enter after the first transaction has
+                # committed.  It is idempotent only when the same final
+                # outcome already exists; the opposite result still conflicts.
+                cursor = await connection.execute(
+                    "SELECT * FROM recruitment_applications WHERE guild_id=? AND id=?",
+                    (guild_id, application_id),
+                )
+                current = await cursor.fetchone()
+                if current and current["status"] == target:
+                    return dict(current)
+                raise
             if application["status"] not in {"UNDER_REVIEW", "INTERVIEW_COMPLETED", "FINAL_REVIEW"}:
                 raise ConflictError("A candidatura não está em decisão final.")
             cursor = await connection.execute(
@@ -1814,11 +1844,34 @@ class RecruitmentService:
                 target,
                 now,
             )
-            await self._history(connection, guild_id, application_id, event, actor_id, public, {})
+            await self._review_card_notification(
+                connection,
+                guild_id,
+                application_id,
+                target,
+                expected_version + 1,
+                now,
+            )
+            await self._history(
+                connection,
+                guild_id,
+                application_id,
+                event,
+                actor_id,
+                public,
+                {"origin": normalized_origin, "correlation_id": correlation},
+            )
             await self.audit.record(
                 guild_id, f"RECRUITMENT_{event}", actor_id=actor_id,
                 target_id=int(application["discord_id"]), before={"status": application["status"]},
-                after={"status": target, "member_id": member_id}, reason=internal,
+                after={
+                    "status": target,
+                    "member_id": member_id,
+                    "origin": normalized_origin,
+                    "correlation_id": correlation,
+                },
+                reason=internal,
+                correlation_id=correlation,
                 connection=connection,
             )
         return dict(await self.database.fetchone("SELECT * FROM recruitment_applications WHERE id=?", (application_id,)))
@@ -2488,6 +2541,14 @@ class RecruitmentService:
                 target,
                 now,
             )
+            await self._review_card_notification(
+                connection,
+                guild_id,
+                application_id,
+                target,
+                expected_version + 1,
+                now,
+            )
         return dict(await self.database.fetchone("SELECT * FROM recruitment_applications WHERE id=?", (application_id,)))
 
     async def _set_application_status(
@@ -2509,6 +2570,14 @@ class RecruitmentService:
         if cursor.rowcount != 1:
             raise ConflictError("A candidatura foi atualizada simultaneamente.")
         await self._history(connection, int(application["guild_id"]), int(application["id"]), event, actor_id, None, {})
+        await self._review_card_notification(
+            connection,
+            int(application["guild_id"]),
+            int(application["id"]),
+            target,
+            int(application["version"]) + 1,
+            now,
+        )
 
     async def _history(
         self,
@@ -2601,6 +2670,27 @@ class RecruitmentService:
             {"application_id": application_id, "status": status},
             now,
         )
+
+    async def _review_card_notification(
+        self,
+        connection: aiosqlite.Connection,
+        guild_id: int,
+        application_id: int,
+        status: str,
+        version: int,
+        now: int,
+    ) -> None:
+        """Request an in-place refresh of the one private Discord review card."""
+        await self._notification(
+            connection,
+            guild_id,
+            application_id,
+            "RECRUITMENT_REVIEW_CARD_REFRESH",
+            f"application-review-card:{application_id}:v{version}",
+            {"application_id": application_id, "status": status, "version": version},
+            now,
+        )
+
     @staticmethod
     def _prevent_self_review(application: Mapping[str, object], actor_id: int) -> None:
         if int(application["discord_id"]) == actor_id:

@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
 import pytest
 
+from choque.config import Branding
 from choque.errors import ConflictError, ValidationError
 from choque.rbac import PROFILE_PERMISSIONS
 from cogs.operations_commands import (
     MemberOperationsView,
+    PanelRefreshCoalescer,
     PatrolCentralView,
     PatrolManagementView,
     PatrolReportView,
+    consolidated_report_text,
+    member_safe_report_data,
+    patrol_central_embed,
+    preserved_patrol_channel_policy,
 )
 
 from .conftest import DISCORD_ID, GUILD_ID
@@ -300,6 +309,15 @@ async def test_required_qualification_can_outweigh_rank(service_bundle):
 async def test_equal_ranks_use_join_order_and_later_higher_rank_does_not_replace(service_bundle):
     operations = service_bundle["operations"]
     await prepare_patrol(service_bundle)
+    await operations.configure_patrol_commander(
+        GUILD_ID,
+        DISCORD_ID,
+        enabled=True,
+        require_qualification=False,
+        required_qualification_id=None,
+        minimum_rank_level=0,
+        reassign_when_higher_rank_joins=False,
+    )
     first_member_id = await prepare_ranked_member(service_bundle, DISCORD_ID, rank_level=10)
     await prepare_ranked_member(service_bundle, 457, rank_level=10)
     higher_member_id = await prepare_ranked_member(
@@ -623,6 +641,7 @@ async def test_phase_fifteen_public_views_are_persistent_and_stable():
         assert custom_ids
         assert len(custom_ids) == len(set(custom_ids))
         assert all(value.startswith("choque:operations:") for value in custom_ids)
+    assert "Relatório consolidado" in {item.label for item in views[1].children}
 
 
 @pytest.mark.asyncio
@@ -636,4 +655,157 @@ async def test_commander_management_is_available_only_to_command_profile():
         "Regra de comando",
         "Prioridade",
         "Histórico",
+        "Gerenciar relatórios",
+        "Ajustar integrantes",
+        "Configurar calls",
+        "Categorias/artigos",
+        "Ponto excepcional",
     }
+
+
+def test_consolidated_report_text_contains_frozen_operational_data():
+    rendered = consolidated_report_text(
+        {
+            "report": {
+                "vehicle_number": 12,
+                "voice_channel_id": ACTIVE_A,
+                "commander_discord_id": DISCORD_ID,
+                "started_at": 1_700_000_000_000,
+                "ended_at": 1_700_000_600_000,
+                "duration_ms": 600_000,
+                "status": "FINALIZED",
+                "description": "Patrulhamento preventivo concluído.",
+                "observations": "Sem intercorrências adicionais.",
+            },
+            "members": [
+                {"rank_name": "SOLDADO", "discord_id": DISCORD_ID},
+            ],
+            "occurrences": [
+                {
+                    "subject_discord_id": DISCORD_ID,
+                    "category_title": "Abandono de PTR",
+                    "article_code": "ART-01",
+                }
+            ],
+            "evidence": [
+                {"id": 1, "evidence_type": "LINK", "locator": "https://example.com/1"},
+                {"id": 2, "evidence_type": "NOTE", "locator": "Registro interno"},
+            ],
+        },
+        include_evidence=True,
+    )
+
+    assert "VIATURA 12" in rendered
+    assert "SOLDADO" in rendered
+    assert "Abandono de PTR" in rendered
+    assert "ART-01" in rendered
+    assert "Evidências **2**" in rendered
+    assert "https://example.com/1" in rendered
+    assert "Sem intercorrências adicionais" in rendered
+
+
+def test_member_report_hides_other_members_occurrences_and_evidence_links():
+    safe = member_safe_report_data(
+        {
+            "report": {"id": 1},
+            "members": [],
+            "occurrences": [
+                {"subject_discord_id": DISCORD_ID, "reason": "Próprio"},
+                {"subject_discord_id": 999, "reason": "Terceiro"},
+            ],
+            "evidence": [{"locator": "https://private.example/evidence"}],
+        },
+        DISCORD_ID,
+    )
+
+    assert [row["reason"] for row in safe["occurrences"]] == ["Próprio"]
+    assert safe["evidence"] == []
+
+
+def test_registry_refresh_preserves_admin_patrol_channel_policy():
+    assert preserved_patrol_channel_policy(
+        {
+            "capacity": 6,
+            "allowed_role_ids_json": "[8001, 8002]",
+            "automatic_clock": 0,
+        }
+    ) == {
+        "capacity": 6,
+        "allowed_role_ids": [8001, 8002],
+        "automatic_clock": False,
+    }
+    assert preserved_patrol_channel_policy(None) == {
+        "capacity": 0,
+        "allowed_role_ids": [],
+        "automatic_clock": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_patrol_central_groups_members_by_vehicle_and_shows_unassigned(
+    service_bundle,
+):
+    await prepare_patrol(service_bundle)
+    await prepare_ranked_member(service_bundle, DISCORD_ID, name="Paiva")
+    await prepare_ranked_member(
+        service_bundle,
+        457,
+        name="Lopes",
+        rank_level=20,
+        rank_role=RANK_ROLE + 1,
+        rank_name="CABO",
+    )
+    for channel_id, label in ((ACTIVE_A, "Alfa"), (ACTIVE_B, "Bravo")):
+        await service_bundle["settings"].add_voice_channel(
+            GUILD_ID, channel_id, label, DISCORD_ID
+        )
+        await service_bundle["settings"].set_voice_patrol_classification(
+            GUILD_ID, channel_id, True
+        )
+    await service_bundle["duty_patrols"].handle_voice_transition(
+        GUILD_ID,
+        DISCORD_ID,
+        None,
+        ACTIVE_A,
+        has_authorized_role=True,
+        role_ids=[RANK_ROLE],
+    )
+    await service_bundle["shifts"].start_shift(
+        GUILD_ID,
+        457,
+        ACTIVE_B,
+        has_authorized_role=True,
+        source="ADMIN",
+    )
+    bot = SimpleNamespace(
+        config=SimpleNamespace(branding=Branding()),
+        services=SimpleNamespace(**service_bundle),
+    )
+
+    embed = await patrol_central_embed(bot, SimpleNamespace(id=GUILD_ID))
+    text = "\n".join(
+        [embed.description or ""]
+        + [f"{field.name}\n{field.value}" for field in embed.fields]
+    )
+
+    assert "VIATURA 01" in text
+    assert f"<@{DISCORD_ID}>" in text
+    assert "EFETIVO SEM VIATURA" in text
+    assert "<@457>" in text
+
+
+@pytest.mark.asyncio
+async def test_panel_refresh_burst_is_coalesced_to_one_edit():
+    coalescer = PanelRefreshCoalescer(delay_seconds=0.01)
+    calls: list[int] = []
+
+    async def refresh() -> None:
+        calls.append(1)
+
+    coalescer.request(123, refresh)
+    coalescer.request(123, refresh)
+    coalescer.request(123, refresh)
+    await asyncio.sleep(0.03)
+
+    assert calls == [1]
+    await coalescer.close()

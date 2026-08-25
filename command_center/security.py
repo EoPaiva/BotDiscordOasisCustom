@@ -17,6 +17,7 @@ LOGGER = logging.getLogger(__name__)
 SIGNATURE_VERSION = "choque-v1"
 NONCE_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{16,128}$")
 COMMAND_CENTER_PROFILES = frozenset({"COMANDO", "ALTO_COMANDO", "ADMINISTRADOR"})
+COMMAND_CENTER_ENTRY_PERMISSIONS = frozenset({"officer.review"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,13 +128,23 @@ async def authenticate_request(
     if not access or access.member_status in {"DISMISSED", "SUSPENDED"}:
         await _record_access(request, guild_id, discord_id, "AUTH", "DENIED")
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Acesso restrito ao efetivo cadastrado.")
-    if not access.discord_present and not technical_bootstrap:
+    # The bootstrap list can elevate an already-authorized administrator, but it
+    # must never keep a former guild member inside the Command Center. Presence
+    # is resolved afresh from the identity projection on every request.
+    if not access.discord_present:
         await _record_access(request, guild_id, discord_id, "AUTH", "DENIED")
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Vínculo atual com o Discord não confirmado.")
     if not await services.security.session_allowed(guild_id, discord_id, issued_at):
         await _record_access(request, guild_id, discord_id, "AUTH", "DENIED")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sessão revogada. Entre novamente.")
-    if not technical_bootstrap and access.profile not in COMMAND_CENTER_PROFILES:
+    has_scoped_command_access = any(
+        access.can(permission) for permission in COMMAND_CENTER_ENTRY_PERMISSIONS
+    )
+    if (
+        not technical_bootstrap
+        and access.profile not in COMMAND_CENTER_PROFILES
+        and not has_scoped_command_access
+    ):
         await _record_access(request, guild_id, discord_id, "AUTH", "DENIED")
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
@@ -228,6 +239,7 @@ def _is_sensitive_mutation(request: Request) -> bool:
             "/v1/inbox/",
             "/v1/requests/",
             "/v1/maintenance/",
+            "/v1/officer-applications/",
         )
     )
 

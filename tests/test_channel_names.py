@@ -73,7 +73,8 @@ def test_phase12_layout_has_stable_unique_identifiers() -> None:
     channel_keys = [spec.key for spec in CHANNEL_SPECS]
     known_ids = [spec.known_id for spec in CHANNEL_SPECS if spec.known_id]
 
-    assert len(category_keys) == len(set(category_keys)) == 19
+    assert len(category_keys) == len(set(category_keys)) == 14
+    assert {"point", "events", "away", "meeting", "archive"}.isdisjoint(category_keys)
     assert len(channel_keys) == len(set(channel_keys))
     assert len(known_ids) == len(set(known_ids))
     assert all(spec.category in set(category_keys) for spec in CHANNEL_SPECS)

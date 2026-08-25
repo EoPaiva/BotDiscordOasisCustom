@@ -73,6 +73,7 @@ const groups: { label: string; items: NavigationItem[] }[] = [
       { href: "/recruitment", label: "Recrutamento", icon: ClipboardCheck, permission: "recruitment.view" },
       { href: "/recruits", label: "Recrutas", icon: ShieldCheck, permission: "recruitment.review" },
       { href: "/career", label: "Carreira", icon: BriefcaseBusiness, permission: "career.manage" },
+      { href: "/officer-candidacies", label: "Oficialato", icon: ShieldCheck, permission: "officer.review" },
       { href: "/qualifications", label: "Qualificações", icon: BookOpenCheck, permission: "qualification.view.all" },
       { href: "/trainings", label: "Treinamentos", icon: GraduationCap, permission: "training.view.self" },
     ],
@@ -99,7 +100,7 @@ const groups: { label: string; items: NavigationItem[] }[] = [
     label: "SISTEMA",
     items: [
       {
-        href: "/discord",
+        href: "/identity/discord",
         label: "Discord e identidade",
         icon: Network,
         permissions: ["identity.manage", "identity.configure", "identity.reconcile"],

@@ -28,6 +28,14 @@ RULES = (
     RateRule(re.compile(r"^/v1/recruitment/applications/\d+/questions/\d+/submit$"), 30, 60),
     RateRule(re.compile(r"^/v1/recruitment/applications/\d+/questions/\d+/integrity$"), 120, 60),
     RateRule(re.compile(r"^/v1/recruitment/applications/\d+/(submit|withdraw)$"), 5, 60),
+    RateRule(re.compile(r"^/v1/officer-candidacy/application$"), 5, 60),
+    RateRule(
+        re.compile(r"^/v1/officer-candidacy/applications/\d+/answers/\d+$"), 90, 60
+    ),
+    RateRule(
+        re.compile(r"^/v1/officer-candidacy/applications/\d+/submit$"), 5, 60
+    ),
+    RateRule(re.compile(r"^/v1/officer-applications(?:/.*)?$"), 60, 60),
     RateRule(
         re.compile(r"^/v1/admin/recruitment/applications/\d+/analysis/reanalyze$"), 5, 60
     ),

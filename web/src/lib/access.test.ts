@@ -31,7 +31,7 @@ describe("functional access context", () => {
     expect(context.member.primary_position?.code).toBe("COMMANDER_GENERAL");
     expect(context.member.functions.map((item) => item.code)).toEqual(["INSTRUCTOR"]);
     expect(context.authorization_version).toBe(12);
-    expect(canAccessPath(context, "/discord")).toBe(true);
+    expect(canAccessPath(context, "/identity/discord")).toBe(true);
   });
 
   it("keeps the flat v1 context compatible during rollout", () => {
@@ -50,7 +50,7 @@ describe("functional access context", () => {
     expect(context.member.rank_name).toBe("Soldado");
     expect(context.access.profile).toBe("MEMBRO");
     expect(context.authorization_version).toBe(1);
-    expect(canAccessPath(context, "/discord")).toBe(false);
+    expect(canAccessPath(context, "/identity/discord")).toBe(false);
     expect(canAccessPath(context, "/profile")).toBe(true);
     expect(canAccessPath(context, "/trainings")).toBe(true);
   });
@@ -104,7 +104,7 @@ describe("functional access context", () => {
       access: { profile: "MEMBRO", permissions: [], authorization_version: 1 },
     });
 
-    for (const path of ["/", "/login", "/status", "/recrutamento", "/minha-candidatura"]) {
+    for (const path of ["/", "/login", "/status", "/recrutamento", "/minha-candidatura", "/candidatura-oficial"]) {
       expect(canAccessPath(visitor, path), path).toBe(true);
     }
     expect(canAccessPath(visitor, "/recrutamento/interno")).toBe(false);
@@ -116,13 +116,14 @@ describe("functional access context", () => {
       access: { profile: "ADMINISTRADOR", permissions: ["*"], authorization_version: 9 },
     });
     const commandRoutes = [
-      "/audit", "/career", "/changes", "/dashboard", "/discipline", "/discord",
-      "/identity", "/inbox", "/maintenance", "/members", "/patrols", "/profile",
+      "/audit", "/career", "/changes", "/dashboard", "/discipline",
+      "/identity", "/identity/discord", "/inbox", "/maintenance", "/members", "/patrols", "/profile",
       "/qualifications", "/readiness", "/recruitment", "/recruitment/ai",
       "/recruitment/blocks", "/recruitment/campaign", "/recruitment/form",
       "/recruitment/form/preview", "/recruits", "/registration", "/reports",
       "/requests", "/security", "/settings", "/settings/channels", "/shifts",
       "/tickets", "/trainings", "/members/99", "/recruitment/99",
+      "/officer-candidacies", "/officer-candidacies/99",
     ];
 
     for (const path of commandRoutes) expect(canAccessPath(administrator, path), path).toBe(true);

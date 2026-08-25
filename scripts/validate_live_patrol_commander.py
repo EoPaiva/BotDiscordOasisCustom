@@ -24,6 +24,11 @@ EXPECTED_CONTROLS = {
     "Regra de comando",
     "Prioridade",
     "Histórico",
+    "Gerenciar relatórios",
+    "Ajustar integrantes",
+    "Configurar calls",
+    "Categorias/artigos",
+    "Ponto excepcional",
 }
 
 
@@ -93,7 +98,7 @@ async def main() -> int:
     print("PATROL_COMMANDER_LIVE_PASS" if not failures else "PATROL_COMMANDER_LIVE_INVALID")
     print(
         f"migration={migration} tables={len(EXPECTED_TABLES & tables)}/2 "
-        f"columns={len(EXPECTED_COLUMNS & columns)}/4 controls={len(control_labels)}/5 "
+        f"columns={len(EXPECTED_COLUMNS & columns)}/4 controls={len(control_labels)}/10 "
         f"active_patrols={active_patrols} commands={len(commands)}"
     )
     if failures:

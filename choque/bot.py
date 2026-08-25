@@ -11,10 +11,13 @@ from discord.ext import commands
 
 from .activity import ActivityService
 from .audit import AuditService
+from .career import CareerService
 from .config import AppConfig
 from .database import Database
 from .discipline import DisciplineService
+from .duty_patrols import DutyPatrolService
 from .errors import ChoqueError
+from .financial_aid import FinancialAidService
 from .members import MemberService
 from .module_flags import ModuleFlagService
 from .operations import OperationsService
@@ -29,6 +32,8 @@ from .security import SecurityService
 from .services import Services
 from .settings import SettingsService
 from .shifts import ShiftService
+from .status import StatusService
+from .tags import TagService
 from .tickets import TicketService
 from .time_utils import utc_now_ms
 from .training import TrainingService
@@ -48,6 +53,9 @@ COGS = (
     "cogs.training_commands",
     "cogs.activity_commands",
     "cogs.ticket_commands",
+    "cogs.tag_commands",
+    "cogs.status_commands",
+    "cogs.financial_aid_commands",
     "cogs.operations_commands",
     "cogs.hierarchy_system",
     "cogs.rank_sync_system",
@@ -87,6 +95,7 @@ class ChoqueBot(commands.Bot):
         modules = ModuleFlagService(database, settings, audit)
         shifts = ShiftService(database, settings, audit)
         personnel = PersonnelService(database, audit)
+        career = CareerService(database, settings, audit, personnel, shifts)
         discipline = DisciplineService(database, audit)
         training = TrainingService(database, audit)
         activity = ActivityService(database, settings, audit, shifts)
@@ -94,6 +103,7 @@ class ChoqueBot(commands.Bot):
         tickets = TicketService(database, audit, members)
         rank_sync = RankSyncService(database, settings, audit)
         operations = OperationsService(database, settings, audit, shifts)
+        duty_patrols = DutyPatrolService(database, settings, audit, shifts, operations)
         recruitment = RecruitmentService(
             database,
             audit,
@@ -103,34 +113,43 @@ class ChoqueBot(commands.Bot):
         )
         recruitment_analysis = RecruitmentAnalysisService(database, settings, audit)
         registration_gate = RegistrationGateService(database, settings, audit)
+        tags = TagService(database, audit)
+        status = StatusService(database, audit)
+        financial_aid = FinancialAidService(database, settings, audit)
         security = SecurityService(database, settings, audit)
         recruitment.analysis_service = recruitment_analysis
         self.services = Services(
-            database,
-            settings,
-            audit,
-            permissions,
-            members,
-            modules,
-            shifts,
-            personnel,
-            discipline,
-            training,
-            activity,
-            requests,
-            tickets,
-            rank_sync,
-            operations,
-            recruitment,
-            recruitment_analysis,
-            registration_gate,
-            security,
+            database=database,
+            settings=settings,
+            audit=audit,
+            permissions=permissions,
+            members=members,
+            modules=modules,
+            shifts=shifts,
+            personnel=personnel,
+            career=career,
+            discipline=discipline,
+            training=training,
+            activity=activity,
+            requests=requests,
+            tickets=tickets,
+            rank_sync=rank_sync,
+            operations=operations,
+            duty_patrols=duty_patrols,
+            financial_aid=financial_aid,
+            recruitment=recruitment,
+            recruitment_analysis=recruitment_analysis,
+            registration_gate=registration_gate,
+            tags=tags,
+            status=status,
+            security=security,
         )
         if self.guild_id:
             await permissions.ensure_defaults(self.guild_id)
             await recruitment.ensure_defaults(self.guild_id)
             await recruitment_analysis.ensure_defaults(self.guild_id)
-        self.web_action_worker = WebActionWorker(database, rank_sync, audit, self)
+            await financial_aid.ensure_defaults(self.guild_id)
+        self.web_action_worker = WebActionWorker(database, rank_sync, audit, self, tags=tags)
         self.recruitment_analysis_worker = RecruitmentAnalysisWorker(recruitment_analysis)
         if imported_guild and not await settings.get(
             imported_guild, "legacy_import_audited", False

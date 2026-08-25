@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import logging
+from collections.abc import Mapping
 from contextlib import suppress
 from urllib.parse import urlsplit
 
@@ -12,9 +13,160 @@ import discord
 from .audit import AuditService
 from .database import Database
 from .rank_sync import RankSyncResult, RankSyncService
+from .tags import TagService
 from .time_utils import utc_now_ms
 
 LOGGER = logging.getLogger(__name__)
+IDLE_POLL_SECONDS = 2.0
+BATCH_POLL_SECONDS = 0.25
+RECOVERY_REVIEW_CARD_REFRESH_INTERVAL_MS = 6_000
+TAG_ROLE_RECONCILIATION_INTERVAL_MS = 300_000
+
+
+# The review card is private to the recruitment team.  Keep its operational
+# state in one renderer so an update made by the portal or by Discord produces
+# the same message, rather than a second card for the same candidate.
+RECRUITMENT_DECISION_STATUSES = frozenset({"UNDER_REVIEW", "INTERVIEW_COMPLETED", "FINAL_REVIEW"})
+RECRUITMENT_FINAL_STATUSES = frozenset({"APPROVED", "REJECTED", "WITHDRAWN", "EXPIRED"})
+
+
+def _review_timestamp(value: object) -> str:
+    if value is None:
+        return "—"
+    try:
+        return f"<t:{int(value) // 1000}:F>"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def recruitment_review_state(application: Mapping[str, object]) -> tuple[str, str, int]:
+    """Return a concise, accessible state for the private review card."""
+    status = str(application.get("status") or "SUBMITTED")
+    states = {
+        "SUBMITTED": (
+            "🕒 AGUARDANDO ANÁLISE",
+            "A ficha aguarda a atribuição de um responsável.",
+            0xC69A45,
+        ),
+        "UNDER_REVIEW": ("🔎 EM ANÁLISE", "O responsável está avaliando o dossiê.", 0x4C78A8),
+        "INTERVIEW_PENDING": (
+            "🗣️ ENTREVISTA PENDENTE",
+            "A candidatura aguarda encaminhamento para entrevista.",
+            0xC69A45,
+        ),
+        "INTERVIEW_SCHEDULED": (
+            "📅 ENTREVISTA AGENDADA",
+            "Há uma entrevista agendada para esta candidatura.",
+            0x4C78A8,
+        ),
+        "INTERVIEW_COMPLETED": (
+            "📋 DECISÃO FINAL",
+            "A entrevista foi concluída e a decisão final está disponível.",
+            0xC69A45,
+        ),
+        "FINAL_REVIEW": ("📋 DECISÃO FINAL", "A candidatura está pronta para uma decisão humana.", 0xC69A45),
+        "APPROVED": ("✅ APROVADA", "A decisão foi registrada e as próximas orientações foram encaminhadas.", 0x71906D),
+        "REJECTED": ("❌ REPROVADA", "A decisão final foi registrada de forma reservada.", 0xA94F43),
+        "WITHDRAWN": ("⚪ RETIRADA", "A candidatura foi retirada pelo candidato.", 0x6B7280),
+        "EXPIRED": ("⌛ EXPIRADA", "O prazo desta candidatura foi encerrado.", 0x6B7280),
+    }
+    return states.get(status, (f"ℹ️ {status}", "Acompanhe o dossiê para detalhes.", 0x5865F2))
+
+
+def build_recruitment_review_embed(branding, application: Mapping[str, object]) -> discord.Embed:
+    """Render the single private card used by the Discord analysis desk."""
+    title, description, color = recruitment_review_state(application)
+    status = str(application.get("status") or "SUBMITTED")
+    embed = discord.Embed(title=f"{title} • MESA DE ANÁLISE", description=description, color=color)
+    embed.add_field(name="Protocolo", value=str(application.get("protocol") or "—"), inline=True)
+    embed.add_field(name="Candidato", value=str(application.get("candidate_nick") or "—"), inline=True)
+    embed.add_field(name="ID BGR", value=str(application.get("bgr_id") or "—"), inline=True)
+
+    assigned_to = application.get("assigned_to")
+    if assigned_to is None:
+        responsible = "Não atribuído"
+    else:
+        responsible = f"<@{assigned_to}>"
+    embed.add_field(name="Responsável", value=responsible, inline=True)
+    embed.add_field(
+        name="Atribuída em",
+        value=_review_timestamp(application.get("assigned_at")),
+        inline=True,
+    )
+    embed.add_field(name="Estado", value=status, inline=True)
+
+    if status in {"APPROVED", "REJECTED"}:
+        decided_by = application.get("decided_by")
+        embed.add_field(
+            name="Decidida por",
+            value=f"<@{decided_by}>" if decided_by is not None else "—",
+            inline=True,
+        )
+        embed.add_field(
+            name="Decisão em",
+            value=_review_timestamp(application.get("decided_at")),
+            inline=True,
+        )
+        reason = str(application.get("internal_reason") or "Justificativa não registrada.").strip()
+        embed.add_field(name="Justificativa interna", value=reason[:1000], inline=False)
+    elif status in RECRUITMENT_DECISION_STATUSES:
+        embed.add_field(
+            name="Próxima ação",
+            value="Use **Aprovar** ou **Reprovar** após registrar uma justificativa.",
+            inline=False,
+        )
+    else:
+        embed.add_field(
+            name="Próxima ação",
+            value="Abra o dossiê e assuma a análise antes da decisão final.",
+            inline=False,
+        )
+    embed.set_footer(text=branding.footer)
+    return embed
+
+
+def build_recruitment_review_view(
+    application: Mapping[str, object], public_url: str | None
+) -> discord.ui.View:
+    """Build a persistent card view; dynamic decision handlers live in the cog."""
+    view = discord.ui.View(timeout=None)
+    status = str(application.get("status") or "SUBMITTED")
+    application_id = int(application["id"])
+    decision_enabled = status in RECRUITMENT_DECISION_STATUSES
+    final = status in RECRUITMENT_FINAL_STATUSES
+    if isinstance(public_url, str) and public_url.startswith(("https://", "http://")):
+        parsed_url = urlsplit(public_url)
+        dossier_url = f"{parsed_url.scheme}://{parsed_url.netloc}/recruitment/{application['id']}"
+        for label, anchor in (
+            ("Abrir dossiê", ""),
+            ("Adicionar nota", "#notas"),
+            ("Entrevista", "#entrevista"),
+            ("Decidir", "#decisao"),
+        ):
+            view.add_item(
+                discord.ui.Button(
+                    label=label,
+                    style=discord.ButtonStyle.link,
+                    url=f"{dossier_url}{anchor}",
+                    disabled=final and label != "Abrir dossiê",
+                    row=0,
+                )
+            )
+    for label, emoji, action, style in (
+        ("Aprovar", "✅", "approve", discord.ButtonStyle.success),
+        ("Reprovar", "❌", "reject", discord.ButtonStyle.danger),
+    ):
+        view.add_item(
+            discord.ui.Button(
+                label=label,
+                emoji=emoji,
+                style=style,
+                custom_id=f"choque:recruitment:decision:{application_id}:{action}:v1",
+                disabled=final or not decision_enabled,
+                row=1,
+            )
+        )
+    return view
 
 
 def _optional_actor_id(value: object) -> int | None:
@@ -32,14 +184,20 @@ class WebActionWorker:
         rank_sync: RankSyncService,
         audit: AuditService,
         bot: discord.Client,
+        *,
+        tags: TagService | None = None,
     ) -> None:
         self.database = database
         self.rank_sync = rank_sync
         self.audit = audit
         self.bot = bot
+        self.tags = tags
         self._task: asyncio.Task[None] | None = None
         self._last_registry_refresh = 0
         self._last_stale_scan = 0
+        self._last_review_card_refresh_scan = 0
+        self._last_tag_role_reconciliation = 0
+        self._next_recovery_review_card_refresh_at = 0
         self._recovered_inflight = False
 
     def start(self) -> None:
@@ -62,12 +220,20 @@ class WebActionWorker:
                 if utc_now_ms() - self._last_registry_refresh >= 300_000:
                     await self.refresh_discord_registry()
                     self._last_registry_refresh = utc_now_ms()
+                if utc_now_ms() - self._last_tag_role_reconciliation >= TAG_ROLE_RECONCILIATION_INTERVAL_MS:
+                    await self.reconcile_tag_roles()
+                    self._last_tag_role_reconciliation = utc_now_ms()
                 processed = await self.process_pending()
                 processed += await self.process_recruitment_pending()
             except Exception:
                 LOGGER.exception("Falha no worker de ações do Command Center")
                 processed = 0
-            await asyncio.sleep(2 if processed else 10)
+            # The worker lives in the Gateway process while the public API
+            # writes the durable queue from a sibling process.  There is no
+            # cross-process wake-up primitive, so a short bounded poll keeps
+            # an approved registration visible in Discord promptly without
+            # sacrificing the durable outbox contract.
+            await asyncio.sleep(BATCH_POLL_SECONDS if processed else IDLE_POLL_SECONDS)
 
     async def _recover_inflight_actions(self) -> None:
         """Make work claimed by a terminated single instance retryable."""
@@ -160,7 +326,7 @@ class WebActionWorker:
             """
             SELECT * FROM web_action_outbox
             WHERE status IN ('PENDING','FAILED') AND attempts < 10 AND available_at <= ?
-            ORDER BY created_at, id LIMIT ?
+            ORDER BY CASE status WHEN 'PENDING' THEN 0 ELSE 1 END, created_at, id LIMIT ?
             """,
             (utc_now_ms(), limit),
         )
@@ -210,6 +376,11 @@ class WebActionWorker:
                         ),
                     )
                 LOGGER.warning("Ação web %s falhou: %s", row["id"], exc)
+                LOGGER.warning(
+                    "Latência da ação web %s até falha: %sms",
+                    row["id"],
+                    self._queue_latency_ms(row),
+                )
             else:
                 processed += 1
         return processed
@@ -222,6 +393,11 @@ class WebActionWorker:
                     processed_at=?, last_error=NULL WHERE id=? AND status='PROCESSING'
                 """,
                 (utc_now_ms(), row["id"]),
+            )
+            LOGGER.info(
+                "Ação web %s concluída em %sms",
+                row["id"],
+                self._queue_latency_ms(row),
             )
             return
 
@@ -262,6 +438,16 @@ class WebActionWorker:
                 )
             elif str(existing_audit["action"]) != "DISCORD_IDENTITY_SYNC_COMPLETED":
                 raise RuntimeError("Correlação do outbox já pertence a outra auditoria")
+        LOGGER.info(
+            "Ação web %s concluída em %sms",
+            row["id"],
+            self._queue_latency_ms(row),
+        )
+
+    @staticmethod
+    def _queue_latency_ms(row) -> int:
+        """Age from the API commit to terminal worker handling for operations."""
+        return max(0, utc_now_ms() - int(row["created_at"]))
 
     async def _claim(self, action_id: int) -> bool:
         async with self.database.transaction() as connection:
@@ -282,6 +468,7 @@ class WebActionWorker:
             "IDENTITY_SYNC",
             "IDENTITY_RECONCILE_BULK",
             "QUALIFICATION_SYNC",
+            "TAG_ROLE_SYNC",
         }
         if action_type not in supported:
             raise ValueError(f"Ação web não suportada: {row['action_type']}")
@@ -345,6 +532,9 @@ class WebActionWorker:
                 ),
             )
             return None
+        if action_type == "TAG_ROLE_SYNC":
+            await self._sync_tag_roles(row, payload, guild, member)
+            return None
         if action_type == "IDENTITY_SYNC":
             result = await self.rank_sync.sync_from_member(
                 member,
@@ -389,6 +579,212 @@ class WebActionWorker:
                 correlation_id=str(row["correlation_id"]),
             )
         return result
+
+    async def _sync_tag_roles(
+        self,
+        row,
+        payload: dict[str, object],
+        guild: discord.Guild,
+        member: discord.Member,
+    ) -> None:
+        """Converge Discord roles from the durable request state, never vice versa."""
+        if self.tags is None:
+            raise RuntimeError("Serviço de tags indisponível para sincronização")
+        request_id = int(payload.get("request_id") or 0)
+        requested_version = int(payload.get("request_version") or 0)
+        if request_id <= 0 or requested_version <= 0:
+            raise ValueError("Solicitação ou versão de tag ausente no payload")
+        request = await self.database.fetchone(
+            "SELECT * FROM tag_requests WHERE id=? AND guild_id=?",
+            (request_id, int(row["guild_id"])),
+        )
+        if not request:
+            raise RuntimeError("Solicitação de tag não encontrada")
+        current_request = await self.database.fetchone(
+            """
+            SELECT id FROM tag_requests
+            WHERE guild_id=? AND member_id=?
+            ORDER BY requested_at DESC, id DESC LIMIT 1
+            """,
+            (int(row["guild_id"]), int(request["member_id"])),
+        )
+        if current_request is None or int(current_request["id"]) != request_id:
+            # A later request is authoritative for this member.  A delayed
+            # terminal sync from an older cycle must never strip its new tag
+            # or waiting role.
+            return
+        # A later domain transition already queued its own role intent.  Do
+        # not let a delayed old worker undo the newest role state.
+        if int(request["version"]) != requested_version:
+            return
+        settings = self.audit.settings
+        if settings is None:
+            raise RuntimeError("Configuração de cargos de tag indisponível")
+        waiting_role_id = await settings.get(int(row["guild_id"]), "tag_waiting_role_id")
+        set_role_id = await settings.get(int(row["guild_id"]), "tag_set_role_id")
+        if not waiting_role_id or not set_role_id:
+            raise RuntimeError("Configure os cargos AGUARDANDO SET e TAG SETADA antes de sincronizar")
+        waiting_role_id = int(waiting_role_id)
+        set_role_id = int(set_role_id)
+        if waiting_role_id == set_role_id:
+            raise RuntimeError("Os cargos de aguardando set e tag setada devem ser diferentes")
+
+        role_cache = {int(role.id): role for role in getattr(guild, "roles", ())}
+        for role_id in (waiting_role_id, set_role_id):
+            role = guild.get_role(role_id) or role_cache.get(role_id)
+            if role is None:
+                roles = await guild.fetch_roles()
+                role = next((item for item in roles if int(item.id) == role_id), None)
+            if role is None:
+                raise RuntimeError(f"Cargo de tag {role_id} não foi encontrado no Discord")
+            role_cache[role_id] = role
+
+        status = str(request["status"])
+        active = status in TagService.ACTIVE_STATUSES
+        existing_tag_pending_validation = (
+            str(request["request_origin"] or "SET_REQUEST") == "EXISTING_DECLARATION"
+            and request["set_at"] is None
+        )
+        should_wait = active and not existing_tag_pending_validation
+        should_set = status == "CONCLUIDO"
+        current_role_ids = {int(role.id) for role in member.roles}
+        reason = f"CHOQUE - BGR • Central de Tags • solicitação #{request_id} v{requested_version}"
+        for role_id, should_have in (
+            (waiting_role_id, should_wait),
+            (set_role_id, should_set),
+        ):
+            has_role = role_id in current_role_ids
+            if should_have and not has_role:
+                await member.add_roles(role_cache[role_id], reason=reason)
+                current_role_ids.add(role_id)
+            elif not should_have and has_role:
+                await member.remove_roles(role_cache[role_id], reason=reason)
+                current_role_ids.discard(role_id)
+
+        now = utc_now_ms()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE tag_role_sync_state
+                SET applied_version=?, last_error=NULL, updated_at=?
+                WHERE tag_request_id=? AND requested_version<=?
+                """,
+                (requested_version, now, request_id, requested_version),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("Estado de sincronização da tag não encontrado")
+            await self.audit.record(
+                int(row["guild_id"]),
+                "DISCORD_TAG_ROLE_SYNC_COMPLETED",
+                actor_id=_optional_actor_id(row["requested_by"]),
+                target_id=int(row["target_discord_id"]),
+                after={
+                    "tag_request_id": request_id,
+                    "status": status,
+                    "waiting_role_id": waiting_role_id if should_wait else None,
+                    "set_role_id": set_role_id if should_set else None,
+                    "request_version": requested_version,
+                },
+                correlation_id=_audit_correlation_id(
+                    row["correlation_id"], f"tag-role-sync-{request_id}-v{requested_version}"
+                ),
+                connection=connection,
+            )
+
+    async def reconcile_tag_roles(self, limit: int = 100) -> int:
+        """Detect Discord-role drift and enqueue one bounded repair per request.
+
+        The durable request remains authoritative.  Reconciliation only queues
+        work after observing a real mismatch; the existing outbox continues to
+        own retries, rate limiting and audit delivery.
+        """
+        if self.tags is None or self.audit.settings is None:
+            return 0
+        safe_limit = max(1, min(int(limit), 100))
+        rows = await self.database.fetchall(
+            """
+            SELECT r.*, s.last_reconcile_requested_at
+            FROM tag_requests r
+            JOIN tag_role_sync_state s ON s.tag_request_id=r.id
+            WHERE r.id=(
+                SELECT newer.id FROM tag_requests newer
+                WHERE newer.guild_id=r.guild_id AND newer.member_id=r.member_id
+                ORDER BY newer.requested_at DESC, newer.id DESC LIMIT 1
+            )
+            ORDER BY r.updated_at, r.id LIMIT ?
+            """,
+            (safe_limit,),
+        )
+        now = utc_now_ms()
+        scheduled = 0
+        for request in rows:
+            guild_id = int(request["guild_id"])
+            waiting_role_id = await self.audit.settings.get(guild_id, "tag_waiting_role_id")
+            set_role_id = await self.audit.settings.get(guild_id, "tag_set_role_id")
+            if not waiting_role_id or not set_role_id or int(waiting_role_id) == int(set_role_id):
+                continue
+            guild = self.bot.get_guild(guild_id)
+            if guild is None:
+                continue
+            try:
+                member = guild.get_member(int(request["discord_id"]))
+                if member is None:
+                    member = await guild.fetch_member(int(request["discord_id"]))
+            except discord.DiscordException:
+                continue
+            status = str(request["status"])
+            current_roles = {int(role.id) for role in member.roles}
+            expected_waiting = status in TagService.ACTIVE_STATUSES
+            expected_set = status == "CONCLUIDO"
+            mismatched = (
+                (int(waiting_role_id) in current_roles) != expected_waiting
+                or (int(set_role_id) in current_roles) != expected_set
+            )
+            if not mismatched:
+                continue
+            request_id = int(request["id"])
+            version = int(request["version"])
+            async with self.database.transaction() as connection:
+                cursor = await connection.execute(
+                    """
+                    UPDATE tag_role_sync_state
+                    SET last_reconcile_requested_at=?, updated_at=?
+                    WHERE tag_request_id=? AND (
+                        last_reconcile_requested_at IS NULL
+                        OR last_reconcile_requested_at<=?
+                    )
+                    """,
+                    (
+                        now,
+                        now,
+                        request_id,
+                        now - TAG_ROLE_RECONCILIATION_INTERVAL_MS,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    continue
+                correlation_id = f"tag-role-reconcile:{request_id}:v{version}:{now}"
+                await connection.execute(
+                    """
+                    INSERT OR IGNORE INTO web_action_outbox(
+                        guild_id, action_type, target_discord_id, payload_json,
+                        requested_by, correlation_id, status, attempts, available_at, created_at
+                    ) VALUES (?, 'TAG_ROLE_SYNC', ?, ?, 0, ?, 'PENDING', 0, ?, ?)
+                    """,
+                    (
+                        guild_id,
+                        int(request["discord_id"]),
+                        json.dumps(
+                            {"request_id": request_id, "request_version": version},
+                            sort_keys=True,
+                        ),
+                        correlation_id,
+                        now,
+                        now,
+                    ),
+                )
+            scheduled += 1
+        return scheduled
 
     async def _sync_qualification_role(
         self,
@@ -461,6 +857,13 @@ class WebActionWorker:
         if not record:
             return
         now = utc_now_ms()
+        next_status = "SYNCED" if success else "FAILED"
+        next_error = None if success else (error or "erro")[:500]
+        if (
+            str(record["sync_status"]) == next_status
+            and (record["sync_error"] or None) == next_error
+        ):
+            return
         event = "REGISTRATION_ACCESS_GRANTED" if success else "REGISTRATION_SYNC_FAILED"
         async with self.database.transaction() as connection:
             await connection.execute(
@@ -470,8 +873,8 @@ class WebActionWorker:
                     version=version+1, updated_at=? WHERE id=?
                 """,
                 (
-                    "SYNCED" if success else "FAILED",
-                    None if success else (error or "erro")[:500],
+                    next_status,
+                    next_error,
                     now,
                     now,
                     record["id"],
@@ -531,18 +934,41 @@ class WebActionWorker:
         if self.audit.settings and now - self._last_stale_scan >= 300_000:
             await self._enqueue_stale_recruitment(now)
             self._last_stale_scan = now
+        if now - self._last_review_card_refresh_scan >= 300_000:
+            await self._enqueue_recruitment_review_card_refreshes(now)
+            self._last_review_card_refresh_scan = now
+        await self._coalesce_recruitment_public_status_backlog(now)
         rows = await self.database.fetchall(
             """
             SELECT * FROM recruitment_notification_outbox
             WHERE status IN ('PENDING','FAILED') AND attempts < 10 AND available_at <= ?
-            ORDER BY created_at, id LIMIT ?
+            ORDER BY CASE WHEN event_type='RECRUITMENT_REVIEW_CARD_REFRESH' THEN 1 ELSE 0 END,
+                     created_at, id LIMIT ?
             """,
             (utc_now_ms(), limit),
         )
         processed = 0
         for row in rows:
+            event_type = str(row["event_type"])
+            try:
+                payload = json.loads(row["payload_json"])
+            except (TypeError, json.JSONDecodeError):
+                payload = {}
+            recovery_refresh = (
+                event_type == "RECRUITMENT_REVIEW_CARD_REFRESH"
+                and bool(payload.get("recovery"))
+            )
+            if recovery_refresh and utc_now_ms() < self._next_recovery_review_card_refresh_at:
+                continue
             if not await self._claim_recruitment(int(row["id"])):
                 continue
+            if recovery_refresh:
+                # Existing cards only need a visual/control migration.  Pace
+                # those PATCHes below Discord's channel limit so they cannot
+                # delay real decisions or generate a rate-limit burst.
+                self._next_recovery_review_card_refresh_at = (
+                    utc_now_ms() + RECOVERY_REVIEW_CARD_REFRESH_INTERVAL_MS
+                )
             try:
                 delivery = await self._dispatch_recruitment(row)
             except Exception as exc:
@@ -568,6 +994,92 @@ class WebActionWorker:
                 )
                 processed += 1
         return processed
+
+    async def _enqueue_recruitment_review_card_refreshes(self, now: int) -> int:
+        """Bring existing private cards forward to the current persistent view.
+
+        The submitted-notification row is the one and only authority for a
+        review card's Discord message.  A version-keyed refresh only edits
+        that message, so startup/reconnect recovery can install new controls
+        without duplicating cards or replaying a candidate notification.
+        """
+        applications = await self.database.fetchall(
+            """
+            SELECT application.id, application.guild_id, application.status, application.version
+            FROM recruitment_applications AS application
+            WHERE application.submitted_at IS NOT NULL
+              AND application.status <> 'DRAFT'
+              AND EXISTS (
+                  SELECT 1 FROM recruitment_notification_outbox AS submitted
+                  WHERE submitted.guild_id=application.guild_id
+                    AND submitted.application_id=application.id
+                    AND submitted.event_type='RECRUITMENT_APPLICATION_SUBMITTED'
+                    AND submitted.status='COMPLETED'
+                    AND submitted.delivery_channel_id IS NOT NULL
+                    AND submitted.delivery_message_id IS NOT NULL
+              )
+            ORDER BY application.updated_at, application.id
+            """
+        )
+        created = 0
+        async with self.database.transaction() as connection:
+            for application in applications:
+                cursor = await connection.execute(
+                    """
+                    INSERT INTO recruitment_notification_outbox(
+                        guild_id, application_id, event_type, event_key,
+                        payload_json, available_at, created_at
+                    ) VALUES (?, ?, 'RECRUITMENT_REVIEW_CARD_REFRESH', ?, ?, ?, ?)
+                    ON CONFLICT(guild_id, event_key) DO NOTHING
+                    """,
+                    (
+                        int(application["guild_id"]),
+                        int(application["id"]),
+                        f"application-review-card:{application['id']}:v{application['version']}",
+                        json.dumps(
+                            {
+                                "application_id": int(application["id"]),
+                                "status": str(application["status"]),
+                                "version": int(application["version"]),
+                                "recovery": True,
+                            },
+                            ensure_ascii=False,
+                        ),
+                        now,
+                        now,
+                    ),
+                )
+                created += int(cursor.rowcount == 1)
+        return created
+
+    async def _coalesce_recruitment_public_status_backlog(self, now: int) -> int:
+        """Deliver only the latest state for a public recruitment card.
+
+        The public card is an upsert, not an event history.  If a worker was
+        offline while a candidate moved through several stages, every pending
+        state would render the *current* application and repeatedly PATCH the
+        same Discord message.  Retain those durable outbox rows for audit, but
+        mark superseded pending states as coalesced before they reach Discord.
+        """
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE recruitment_notification_outbox AS stale
+                SET status='COMPLETED', processed_at=?,
+                    last_error='Coalescida sem envio: estado público mais recente já disponível'
+                WHERE stale.event_type='RECRUITMENT_PUBLIC_STATUS'
+                  AND stale.status IN ('PENDING','FAILED')
+                  AND EXISTS (
+                    SELECT 1 FROM recruitment_notification_outbox newer
+                    WHERE newer.guild_id=stale.guild_id
+                      AND newer.application_id=stale.application_id
+                      AND newer.event_type='RECRUITMENT_PUBLIC_STATUS'
+                      AND newer.id>stale.id
+                  )
+                """,
+                (now,),
+            )
+            return int(cursor.rowcount)
 
     async def _enqueue_stale_recruitment(self, now: int) -> int:
         guilds = await self.database.fetchall(
@@ -633,7 +1145,15 @@ class WebActionWorker:
             return cursor.rowcount == 1
 
     async def _dispatch_recruitment(self, row) -> tuple[int | None, int | None]:
-        if row["delivery_channel_id"] and row["delivery_message_id"]:
+        event_type = str(row["event_type"])
+        # A refresh is deliberately an edit of the original private card.  Its
+        # own outbox delivery pointers are merely retry bookkeeping and must
+        # never turn a failed edit into a no-op on the next worker pass.
+        if (
+            event_type != "RECRUITMENT_REVIEW_CARD_REFRESH"
+            and row["delivery_channel_id"]
+            and row["delivery_message_id"]
+        ):
             channel = self.bot.get_channel(int(row["delivery_channel_id"]))
             if channel and hasattr(channel, "fetch_message"):
                 try:
@@ -641,19 +1161,28 @@ class WebActionWorker:
                     return int(row["delivery_channel_id"]), int(row["delivery_message_id"])
                 except discord.NotFound:
                     pass
-        application = await self.database.fetchone(
+        application_row = await self.database.fetchone(
             "SELECT * FROM recruitment_applications WHERE id=? AND guild_id=?",
             (row["application_id"], row["guild_id"]),
         )
-        if not application:
+        if not application_row:
             raise RuntimeError("Candidatura da notificação não encontrada")
+        # aiosqlite.Row is subscriptable but does not implement Mapping.get().
+        # Renderers intentionally accept normal mappings so the same card
+        # can be refreshed from a Discord callback or from the durable outbox.
+        application = dict(application_row)
         guild = self.bot.get_guild(int(row["guild_id"]))
         if not guild:
             raise RuntimeError("Guild indisponível no Discord")
-        event_type = str(row["event_type"])
         payload = json.loads(row["payload_json"])
         if event_type == "RECRUITMENT_PUBLIC_STATUS":
             return await self._dispatch_recruitment_public_status(row, application)
+        if event_type in {
+            "RECRUITMENT_REVIEW_CARD_REFRESH",
+            "RECRUITMENT_APPLICATION_STALE",
+            "RECRUITMENT_ANALYSIS_COMPLETED",
+        }:
+            return await self._refresh_recruitment_review_card(row, application)
         member = guild.get_member(int(application["discord_id"]))
         if not member:
             try:
@@ -832,8 +1361,6 @@ class WebActionWorker:
             return message.channel.id, message.id
         if event_type not in {
             "RECRUITMENT_APPLICATION_SUBMITTED",
-            "RECRUITMENT_APPLICATION_STALE",
-            "RECRUITMENT_ANALYSIS_COMPLETED",
         }:
             raise ValueError(f"Evento de recrutamento não suportado: {event_type}")
         channel_id = None
@@ -854,46 +1381,9 @@ class WebActionWorker:
             if not isinstance(fetched, discord.TextChannel):
                 raise RuntimeError("Canal configurado não é textual")
             channel = fetched
-        view = None
         public_url = await self.audit.settings.get(int(row["guild_id"]), "recruitment_public_url")
-        if isinstance(public_url, str) and public_url.startswith(("https://", "http://")):
-            parsed_url = urlsplit(public_url)
-            view = discord.ui.View()
-            dossier_url = (
-                f"{parsed_url.scheme}://{parsed_url.netloc}/recruitment/{application['id']}"
-            )
-            for label, anchor in (
-                ("Abrir dossiê", ""),
-                ("Adicionar nota", "#notas"),
-                ("Entrevista", "#entrevista"),
-                ("Decidir", "#decisao"),
-            ):
-                view.add_item(
-                    discord.ui.Button(
-                        label=label,
-                        style=discord.ButtonStyle.link,
-                        url=f"{dossier_url}{anchor}",
-                    )
-                )
-        stale = event_type == "RECRUITMENT_APPLICATION_STALE"
-        analysis_completed = event_type == "RECRUITMENT_ANALYSIS_COMPLETED"
-        embed = self._recruitment_embed(
-                (
-                    "Análise automatizada disponível"
-                    if analysis_completed
-                    else "Candidatura aguardando análise"
-                    if stale
-                    else "Nova candidatura recebida"
-                ),
-                application,
-                (
-                    f"O protocolo aguarda tratamento há pelo menos {int(payload['stale_hours'])} horas."
-                    if stale
-                    else "O relatório assistivo está disponível no dossiê. A decisão continua humana."
-                    if analysis_completed
-                    else "Conteúdo completo disponível somente no Centro de Comando."
-                ),
-            )
+        view = build_recruitment_review_view(application, public_url)
+        embed = build_recruitment_review_embed(self.bot.config.branding, application)
         attachment = None
         if event_type == "RECRUITMENT_APPLICATION_SUBMITTED":
             answers = await self.database.fetchall(
@@ -919,32 +1409,6 @@ class WebActionWorker:
                 value=f"{len(answers)} respostas completas anexadas para análise do recrutador.",
                 inline=False,
             )
-        elif analysis_completed:
-            analysis = await self.database.fetchone(
-                """
-                SELECT recommendation, overall_score, summary
-                FROM recruitment_analysis_results
-                WHERE guild_id=? AND application_id=?
-                ORDER BY created_at DESC, id DESC LIMIT 1
-                """,
-                (int(row["guild_id"]), int(application["id"])),
-            )
-            if analysis:
-                labels = {
-                    "RECOMMENDED": "Recomendado para análise",
-                    "REVIEW": "Revisão recomendada",
-                    "NOT_RECOMMENDED": "Pontos relevantes para revisão",
-                }
-                embed.add_field(
-                    name="Classificação consultiva",
-                    value=f"{labels.get(str(analysis['recommendation']), 'Revisão humana')} • índice {int(analysis['overall_score'])}/100",
-                    inline=False,
-                )
-                embed.add_field(
-                    name="Resumo automatizado",
-                    value=str(analysis["summary"])[:1024] or "Resumo indisponível.",
-                    inline=False,
-                )
         mention_content = None
         allowed_mentions = discord.AllowedMentions.none()
         if event_type in {
@@ -983,6 +1447,61 @@ class WebActionWorker:
             allowed_mentions=allowed_mentions,
         )
         return message.channel.id, message.id
+
+    async def _refresh_recruitment_review_card(self, row, application) -> tuple[int | None, int | None]:
+        """Edit the single private review card; never publish a second one."""
+        event_id = row["id"] if "id" in row.keys() else "unknown"
+        original = await self.database.fetchone(
+            """
+            SELECT delivery_channel_id, delivery_message_id
+            FROM recruitment_notification_outbox
+            WHERE guild_id=? AND application_id=?
+              AND event_type='RECRUITMENT_APPLICATION_SUBMITTED'
+              AND status='COMPLETED' AND delivery_channel_id IS NOT NULL
+              AND delivery_message_id IS NOT NULL
+            ORDER BY processed_at DESC, id DESC LIMIT 1
+            """,
+            (int(row["guild_id"]), int(application["id"])),
+        )
+        if not original:
+            # Legacy follow-up rows can survive a migration or a manual deletion of
+            # an old review card.  Recreating a card here would duplicate the
+            # candidate's Mesa entry, so keep the durable outbox history and finish
+            # this refresh as a no-op.  A newly delivered submission already renders
+            # the current domain state, so it does not need a second refresh either.
+            LOGGER.info(
+                "Skipping review-card refresh %s: no original submitted card for application %s",
+                event_id,
+                application["id"],
+            )
+            return None, None
+        channel_id = int(original["delivery_channel_id"])
+        message_id = int(original["delivery_message_id"])
+        channel = self.bot.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            fetched = await self.bot.fetch_channel(channel_id)
+            if not isinstance(fetched, discord.TextChannel):
+                raise RuntimeError("Canal da Mesa de Análise não é textual")
+            channel = fetched
+        try:
+            message = await channel.fetch_message(message_id)
+        except discord.NotFound:
+            # Do not resurrect an intentionally removed legacy card and create a
+            # duplicate in the private review queue.  The final decision and audit
+            # records remain durable in the database.
+            LOGGER.info(
+                "Skipping review-card refresh %s: original card %s is no longer present",
+                event_id,
+                message_id,
+            )
+            return None, None
+        public_url = await self.audit.settings.get(int(row["guild_id"]), "recruitment_public_url")
+        await message.edit(
+            embed=build_recruitment_review_embed(self.bot.config.branding, application),
+            view=build_recruitment_review_view(application, public_url),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        return channel.id, message.id
 
     async def _dispatch_recruitment_public_status(
         self,

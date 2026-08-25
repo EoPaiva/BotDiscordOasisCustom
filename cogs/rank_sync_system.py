@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
 import discord
@@ -23,7 +24,10 @@ class RankSyncSystem(commands.Cog):
         self._reconciled_guilds: set[int] = set()
         self._reconcile_lock = asyncio.Lock()
         self._periodic_task: asyncio.Task[None] | None = None
+        self._audit_recovery_task: asyncio.Task[None] | None = None
         self._last_periodic_reconciliation: dict[int, float] = {}
+        self._seen_member_audit_ids: dict[int, set[int]] = {}
+        self._audit_recovery_disabled_guilds: set[int] = set()
 
     @property
     def pending_count(self) -> int:
@@ -36,6 +40,10 @@ class RankSyncSystem(commands.Cog):
             self._periodic_reconciliation_loop(),
             name="identity-periodic-reconciliation",
         )
+        self._audit_recovery_task = asyncio.create_task(
+            self._audit_recovery_loop(),
+            name="identity-audit-recovery",
+        )
 
     def cog_unload(self) -> None:
         for task in tuple(self._pending.values()):
@@ -44,6 +52,9 @@ class RankSyncSystem(commands.Cog):
         if self._periodic_task:
             self._periodic_task.cancel()
             self._periodic_task = None
+        if self._audit_recovery_task:
+            self._audit_recovery_task.cancel()
+            self._audit_recovery_task = None
 
     async def _refresh_hierarchy(self, guild: discord.Guild) -> None:
         cog = self.bot.get_cog("HierarchyCommands")
@@ -59,9 +70,15 @@ class RankSyncSystem(commands.Cog):
     ) -> None:
         try:
             await asyncio.sleep(delay)
+            actor_id = (
+                await self._role_change_actor(member)
+                if source == "DISCORD_ROLE_CHANGE"
+                else None
+            )
             result = await self.services.rank_sync.sync_from_member(
                 member,
                 source=source,
+                actor_id=actor_id,
             )
             if result.db_changed:
                 await self._refresh_hierarchy(member.guild)
@@ -77,6 +94,116 @@ class RankSyncSystem(commands.Cog):
             key = (member.guild.id, member.id)
             if self._pending.get(key) is asyncio.current_task():
                 self._pending.pop(key, None)
+
+    async def _role_change_actor(self, member: discord.Member) -> int | None:
+        """Best-effort attribution for a recent manual rank-role change."""
+        cutoff = datetime.now(UTC) - timedelta(seconds=30)
+        audit_logs = getattr(member.guild, "audit_logs", None)
+        if not callable(audit_logs):
+            return None
+        try:
+            async for entry in audit_logs(
+                limit=12,
+                action=discord.AuditLogAction.member_role_update,
+            ):
+                target_id = getattr(entry.target, "id", None)
+                if target_id != member.id or entry.created_at < cutoff:
+                    continue
+                user_id = getattr(entry.user, "id", None)
+                return int(user_id) if user_id is not None else None
+        except (discord.Forbidden, discord.HTTPException):
+            LOGGER.warning(
+                "Não foi possível atribuir a alteração recente de patente da guild %s.",
+                member.guild.id,
+            )
+        return None
+
+    async def _recover_recent_member_audits(self, guild: discord.Guild) -> int:
+        """Recover role/nickname updates missed by the local member cache.
+
+        Discord audit entries are only a recovery signal.  The final member state is
+        always fetched from Discord and reconciled through RankSync, so online and
+        offline members follow the same canonical path.
+        """
+        if guild.id in self._audit_recovery_disabled_guilds:
+            return 0
+        audit_logs = getattr(guild, "audit_logs", None)
+        if not callable(audit_logs):
+            return 0
+
+        cutoff = datetime.now(UTC) - timedelta(minutes=15)
+        entries: list[tuple[int, str, object]] = []
+        try:
+            for action, source in (
+                (discord.AuditLogAction.member_role_update, "DISCORD_ROLE_CHANGE"),
+                (discord.AuditLogAction.member_update, "DISCORD_NICKNAME_CHANGE"),
+            ):
+                async for entry in audit_logs(limit=50, action=action):
+                    if entry.created_at < cutoff:
+                        break
+                    entries.append((int(entry.id), source, entry))
+        except discord.Forbidden:
+            self._audit_recovery_disabled_guilds.add(guild.id)
+            LOGGER.warning(
+                "Recuperação de identidade por auditoria indisponível na guild %s.",
+                guild.id,
+            )
+            return 0
+        except discord.HTTPException:
+            LOGGER.exception(
+                "Falha temporária ao consultar auditoria de identidade da guild %s.",
+                guild.id,
+            )
+            return 0
+
+        seen = self._seen_member_audit_ids.setdefault(guild.id, set())
+        changed = 0
+        for entry_id, source, entry in sorted(entries, key=lambda item: item[0]):
+            if entry_id in seen:
+                continue
+            target_id = getattr(getattr(entry, "target", None), "id", None)
+            if target_id is None:
+                seen.add(entry_id)
+                continue
+            member = guild.get_member(int(target_id))
+            if member is None:
+                try:
+                    member = await guild.fetch_member(int(target_id))
+                except discord.NotFound:
+                    seen.add(entry_id)
+                    continue
+                except (discord.Forbidden, discord.HTTPException):
+                    LOGGER.exception(
+                        "Falha ao buscar membro %s para recuperação de identidade.",
+                        target_id,
+                    )
+                    continue
+            if member.bot:
+                seen.add(entry_id)
+                continue
+            actor_id = getattr(getattr(entry, "user", None), "id", None)
+            try:
+                result = await self.services.rank_sync.sync_from_member(
+                    member,
+                    source=source,
+                    actor_id=int(actor_id) if actor_id is not None else None,
+                    correlation_id=f"discord-member-audit-{entry_id}",
+                )
+            except Exception:
+                LOGGER.exception(
+                    "Falha ao recuperar identidade do membro %s na guild %s.",
+                    target_id,
+                    guild.id,
+                )
+                continue
+            seen.add(entry_id)
+            changed += int(result.db_changed)
+
+        if len(seen) > 200:
+            self._seen_member_audit_ids[guild.id] = set(sorted(seen)[-200:])
+        if changed:
+            await self._refresh_hierarchy(guild)
+        return changed
 
     async def _schedule(
         self, member: discord.Member, *, source: str = "DISCORD_ROLE_CHANGE"
@@ -235,6 +362,32 @@ class RankSyncSystem(commands.Cog):
         except Exception:
             LOGGER.exception("Loop periódico de reconciliação de identidade interrompido")
 
+    async def _audit_recovery_loop(self) -> None:
+        try:
+            await self.bot.wait_until_ready()
+            while not self.bot.is_closed():
+                intervals: list[float] = []
+                for guild in tuple(self.bot.guilds):
+                    configured = float(
+                        await self.services.settings.get(
+                            guild.id, "rank_audit_recovery_interval_seconds", 20
+                        )
+                    )
+                    intervals.append(max(10.0, min(configured, 300.0)))
+                    async with self._reconcile_lock:
+                        try:
+                            await self._recover_recent_member_audits(guild)
+                        except Exception:
+                            LOGGER.exception(
+                                "Falha inesperada na recuperação de identidade da guild %s.",
+                                guild.id,
+                            )
+                await asyncio.sleep(min(intervals, default=20.0))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.exception("Loop de recuperação de identidade por auditoria interrompido")
+
     @commands.Cog.listener()
     async def on_ready(self) -> None:
         if self.bot.check_mode:
@@ -244,6 +397,7 @@ class RankSyncSystem(commands.Cog):
                 if guild.id in self._reconciled_guilds:
                     continue
                 try:
+                    await self._recover_recent_member_audits(guild)
                     summary = await self.services.rank_sync.reconcile_guild(
                         guild,
                         source="STARTUP_RECONCILIATION",

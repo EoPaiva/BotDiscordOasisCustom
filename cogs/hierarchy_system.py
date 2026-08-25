@@ -10,8 +10,48 @@ from discord.ext import commands
 
 from choque.embeds import branded_embed
 from choque.errors import PermissionDenied, ValidationError
+from choque.time_utils import format_duration
 
 LOGGER = logging.getLogger(__name__)
+
+
+def promotion_requirement_text(row: object) -> str:
+    target_total_ms = row["target_total_ms"]
+    if target_total_ms is not None:
+        tenure_ms = int(row["minimum_tenure_ms"] or 0)
+        tenure = (
+            "sem permanência adicional"
+            if tenure_ms == 0
+            else f"{format_duration(tenure_ms)} na patente atual"
+        )
+        return (
+            f"**Próxima:** {row['next_rank_name']}\n"
+            f"**Requisito:** {format_duration(int(target_total_ms))} totais • {tenure}\n"
+            "**Tipo:** progressão automática, após validações de cadastro, vínculo, "
+            "punições e sincronização"
+        )
+    if int(row["level"]) == 8:
+        return (
+            "**Próxima:** Aspirante\n"
+            "**Requisito:** mérito, candidatura ao Oficialato, avaliação e entrevista\n"
+            "**Tipo:** decisão humana do Comando; horas isoladamente não promovem"
+        )
+    if int(row["level"]) == 18:
+        return (
+            "**Requisito:** não se aplica\n"
+            "**Tipo:** cargo exclusivo do proprietário do servidor; não é promoção nem upamento"
+        )
+    if int(row["level"]) >= 16:
+        return (
+            "**Requisito:** não há requisito público de horas ou mérito\n"
+            "**Tipo:** cargo estratégico por nomeação interna e critérios específicos do Comando"
+        )
+    if int(row["level"]) > 8:
+        return (
+            "**Requisito:** mérito, desempenho, necessidade institucional e histórico\n"
+            "**Tipo:** promoção manual e auditada pelo Comando"
+        )
+    return "**Tipo:** promoção manual; nenhuma regra automática ativa"
 
 
 class HierarchyCommands(commands.Cog):
@@ -24,8 +64,13 @@ class HierarchyCommands(commands.Cog):
         rows = await self.services.database.fetchall(
             """
             SELECT r.level, r.name, r.prefix, r.discord_role_id, r.rbac_profile,
-                   COUNT(m.id) AS member_count
+                   COUNT(m.id) AS member_count,
+                   cpr.target_total_ms, cpr.minimum_tenure_ms,
+                   nr.name AS next_rank_name
             FROM ranks r LEFT JOIN members m ON m.rank_id=r.id AND m.status='ACTIVE'
+            LEFT JOIN career_progression_rules cpr
+              ON cpr.guild_id=r.guild_id AND cpr.from_rank_id=r.id AND cpr.enabled=1
+            LEFT JOIN ranks nr ON nr.id=cpr.to_rank_id
             WHERE r.guild_id=? AND r.active=1
             GROUP BY r.id ORDER BY r.level DESC
             """,
@@ -34,7 +79,11 @@ class HierarchyCommands(commands.Cog):
         embed = branded_embed(
             self.bot.config.branding,
             title="CHOQUE - BGR • Hierarquia",
-            description="Patentes operacionais cadastradas no sistema.",
+            description=(
+                "Patentes e requisitos oficiais da carreira. As horas são cumulativas e contam "
+                "somente pontos encerrados e validados. Até Cadete, o sistema pode promover "
+                "automaticamente; acima disso, toda decisão é humana."
+            ),
         )
         if not rows:
             embed.description = "Nenhuma patente ativa configurada."
@@ -76,7 +125,8 @@ class HierarchyCommands(commands.Cog):
                 name=f"{row['prefix']} {row['name']}".strip(),
                 value=(
                     f"Nível `{row['level']}` • {role}\n"
-                    f"Perfil `{row['rbac_profile']}` • {member_count} membro(s) no cargo"
+                    f"{promotion_requirement_text(row)}\n"
+                    f"Efetivo atual: **{member_count}** membro(s)"
                 ),
                 inline=False,
             )

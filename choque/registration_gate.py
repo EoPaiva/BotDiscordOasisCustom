@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import uuid
 from collections.abc import Mapping
 from typing import Any
@@ -12,6 +11,7 @@ import aiosqlite
 from .audit import AuditService
 from .database import Database
 from .errors import ConflictError, NotFoundError, ValidationError
+from .identity import normalize_bgr_id
 from .settings import SettingsService
 from .time_utils import utc_now_ms
 
@@ -20,6 +20,7 @@ REGISTRATION_STATUSES = frozenset(
 )
 ACCESS_TIERS = frozenset({"REGISTERED_VISITOR", "CANDIDATE", "RECRUIT", "MEMBER"})
 ACCESS_CLASSES = frozenset({"ONBOARDING_VISIBLE", "MEMBER_ONLY", "STAFF_ONLY", "PUBLIC"})
+RESULT_DELIVERY_CLAIM_TTL_MS = 5 * 60 * 1000
 REGISTRATION_EVENTS = frozenset(
     {
         "REGISTRATION_STARTED",
@@ -49,7 +50,6 @@ GATE_SETTING_KEYS = frozenset(
         "registration_dm_enabled",
     }
 )
-_BGR_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
 RANK_COMPLIANCE_WINDOW_MS = 72 * 60 * 60 * 1000
 RANK_COMPLIANCE_REMINDER_MS = 24 * 60 * 60 * 1000
 RANK_COMPLIANCE_RETRY_MS = 6 * 60 * 60 * 1000
@@ -113,6 +113,73 @@ class RegistrationGateService:
             (guild_id, limit),
         )
 
+    async def pending_review_cleanup(self, guild_id: int, *, limit: int = 100):
+        """Return only completed results whose temporary review card remains."""
+        return await self.database.fetchall(
+            """
+            SELECT * FROM registration_gate_records
+            WHERE guild_id=? AND status IN ('REGISTERED','BLOCKED')
+              AND reviewed_at IS NOT NULL AND delivery_status='DELIVERED'
+              AND review_channel_id IS NOT NULL AND review_message_id IS NOT NULL
+            ORDER BY reviewed_at, id LIMIT ?
+            """,
+            (guild_id, limit),
+        )
+
+    async def claim_review_result_delivery(self, registration_id: int) -> str | None:
+        return await self._claim_delivery_phase(registration_id, "RESULT")
+
+    async def claim_review_cleanup(self, registration_id: int) -> str | None:
+        return await self._claim_delivery_phase(registration_id, "CLEANUP")
+
+    async def _claim_delivery_phase(self, registration_id: int, phase: str) -> str | None:
+        now = utc_now_ms()
+        token = str(uuid.uuid4())
+        if phase not in {"RESULT", "CLEANUP"}:
+            raise ValueError("Fase de entrega inválida.")
+        condition = (
+            "delivery_status='PENDING'"
+            if phase == "RESULT"
+            else (
+                "status IN ('REGISTERED','BLOCKED') AND reviewed_at IS NOT NULL "
+                "AND delivery_status='DELIVERED' AND review_channel_id IS NOT NULL "
+                "AND review_message_id IS NOT NULL"
+            )
+        )
+        async with self.database.transaction() as connection:
+            await connection.execute(
+                """
+                DELETE FROM registration_delivery_claims
+                WHERE registration_id=? AND phase=? AND claimed_at<?
+                """,
+                (registration_id, phase, now - RESULT_DELIVERY_CLAIM_TTL_MS),
+            )
+            cursor = await connection.execute(
+                f"""
+                INSERT OR IGNORE INTO registration_delivery_claims(
+                    registration_id, phase, claim_token, claimed_at
+                )
+                SELECT ?, ?, ?, ?
+                WHERE EXISTS (
+                    SELECT 1 FROM registration_gate_records
+                    WHERE id=? AND {condition}
+                )
+                """,
+                (registration_id, phase, token, now, registration_id),
+            )
+            return token if cursor.rowcount == 1 else None
+
+    async def release_delivery_claim(
+        self, registration_id: int, phase: str, claim_token: str
+    ) -> None:
+        await self.database.execute(
+            """
+            DELETE FROM registration_delivery_claims
+            WHERE registration_id=? AND phase=? AND claim_token=?
+            """,
+            (registration_id, phase, claim_token),
+        )
+
     async def record_review_notification(
         self,
         registration_id: int,
@@ -131,6 +198,52 @@ class RegistrationGateService:
             if cursor.rowcount != 1:
                 raise ConflictError("Esse cadastro não está mais aguardando revisão.")
 
+    async def prepare_pending_review_delivery(self, registration_id: int):
+        """Repair a stale result-delivery cycle before showing a pending review.
+
+        This is a recovery guard for records created before review-cycle resets
+        were enforced.  It deliberately preserves an already-persisted pending
+        card pointer, so a reconnect can edit/reuse that card instead of
+        deleting or duplicating it.
+        """
+        now = utc_now_ms()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                "SELECT * FROM registration_gate_records WHERE id=?", (registration_id,)
+            )
+            record = await cursor.fetchone()
+            if not record:
+                raise NotFoundError("Cadastro não encontrado.")
+            if record["status"] not in {"PENDING", "REQUIRES_REVIEW"}:
+                raise ConflictError("Esse cadastro não está mais aguardando revisão.")
+            stale_delivery = (
+                record["delivery_status"] != "PENDING"
+                or record["result_channel_id"] is not None
+                or record["result_message_id"] is not None
+                or record["reviewed_at"] is not None
+                or record["reviewed_by"] is not None
+                or record["review_reason"] is not None
+            )
+            if stale_delivery:
+                await connection.execute(
+                    """
+                    UPDATE registration_gate_records
+                    SET completed_at=NULL, reviewed_at=NULL, reviewed_by=NULL,
+                        review_reason=NULL, result_channel_id=NULL, result_message_id=NULL,
+                        delivery_status='PENDING', last_attempt_at=?, updated_at=?
+                    WHERE id=? AND status IN ('PENDING','REQUIRES_REVIEW')
+                    """,
+                    (now, now, registration_id),
+                )
+                await connection.execute(
+                    "DELETE FROM registration_delivery_claims WHERE registration_id=?",
+                    (registration_id,),
+                )
+            cursor = await connection.execute(
+                "SELECT * FROM registration_gate_records WHERE id=?", (registration_id,)
+            )
+            return await cursor.fetchone()
+
     async def mark_review_result_delivered(
         self,
         registration_id: int,
@@ -138,6 +251,7 @@ class RegistrationGateService:
         actor_id: int | None,
         channel_id: int,
         message_id: int,
+        claim_token: str | None = None,
     ) -> None:
         async with self.database.transaction() as connection:
             cursor = await connection.execute(
@@ -147,14 +261,24 @@ class RegistrationGateService:
             record = await cursor.fetchone()
             if not record:
                 raise NotFoundError("Cadastro não encontrado.")
-            if record["status"] in {"PENDING", "REQUIRES_REVIEW"}:
-                raise ConflictError("Esse cadastro ainda aguarda revisão.")
+            if record["status"] not in {"REGISTERED", "BLOCKED"} or not record["reviewed_at"]:
+                raise ConflictError("Esse cadastro ainda não possui uma decisão final.")
             if (
                 record["delivery_status"] == "DELIVERED"
                 and int(record["result_channel_id"] or 0) == channel_id
                 and int(record["result_message_id"] or 0) == message_id
             ):
                 return
+            if claim_token is not None:
+                claim = await connection.execute(
+                    """
+                    SELECT 1 FROM registration_delivery_claims
+                    WHERE registration_id=? AND phase='RESULT' AND claim_token=?
+                    """,
+                    (registration_id, claim_token),
+                )
+                if await claim.fetchone() is None:
+                    raise ConflictError("A entrega do resultado foi assumida por outra instância.")
             await connection.execute(
                 """
                 UPDATE registration_gate_records
@@ -175,6 +299,45 @@ class RegistrationGateService:
                     "result_message_id": message_id,
                 },
                 connection=connection,
+            )
+            if claim_token is not None:
+                await connection.execute(
+                    """
+                    DELETE FROM registration_delivery_claims
+                    WHERE registration_id=? AND phase='RESULT' AND claim_token=?
+                    """,
+                    (registration_id, claim_token),
+                )
+
+    async def mark_review_cleanup_completed(
+        self, registration_id: int, *, claim_token: str
+    ) -> None:
+        """Forget only the temporary-card pointer after its confirmed removal."""
+        async with self.database.transaction() as connection:
+            claim = await connection.execute(
+                """
+                SELECT 1 FROM registration_delivery_claims
+                WHERE registration_id=? AND phase='CLEANUP' AND claim_token=?
+                """,
+                (registration_id, claim_token),
+            )
+            if await claim.fetchone() is None:
+                raise ConflictError("A limpeza da ficha foi assumida por outra instância.")
+            await connection.execute(
+                """
+                UPDATE registration_gate_records
+                SET review_channel_id=NULL, review_message_id=NULL, updated_at=?
+                WHERE id=? AND status IN ('REGISTERED','BLOCKED')
+                  AND reviewed_at IS NOT NULL AND delivery_status='DELIVERED'
+                """,
+                (utc_now_ms(), registration_id),
+            )
+            await connection.execute(
+                """
+                DELETE FROM registration_delivery_claims
+                WHERE registration_id=? AND phase='CLEANUP' AND claim_token=?
+                """,
+                (registration_id, claim_token),
             )
 
     async def _member_by_discord(
@@ -224,13 +387,9 @@ class RegistrationGateService:
     @staticmethod
     def _normalize_identity(mta_nick: str, bgr_id: str) -> tuple[str, str]:
         nick = " ".join(mta_nick.split()).strip()
-        normalized_id = bgr_id.strip()
+        normalized_id = normalize_bgr_id(bgr_id)
         if len(nick) < 2 or len(nick) > 32:
             raise ValidationError("O nick BGR deve possuir entre 2 e 32 caracteres.")
-        if not _BGR_ID_PATTERN.fullmatch(normalized_id):
-            raise ValidationError(
-                "O ID BGR deve possuir até 32 caracteres: letras, números, ponto, hífen ou _."
-            )
         return nick, normalized_id
 
     async def _event(
@@ -312,8 +471,8 @@ class RegistrationGateService:
                 conflict_member_id=excluded.conflict_member_id,
                 sync_status=excluded.sync_status,
                 sync_error=excluded.sync_error,
-                idempotency_key=COALESCE(registration_gate_records.idempotency_key,
-                                         excluded.idempotency_key),
+                idempotency_key=COALESCE(excluded.idempotency_key,
+                                         registration_gate_records.idempotency_key),
                 submitted_at=COALESCE(registration_gate_records.submitted_at,
                                       excluded.submitted_at),
                 completed_at=excluded.completed_at,
@@ -355,6 +514,37 @@ class RegistrationGateService:
         )
         return await cursor.fetchone()
 
+    async def _begin_review_delivery_cycle(
+        self,
+        connection: aiosqlite.Connection,
+        registration_id: int,
+        *,
+        submitted_at: int,
+    ) -> None:
+        """Reset delivery state when one durable registration enters a new review cycle.
+
+        A record is deliberately reused per guild/member.  Its final result and
+        cleanup claim from a previous cycle must never authorize removal of the
+        card that will represent the new pending review.
+        """
+        cursor = await connection.execute(
+            """
+            UPDATE registration_gate_records
+            SET submitted_at=?, completed_at=NULL, reviewed_at=NULL, reviewed_by=NULL,
+                review_reason=NULL, review_channel_id=NULL, review_message_id=NULL,
+                result_channel_id=NULL, result_message_id=NULL,
+                delivery_status='PENDING', last_attempt_at=?, updated_at=?
+            WHERE id=? AND status IN ('PENDING','REQUIRES_REVIEW')
+            """,
+            (submitted_at, submitted_at, submitted_at, registration_id),
+        )
+        if cursor.rowcount != 1:
+            raise ConflictError("Esse cadastro não está mais aguardando revisão.")
+        await connection.execute(
+            "DELETE FROM registration_delivery_claims WHERE registration_id=?",
+            (registration_id,),
+        )
+
     async def registration_intent(self, guild_id: int, discord_id: int) -> dict[str, Any]:
         async with self.database.transaction() as connection:
             member = await self._member_by_discord(connection, guild_id, discord_id)
@@ -364,6 +554,35 @@ class RegistrationGateService:
                 (guild_id, discord_id),
             )
             current = await current_cursor.fetchone()
+            approved_recruitment_needs_registration = False
+            if (
+                member
+                and member["status"] == "ACTIVE"
+                and recruitment
+                and recruitment["status"] == "APPROVED"
+                and current
+                and current["status"] == "REGISTERED"
+                and int(current["recruitment_application_id"] or 0) == int(recruitment["id"])
+            ):
+                submitted_cursor = await connection.execute(
+                    """
+                    SELECT 1 FROM registration_gate_events
+                    WHERE registration_id=? AND source='SELF_REGISTRATION'
+                    LIMIT 1
+                    """,
+                    (int(current["id"]),),
+                )
+                approved_recruitment_needs_registration = await submitted_cursor.fetchone() is None
+        # A aprovação do alistamento cria o vínculo operacional, mas não substitui a
+        # identificação declarada pelo próprio recruta. Antes ela ficava parecendo um
+        # cadastro concluído e escondia o formulário. O evento SELF_REGISTRATION é a
+        # marca durável de que essa etapa já foi iniciada, inclusive após reconnect.
+        if approved_recruitment_needs_registration:
+            return {
+                "mode": "FORM",
+                "kind": "APPROVED_RECRUITMENT",
+                "current": current,
+            }
         if current and current["status"] in {"PENDING", "REQUIRES_REVIEW"}:
             return {"mode": "STATUS", "kind": str(current["status"]), "current": current}
         if (
@@ -372,6 +591,12 @@ class RegistrationGateService:
             and current["conflict_code"] == "ADMIN_DEACTIVATED"
         ):
             return {"mode": "BLOCKED", "kind": "ADMIN_DEACTIVATED", "current": current}
+        # A reabertura administrativa cria explicitamente um ciclo atual sem
+        # cadastro. Ele precisa prevalecer sobre vínculos e candidaturas
+        # históricos; caso contrário o botão persistente volta a mostrar a
+        # situação antiga em vez de abrir o formulário do novo ciclo.
+        if current and current["status"] == "UNREGISTERED" and not member:
+            return {"mode": "FORM", "kind": "CURRENT_CYCLE", "current": current}
         if member:
             if member["status"] == "ACTIVE":
                 if current and current["status"] == "REGISTERED" and current["reviewed_at"]:
@@ -504,7 +729,25 @@ class RegistrationGateService:
             if not record:
                 raise NotFoundError("Cadastro não encontrado.")
             if not record["member_id"]:
-                raise ConflictError("Somente cadastros vinculados podem ser reabertos por este fluxo.")
+                compliance_cursor = await connection.execute(
+                    """
+                    SELECT 1 FROM rank_registration_compliance
+                    WHERE guild_id=? AND discord_id=? AND status IN ('PENDING','EXPIRING')
+                    LIMIT 1
+                    """,
+                    (int(record["guild_id"]), int(record["discord_id"])),
+                )
+                has_current_compliance = await compliance_cursor.fetchone() is not None
+                recoverable_accidental_block = (
+                    record["status"] == "BLOCKED"
+                    and record["conflict_code"] == "ADMIN_DEACTIVATED"
+                    and has_current_compliance
+                )
+                if not recoverable_accidental_block:
+                    raise ConflictError(
+                        "Somente cadastros vinculados ou um bloqueio administrativo com "
+                        "cobrança funcional ativa podem ser reabertos por este fluxo."
+                    )
             if record["status"] in {"PENDING", "REQUIRES_REVIEW"}:
                 return record
             await connection.execute(
@@ -528,7 +771,10 @@ class RegistrationGateService:
                 event_type="REGISTRATION_RECONCILED",
                 actor_id=actor_id,
                 source="SYSTEM_RECONCILIATION",
-                metadata={"operation": "REOPEN_FOR_REVIEW", "member_id": int(record["member_id"])},
+                metadata={
+                    "operation": "REOPEN_FOR_REVIEW",
+                    "member_id": int(record["member_id"]) if record["member_id"] else None,
+                },
             )
             await self.audit.record(
                 int(record["guild_id"]),
@@ -1248,12 +1494,10 @@ class RegistrationGateService:
         bgr_id: str,
         idempotency_key: str | None = None,
     ):
-        nick, normalized_id = self._normalize_identity(mta_nick, bgr_id)
         if await self.settings.get(guild_id, "security_lockdown", False):
             raise ValidationError("A Portaria está temporariamente bloqueada pelo modo de segurança.")
         if not await self.settings.get(guild_id, "registration_gate_enabled", False):
             raise ValidationError("A Portaria Digital ainda não foi ativada pela Administração.")
-        key = idempotency_key or f"self:{guild_id}:{discord_id}:{normalized_id.lower()}"
         now = utc_now_ms()
         async with self.database.transaction() as connection:
             current_cursor = await connection.execute(
@@ -1261,14 +1505,109 @@ class RegistrationGateService:
                 (guild_id, discord_id),
             )
             current = await current_cursor.fetchone()
+            if current and current["status"] == "BLOCKED":
+                if current["conflict_code"] == "ADMIN_DEACTIVATED":
+                    raise ConflictError(
+                        "Este cadastro foi desativado pela Administração. "
+                        "Procure a Administração para orientação."
+                    )
+                raise ConflictError(
+                    "Este cadastro está bloqueado. Procure a Administração para orientação."
+                )
+
+            # Um segundo envio nunca reinicia nem sobrescreve a ficha que já está
+            # aguardando decisão humana, mesmo se o usuário digitar outro ID.
+            if current and current["status"] in {"PENDING", "REQUIRES_REVIEW"}:
+                result = dict(current)
+                result["submission_outcome"] = "PENDING_EXISTING"
+                return result
+
+            member = await self._member_by_discord(connection, guild_id, discord_id)
+            recruitment = await self._recruitment_by_discord(connection, guild_id, discord_id)
+            compliance_cursor = await connection.execute(
+                """
+                SELECT * FROM rank_registration_compliance
+                WHERE guild_id=? AND discord_id=? AND status IN ('PENDING','EXPIRING')
+                ORDER BY detected_at, id
+                LIMIT 1
+                """,
+                (guild_id, discord_id),
+            )
+            compliance = await compliance_cursor.fetchone()
+
+            if member and member["status"] != "ACTIVE":
+                raise ConflictError(
+                    "Este vínculo não está ativo. Procure a Administração para orientação."
+                )
+
+            nick, normalized_id = self._normalize_identity(mta_nick, bgr_id)
+
+            approved_recruitment_needs_registration = False
+            if (
+                member
+                and member["status"] == "ACTIVE"
+                and recruitment
+                and recruitment["status"] == "APPROVED"
+                and current
+                and current["status"] == "REGISTERED"
+                and int(current["recruitment_application_id"] or 0) == int(recruitment["id"])
+            ):
+                submitted_cursor = await connection.execute(
+                    """
+                    SELECT 1 FROM registration_gate_events
+                    WHERE registration_id=? AND source='SELF_REGISTRATION'
+                    LIMIT 1
+                    """,
+                    (int(current["id"]),),
+                )
+                approved_recruitment_needs_registration = (
+                    await submitted_cursor.fetchone() is None
+                )
+
+            reopened_cycle = bool(current and current["status"] == "UNREGISTERED")
+            visitor_upgrade = bool(
+                current
+                and current["status"] == "REGISTERED"
+                and current["access_tier"] == "REGISTERED_VISITOR"
+                and current["member_id"] is None
+                and (recruitment or compliance)
+            )
+            submitted_matches_member = bool(
+                member
+                and member["character_id"]
+                and str(member["character_id"]).strip().lower() == normalized_id.lower()
+            )
+            if (
+                member
+                and submitted_matches_member
+                and not reopened_cycle
+                and not approved_recruitment_needs_registration
+            ):
+                result = dict(current) if current else {}
+                result.update(
+                    {
+                        "status": "REGISTERED",
+                        "access_tier": self._tier_for_member(member),
+                        "sync_status": "NOT_REQUIRED",
+                        "mta_nick": str(member["mta_nick"]),
+                        "bgr_id": str(member["character_id"] or "") or None,
+                        "member_id": int(member["id"]),
+                        "submission_outcome": "ALREADY_REGISTERED",
+                    }
+                )
+                return result
             if (
                 current
-                and current["status"] == "BLOCKED"
-                and current["conflict_code"] == "ADMIN_DEACTIVATED"
+                and current["status"] == "REGISTERED"
+                and not approved_recruitment_needs_registration
+                and not visitor_upgrade
+                and not member
             ):
-                raise ConflictError(
-                    "Este cadastro foi desativado pela Administração. Procure o suporte."
-                )
+                result = dict(current)
+                result["submission_outcome"] = "ALREADY_REGISTERED"
+                return result
+
+            key = idempotency_key or f"self:{guild_id}:{discord_id}:{normalized_id.lower()}"
             attempts_cursor = await connection.execute(
                 """
                 SELECT COUNT(*) AS total FROM registration_gate_events e
@@ -1289,19 +1628,7 @@ class RegistrationGateService:
             if existing_key and int(existing_key["discord_id"]) == discord_id:
                 return existing_key
 
-            member = await self._member_by_discord(connection, guild_id, discord_id)
             conflicting_member = await self._member_by_bgr(connection, guild_id, normalized_id)
-            recruitment = await self._recruitment_by_discord(connection, guild_id, discord_id)
-            compliance_cursor = await connection.execute(
-                """
-                SELECT * FROM rank_registration_compliance
-                WHERE guild_id=? AND discord_id=? AND status IN ('PENDING','EXPIRING')
-                ORDER BY detected_at, id
-                LIMIT 1
-                """,
-                (guild_id, discord_id),
-            )
-            compliance = await compliance_cursor.fetchone()
 
             status = "PENDING"
             tier = "REGISTERED_VISITOR"
@@ -1388,6 +1715,14 @@ class RegistrationGateService:
                 sync_status=sync_status,
                 idempotency_key=key,
             )
+            if status in {"PENDING", "REQUIRES_REVIEW"}:
+                await self._begin_review_delivery_cycle(
+                    connection, int(record["id"]), submitted_at=now
+                )
+                cursor = await connection.execute(
+                    "SELECT * FROM registration_gate_records WHERE id=?", (int(record["id"]),)
+                )
+                record = await cursor.fetchone()
             await self._event(
                 connection,
                 guild_id=guild_id,
@@ -1893,7 +2228,14 @@ class RegistrationGateService:
         success: bool,
         actor_id: int | None = None,
         error: str | None = None,
-    ) -> None:
+    ) -> bool:
+        """Persist a real registration-sync transition exactly once.
+
+        Gateway role events can be delivered more than once while Discord
+        settles a member update.  A successful retry against an already
+        ``SYNCED`` record is not an access grant and must not create another
+        audit/history event.
+        """
         async with self.database.transaction() as connection:
             cursor = await connection.execute(
                 "SELECT * FROM registration_gate_records WHERE id=?", (registration_id,)
@@ -1902,12 +2244,19 @@ class RegistrationGateService:
             if not record:
                 raise NotFoundError("Cadastro não encontrado.")
             now = utc_now_ms()
+            next_status = "SYNCED" if success else "FAILED"
+            next_error = None if success else (error or "erro")[:500]
+            if (
+                str(record["sync_status"]) == next_status
+                and (record["sync_error"] or None) == next_error
+            ):
+                return False
             await connection.execute(
                 """
                 UPDATE registration_gate_records SET sync_status=?, sync_error=?,
                     last_attempt_at=?, version=version+1, updated_at=? WHERE id=?
                 """,
-                ("SYNCED" if success else "FAILED", None if success else (error or "erro")[:500], now, now, registration_id),
+                (next_status, next_error, now, now, registration_id),
             )
             event_type = (
                 "REGISTRATION_ACCESS_GRANTED"
@@ -1935,6 +2284,7 @@ class RegistrationGateService:
                 connection=connection,
                 deliver_immediately=False,
             )
+            return True
 
     async def queue(self, guild_id: int, *, limit: int = 100):
         return await self.database.fetchall(

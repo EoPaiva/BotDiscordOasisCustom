@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from choque.backups import create_consistent_backup, restore_drill
-from choque.database import Database
+from choque.database import MIGRATIONS, Database
 
 
 def test_consistent_backup_and_restore_drill(tmp_path: Path) -> None:
@@ -28,7 +28,7 @@ def test_consistent_backup_and_restore_drill(tmp_path: Path) -> None:
     evidence = create_consistent_backup(source, tmp_path / "backups")
     assert evidence.path.exists()
     assert evidence.manifest_path.exists()
-    assert evidence.migration == 27
+    assert evidence.migration == MIGRATIONS[-1][0]
     assert evidence.integrity == "ok"
     assert evidence.foreign_key_violations == 0
     manifest = json.loads(evidence.manifest_path.read_text(encoding="utf-8"))
@@ -36,5 +36,5 @@ def test_consistent_backup_and_restore_drill(tmp_path: Path) -> None:
 
     restored = restore_drill(evidence.path)
     assert restored.sha256 == evidence.sha256
-    assert restored.migration == 27
+    assert restored.migration == MIGRATIONS[-1][0]
     assert restored.integrity == "ok"

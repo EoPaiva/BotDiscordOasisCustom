@@ -198,10 +198,20 @@ class OperationsService:
         actor_id: int | None,
         *,
         enabled: bool = True,
+        logical_key: str | None = None,
+        capacity: int = 0,
+        allowed_role_ids: Iterable[int] = (),
+        automatic_clock: bool = True,
     ) -> None:
         channel_type = channel_type.upper()
         if channel_type not in {"WAITING", "ACTIVE"}:
             raise ValidationError("Tipo de call de patrulha inválido.")
+        logical_key = (logical_key or f"voice:{channel_id}").strip().lower()
+        if not logical_key:
+            raise ValidationError("Informe a chave lógica da call de patrulha.")
+        if not 0 <= int(capacity) <= 99:
+            raise ValidationError("A capacidade da viatura deve ficar entre 0 e 99.")
+        role_ids = sorted({int(value) for value in allowed_role_ids if int(value) > 0})
         now = self.clock()
         async with self.database.transaction() as connection:
             if channel_type == "WAITING" and enabled:
@@ -216,14 +226,19 @@ class OperationsService:
                 """
                 INSERT INTO patrol_channels(
                     guild_id, channel_id, channel_type, enabled, sort_order,
-                    label, created_at, created_by, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    label, created_at, created_by, updated_at, logical_key,
+                    capacity, allowed_role_ids_json, automatic_clock
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(guild_id, channel_id) DO UPDATE SET
                     channel_type=excluded.channel_type,
                     enabled=excluded.enabled,
                     sort_order=excluded.sort_order,
                     label=excluded.label,
-                    updated_at=excluded.updated_at
+                    updated_at=excluded.updated_at,
+                    logical_key=excluded.logical_key,
+                    capacity=excluded.capacity,
+                    allowed_role_ids_json=excluded.allowed_role_ids_json,
+                    automatic_clock=excluded.automatic_clock
                 """,
                 (
                     guild_id,
@@ -235,6 +250,10 @@ class OperationsService:
                     now,
                     actor_id,
                     now,
+                    logical_key,
+                    int(capacity),
+                    json.dumps(role_ids),
+                    int(automatic_clock),
                 ),
             )
             await self.audit.record(
@@ -247,6 +266,10 @@ class OperationsService:
                     "channel_type": channel_type,
                     "enabled": enabled,
                     "sort_order": sort_order,
+                    "logical_key": logical_key,
+                    "capacity": int(capacity),
+                    "allowed_role_ids": role_ids,
+                    "automatic_clock": bool(automatic_clock),
                 },
                 connection=connection,
             )
@@ -733,6 +756,22 @@ class OperationsService:
                     f"patrol:reserved:{patrol_id}",
                     {"channel_id": int(channel["channel_id"]), "members": member_ids},
                 )
+                await connection.execute(
+                    """
+                    INSERT OR IGNORE INTO patrol_composition_events(
+                        guild_id, patrol_id, event_type, after_channel_id,
+                        reason, metadata_json, event_key, occurred_at
+                    ) VALUES (?, ?, 'VEHICLE_CREATED', ?, 'QUEUE_AUTO', ?, ?, ?)
+                    """,
+                    (
+                        guild_id,
+                        patrol_id,
+                        int(channel["channel_id"]),
+                        json.dumps({"reserved_members": member_ids}, sort_keys=True),
+                        f"vehicle:{patrol_id}:created",
+                        now,
+                    ),
+                )
                 plans.append(
                     {
                         "patrol_id": patrol_id,
@@ -787,6 +826,30 @@ class OperationsService:
                     WHERE id=? AND status='RESERVED'
                     """,
                     (now, int(shift["id"]) if shift else None, member["id"]),
+                )
+                if shift:
+                    await connection.execute(
+                        "UPDATE shifts SET current_patrol_id=?, version=version+1 WHERE id=?",
+                        (patrol_id, shift["id"]),
+                    )
+                await connection.execute(
+                    """
+                    INSERT OR IGNORE INTO patrol_composition_events(
+                        guild_id, patrol_id, event_type, member_id, discord_id,
+                        after_channel_id, reason, event_key, occurred_at
+                    ) VALUES (?, ?, 'MEMBER_JOINED', ?, ?,
+                              (SELECT voice_channel_id FROM patrols WHERE id=?),
+                              'QUEUE_AUTO', ?, ?)
+                    """,
+                    (
+                        guild_id,
+                        patrol_id,
+                        member["member_id"],
+                        member["discord_id"],
+                        patrol_id,
+                        f"vehicle:{patrol_id}:member:{member['member_id']}:join:{now}",
+                        now,
+                    ),
                 )
                 await connection.execute(
                     """
@@ -1050,7 +1113,7 @@ class OperationsService:
             """
             UPDATE patrols SET leader_member_id=?, commander_member_id=?,
                 commander_assigned_at=?, commander_assignment_source=?,
-                commander_manual_lock=?, updated_at=?
+                commander_manual_lock=?, updated_at=?, version=version+1
             WHERE guild_id=? AND id=? AND status='ACTIVE'
             """,
             (
@@ -1130,6 +1193,30 @@ class OperationsService:
                 "reason": reason,
                 "actor": actor_id,
             },
+        )
+        await connection.execute(
+            """
+            INSERT OR IGNORE INTO patrol_composition_events(
+                guild_id, patrol_id, event_type, previous_commander_id,
+                next_commander_id, actor_id, reason, metadata_json,
+                event_key, occurred_at
+            ) VALUES (?, ?, 'COMMANDER_CHANGED', ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                guild_id,
+                patrol_id,
+                before_member_id,
+                after_member_id,
+                actor_id,
+                reason,
+                json.dumps(
+                    {"before_discord_id": before_discord_id, "after_discord_id": after_discord_id},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                f"vehicle:{patrol_id}:commander:{before_member_id}:{after_member_id}:{now}",
+                now,
+            ),
         )
         return {
             "changed": True,
@@ -1623,7 +1710,8 @@ class OperationsService:
     ) -> None:
         cursor = await connection.execute(
             """
-            UPDATE patrols SET status='CLOSED', ended_at=?, end_reason=?, updated_at=?
+            UPDATE patrols SET status='CLOSED', ended_at=?, end_reason=?, updated_at=?,
+                version=version+1
             WHERE id=? AND status='ACTIVE'
             """,
             (now, reason, now, patrol["id"]),
@@ -1636,6 +1724,13 @@ class OperationsService:
             WHERE patrol_id=? AND status='ACTIVE'
             """,
             (now, patrol["id"]),
+        )
+        await connection.execute(
+            """
+            UPDATE shifts SET current_patrol_id=NULL, version=version+1
+            WHERE current_patrol_id=? AND status IN ('ACTIVE','GRACE')
+            """,
+            (patrol["id"],),
         )
         await connection.execute(
             """
@@ -1667,6 +1762,23 @@ class OperationsService:
             int(patrol["id"]),
             f"patrol:finished:{patrol['id']}",
             {"reason": reason, "ended_at": now},
+        )
+        await connection.execute(
+            """
+            INSERT OR IGNORE INTO patrol_composition_events(
+                guild_id, patrol_id, event_type, before_channel_id, actor_id,
+                reason, event_key, occurred_at
+            ) VALUES (?, ?, 'VEHICLE_CLOSED', ?, ?, ?, ?, ?)
+            """,
+            (
+                int(patrol["guild_id"]),
+                int(patrol["id"]),
+                int(patrol["voice_channel_id"]),
+                actor_id,
+                reason,
+                f"vehicle:{patrol['id']}:closed",
+                now,
+            ),
         )
 
     async def finish_patrol(
@@ -2919,6 +3031,26 @@ class OperationsService:
                                   WHERE sa.shift_id=s.id), 0))
                              FROM shifts s WHERE s.member_id=m.id
                                AND s.validation_status='VALID'), 0) AS valid_hours_ms
+                   ,COALESCE((SELECT COUNT(*) FROM career_merits cm
+                              WHERE cm.guild_id=m.guild_id AND cm.member_id=m.id), 0)
+                       AS merit_count
+                   ,COALESCE((SELECT SUM(CASE WHEN cm.merit_type='POSITIVE'
+                                              THEN cm.weight ELSE 0 END)
+                              FROM career_merits cm
+                              WHERE cm.guild_id=m.guild_id AND cm.member_id=m.id), 0)
+                       AS positive_merit_weight
+                   ,COALESCE((SELECT SUM(CASE WHEN cm.merit_type='NEGATIVE'
+                                              THEN cm.weight ELSE 0 END)
+                              FROM career_merits cm
+                              WHERE cm.guild_id=m.guild_id AND cm.member_id=m.id), 0)
+                       AS negative_merit_weight
+                   ,(SELECT cpr.target_total_ms FROM career_progression_rules cpr
+                     WHERE cpr.guild_id=m.guild_id AND cpr.from_rank_id=m.rank_id
+                       AND cpr.enabled=1) AS progression_target_ms
+                   ,(SELECT tr.name FROM career_progression_rules cpr
+                     JOIN ranks tr ON tr.id=cpr.to_rank_id
+                     WHERE cpr.guild_id=m.guild_id AND cpr.from_rank_id=m.rank_id
+                       AND cpr.enabled=1) AS progression_next_rank_name
             FROM members m LEFT JOIN ranks r ON r.id=m.rank_id
             WHERE m.guild_id=? AND m.status!='DISMISSED'
             ORDER BY COALESCE(r.level, -1) DESC, m.mta_nick
@@ -2931,7 +3063,8 @@ class OperationsService:
                 SELECT 'P-' || pa.id AS id, pa.discord_id, m.mta_nick,
                        pa.action_type, fr.name AS from_rank_name,
                        tr.name AS to_rank_name, pa.actor_id, pa.reason,
-                       pa.created_at, 'FORMAL_PANEL' AS source
+                       pa.created_at, pa.source, pa.evidence_locator,
+                       pa.observations, pa.article_code
                 FROM personnel_actions pa
                 JOIN members m ON m.id=pa.member_id
                 LEFT JOIN ranks fr ON fr.id=pa.from_rank_id
@@ -2942,7 +3075,8 @@ class OperationsService:
                        rse.event_type AS action_type, fr.name AS from_rank_name,
                        tr.name AS to_rank_name, rse.actor_id,
                        'Sincronização automática de patente' AS reason,
-                       rse.created_at, rse.source
+                       rse.created_at, rse.source, NULL AS evidence_locator,
+                       NULL AS observations, NULL AS article_code
                 FROM rank_sync_events rse
                 JOIN members m ON m.id=rse.member_id
                 LEFT JOIN ranks fr ON fr.id=rse.from_rank_id
@@ -2953,10 +3087,20 @@ class OperationsService:
             """,
             (guild_id, guild_id),
         )
+        officer_status_rows = await self.database.fetchall(
+            """
+            SELECT status, COUNT(*) AS total FROM officer_applications
+            WHERE guild_id=? GROUP BY status
+            """,
+            (guild_id,),
+        )
         return {
             "generated_at": self.clock(),
             "members": [dict(row) for row in members],
             "movements": [dict(row) for row in movements],
+            "officer_applications": {
+                str(row["status"]): int(row["total"]) for row in officer_status_rows
+            },
         }
 
     async def add_recruit_evaluation(
@@ -3066,6 +3210,16 @@ class OperationsService:
             "required_courses": not missing_courses,
             "no_active_punishment": active_punishment is None,
         }
+        automatic_rule = await self.database.fetchone(
+            """
+            SELECT cpr.target_total_ms, cpr.minimum_tenure_ms,
+                   tr.id AS to_rank_id, tr.name AS to_rank_name
+            FROM career_progression_rules cpr
+            JOIN ranks tr ON tr.id=cpr.to_rank_id
+            WHERE cpr.guild_id=? AND cpr.from_rank_id=? AND cpr.enabled=1
+            """,
+            (guild_id, member["rank_id"]),
+        )
         return {
             "member": dict(member),
             "next_rank": dict(next_rank) if next_rank else None,
@@ -3074,7 +3228,8 @@ class OperationsService:
             "missing_courses": missing_courses,
             "checks": checks,
             "eligible_for_human_review": all(checks.values()),
-            "automatic_promotion": False,
+            "automatic_promotion": automatic_rule is not None,
+            "automatic_rule": dict(automatic_rule) if automatic_rule else None,
         }
 
     async def dossier(self, guild_id: int, discord_id: int) -> dict[str, object]:

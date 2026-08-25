@@ -1,5 +1,152 @@
 # PROJECT HANDOFF
 
+## Simplificação da Central de Tags — publicada em 2026-08-25
+
+- A migration 43 versiona a renderização das fichas. Cada solicitação ativa mantém uma mensagem única
+  com controles contextuais, e pedidos encerrados permanecem em cinza, sem botões.
+- As treze pendências existentes foram convertidas para o novo layout: zero ficha ausente, zero versão
+  desatualizada e zero pedido ativo duplicado. Um reinício controlado não reenviou nem reeditou fichas.
+- Gates: 58 testes focados, 507 testes completos, Ruff, compileall, diff-check e `main.py --check`.
+  Produção saudável em migration 43, app combinado online e standalone offline, preservando um Gateway.
+
+## Diretriz revisada do Robô Analista — 2026-08-23
+
+- A evolução do Robô Analista passa a ser local e híbrida, depois da Central de Tags. Regras
+  determinísticas transparentes continuam como autoridade e fallback; não haverá dependência de
+  provider externo, chave de IA ou envio de respostas para terceiros.
+- O assistente opcional será um spike isolado de Qwen3-0.6B GGUF Q4_0 via `llama.cpp`, com contexto
+  curto, concorrência 1, timeout, circuit breaker, dados minimizados/anônimos e saída validada por
+  schema. Ele somente resume respostas abertas, organiza evidências e sugere sinais explicáveis.
+- Nenhum resultado do modelo poderá aprovar, reprovar ou determinar elegibilidade. Toda decisão e
+  validação final permanecem humanas, auditáveis e protegidas por RBAC. Plano Diamond: 4096 MB;
+  reserva futura inicial de 1536 MB para o spike, sem alterar a API combinada atual (1024 MB), sem
+  reativar o standalone offline (900 MB) e sem criar aplicativo agora.
+
+## Mesa de Análise concluída e publicada — 2026-08-23
+
+- A ficha privada de cada candidatura agora tem estado operacional/final, responsável, atribuição,
+  decisão, decisor e timestamps na mesma mensagem. Os controles existentes permanecem, e os novos
+  botões persistentes **Aprovar** e **Reprovar** abrem modal com justificativa e mensagem ao candidato.
+- As decisões Discord usam o mesmo `RecruitmentService` e RBAC do portal, bloqueiam autoavaliação,
+  decisão concorrente e resultado incompatível; a trilha preserva ator, motivo, origem `DISCORD` e
+  correlation ID. A transição atualiza a própria ficha e desabilita controles incompatíveis, sem
+  criar uma segunda mensagem.
+- A recuperação edita somente a ficha original e aplica cadência de seis segundos nos cartões
+  legados. Um evento sem ficha original termina como no-op auditável, para não ressuscitar ou
+  duplicar mensagem removida. A fila web aceita filtros por estado e ID do responsável.
+- Produção: `choque-bgr-api` recebeu deploy por stage validado; `CHECK_OK`, migration 28, API e
+  Gateway único foram confirmados. A aplicação standalone continua offline. A Vercel recebeu
+  `dpl_EJZedEhLbTyjaJFYAjhVseEzhX9v`, `READY`, no alias principal, com zero erro de runtime recente
+  em `/recruitment`.
+- A demonstração segura autorizada foi publicada uma única vez na Mesa (`message_id`
+  `1541248708203774013`): é identificada como TESTE/DEMONSTRAÇÃO, tem controles desabilitados e não
+  aponta para candidatura, membro, cargo ou histórico real. Snapshot remoto:
+  `recruitment_review_demo_20260824T005206Z.json`.
+- Gates: 56 testes focados, 335 pytest, 40 Vitest, Ruff, compileall, `main.py --check`, ESLint,
+  typecheck e build Next.js aprovados. O backup pré-Mesa permanece em
+  `C:\Users\mpaii\AppData\Local\Temp\choque-pre-mesa-20260823-213417\backup-choque-bgr-api.zip`.
+
+## Ficha temporária da Portaria recuperada — 2026-08-23
+
+- Diagnóstico confirmado no backup remoto: o registro `338` estava em `REQUIRES_REVIEW`, sem
+  decisão humana, porém ainda carregava `delivery_status=DELIVERED` e o resultado de um ciclo
+  anterior. O worker de limpeza antigo selecionava apenas a entrega e apagava a ficha nova.
+- `submit()` agora reinicia atomicamente o ciclo de revisão ao reutilizar o registro durável:
+  resultado, decisão, ponteiros antigos e claims são retirados antes de uma nova ficha. A recuperação
+  de startup também corrige registros legados inconsistentes, mas preserva o ponteiro da ficha
+  pendente já publicada para não duplicá-la nem apagá-la.
+- Limpeza passou a exigir estado final e decisão: somente `REGISTERED`/`BLOCKED` com `reviewed_at`
+  na Portaria e `APPROVED`/`REJECTED` nas solicitações legadas. A mensagem fixa da Central não é
+  tocada; somente a ficha temporária persistida é removida após o resultado único no Histórico.
+- Produção: backup pré-corte preservado, app combinado reiniciado com `CHECK_OK`, Gateway único e
+  standalone offline. A releitura pós-restart confirmou que o registro afetado foi reparado para
+  `REQUIRES_REVIEW`, `PENDING`, com novo `review_message_id` e sem resultado anterior.
+- Gates: 39 testes dirigidos, 326 testes da suíte completa, Ruff e `main.py --check` aprovados.
+  `scripts/deploy_discloud_staged.ps1` passa a construir um stage limpo para impedir que
+  `.discloudignore` dentro de artefatos faça o runtime receber código antigo.
+
+## Qualificações validadas ao vivo — 2026-08-23
+
+- A prova humana autenticada foi concluída: a concessão de Abordagem Avançada para Paiva chegou à
+  API com snowflake exato, foi registrada como `GRANT` de origem Web e sincronizou o cargo Discord
+  em uma tentativa, sem erro nem boundary React. A frente de Qualificações está concluída.
+
+## Hotfix de contrato de snowflake em Qualificações publicado — 2026-08-23
+
+- A validação humana após `dpl_JADvS3uvzJdQoHynjvJX9wWK1zCA` confirmou que o primeiro hotfix do
+  formulário eliminou o `Zod too_big`, mas revelou um segundo erro: `/v1/qualifications` ainda
+  serializava o `discord_id` do membro como número JSON. O navegador arredondava o snowflake antes
+  do clique e a API recebia um ID inexistente, retornando `Membro cadastrado não encontrado.`
+  (digest `1027291490`).
+- O app combinado agora converte na fronteira HTTP os snowflakes expostos pela matriz
+  (`member.discord_id`, `course_role_id` e `actor_id` de decisões) para texto decimal. O core e os
+  cogs continuam usando inteiros Python; não houve criação automática de membro, bypass de RBAC ou
+  alteração de step-up. Um backup remoto imediatamente anterior confirmou o cadastro ativo de Paiva
+  com um snowflake acima do limite seguro do JavaScript.
+- A Vercel recebeu `dpl_GDP7NteVNqxrSLMTXYWuC5mmHiY9`, `READY`, e a Discloud combinada foi atualizada
+  após backup íntegro (`quick_check=ok`, zero FK, migration 28). Startup confirmou `CHECK_OK`, um
+  Gateway e health da API. Se um membro ou curso desaparecer entre renderização e clique, a ação
+  redireciona à matriz com orientação clara em vez de lançar React #441.
+- Cobertura: GET da matriz com snowflake acima de `Number.MAX_SAFE_INTEGER`, POST subsequente com a
+  mesma string exata, curso/cargo Discord como string, 404 controlado no Server Action, 40 Vitest,
+  typecheck, build Next.js, 24 testes API, Ruff e `main.py --check`. O novo clique humano autenticado
+  em Paiva ainda é a validação final pendente; não fechar como concluído antes dela.
+
+## Qualificações e política de Auditoria publicadas — 2026-08-23
+
+- O erro de produção `React #441`, digest `1761130017`, em `/qualifications` foi correlacionado no
+  Vercel a uma `ZodError`: um snowflake do Discord excedia o maior inteiro seguro do JavaScript.
+  A Server Action agora preserva `discord_id` como texto decimal até a API FastAPI, que o converte
+  com precisão para o inteiro Python. Não houve mudança em OAuth, RBAC ou step-up.
+- A produção web recebeu `dpl_JADvS3uvzJdQoHynjvJX9wWK1zCA`, `READY`, no alias
+  `https://web-plum-tau-82.vercel.app`. Build remoto concluído; após a publicação não houve erro de
+  runtime no deployment. A rota `/qualifications` continua redirecionando corretamente ao login
+  quando não há sessão.
+- Cobertura desta correção: ação com snowflake real acima do limite JavaScript, rejeição de ID
+  inválido e aceitação da string pela API. `39` Vitest, typecheck, build Next.js, `24` testes da API,
+  Ruff e `main.py --check` passaram. O texto canônico do catálogo permanece `Abordagem Avançada`;
+  não há evidência de encoding quebrado no fonte ou seed.
+- A contenção do canal Auditoria do Bot também está em produção: a política explícita mantém eventos
+  rotineiros de sucesso no banco, mas não os publica no Discord. Erros, segurança, decisões de
+  cadastro/recrutamento e alterações administrativas relevantes continuam entregues. A medição que
+  motivou a correção encontrou 11.188 `REGISTRATION_ACCESS_GRANTED` em 24 horas. O app combinado
+  segue como único Gateway; o app standalone permanece desligado.
+
+## Hotfix do painel de Recrutamento publicado; hardening de entrega em validação — 2026-08-23
+
+- A produção Vercel recebeu o deployment `dpl_9nW66UQb428mSuwR6YbWJvkT6DBe`, pronto e associado a
+  `https://web-plum-tau-82.vercel.app`. A publicação contém somente `web/`: nenhum banco, migration,
+  processo do bot ou API Discloud foi reiniciado.
+- A rota sem filtros agora assina exatamente `/v1/admin/recruitment/applications`, sem o `?` vazio
+  normalizado pelo Fetch; isso elimina a divergência HMAC que produzia `Credencial interna inválida.`.
+- Mutações de Recrutamento preservam o step-up de 30 minutos. Quando ele expira, a Server Action leva
+  ao login OAuth de renovação com retorno seguro, em vez de lançar um 401 no Server Component e
+  derrubar a tela com React #441. O login de renovação e o retorno a `/recruitment` foram verificados
+  publicamente; a aprovação humana autenticada ainda precisa de validação no navegador.
+- A correção estrutural de Auditoria/Histórico está localmente em validação. A migration 28 revelou
+  uma falha pré-existente do executor, que ignorava migrations ausentes quando havia uma versão maior
+  registrada. O executor agora consulta o conjunto de versões e reaplica cada lacuna; bot/API ficam
+  bloqueados até a suíte Python completa aprovar esse cenário.
+
+## Investigação pausada — possível flood `REGISTRATION_ACCESS_GRANTED` — 2026-08-23
+
+- O proprietário relatou lentidão e mensagens repetidas de `REGISTRATION_ACCESS_GRANTED` no canal
+  de Auditoria. Nenhuma alteração corretiva foi aplicada ainda; a aplicação Discloud continua
+  online em instância única.
+- A leitura inicial isolou um candidato forte à causa: `RegistrationGateSystem.sync_member_access()`
+  chama `RegistrationGateService.mark_sync()` após toda sincronização bem-sucedida, e
+  `mark_sync()` grava incondicionalmente um evento e uma auditoria `REGISTRATION_ACCESS_GRANTED`
+  para qualquer registro `REGISTERED`, inclusive quando a reconciliação não alterou cargo, acesso
+  ou apelido. Isso pode amplificar alterações de cargo e reprocessamentos em mensagens de auditoria.
+- Próxima continuidade obrigatória: medir os eventos/auditorias no banco remoto por membro e por
+  período, rastrear todos os chamadores de `sync_member_access()` e confirmar a cadeia que está
+  reexecutando. Só então tornar o `mark_sync()` idempotente, registrando acesso concedido apenas na
+  transição efetiva ou em alteração material. Preservar o histórico antigo; não apagar auditorias,
+  cadastros ou cargos.
+- Antes do rollout: backup remoto, testes que cubram repetição sem mudança, Ruff, suíte direcionada,
+  `main.py --check`, reinício controlado e validação de que uma concessão real gera uma única
+  mensagem. Atualizar também a fila, ledger e relatório após a correção concluída.
+
 ## Auditoria recuperada, requisito etário e status público — 2026-08-23
 
 - A releitura dos pedidos recentes encontrou divergência entre a mensagem de Requisitos, que já
@@ -160,8 +307,8 @@
   `branding.footer`; retry concluiu sem evento duplicado e há teste de regressão;
 - QA final desta rodada: 293 testes Python, 29 testes web, Ruff, compileall, `main.py --check`,
   ESLint, TypeScript e build aprovados;
-- bloqueio restante do recrutamento: o Robô Analista está implementado, mas `provider_ready=false`.
-  É necessária credencial externa de um provider OpenAI-compatible/NVIDIA antes de ativá-lo;
+- bloqueio histórico superado em 2026-08-24: o Robô Analista usa motor local determinístico,
+  `provider_ready=true`, sem credencial ou serviço externo;
 - item 29 concluído operacionalmente. O ZIP sanitizado pós-hotfix contém 107 entradas, 450.193
   bytes, zero caminho proibido e SHA-256
   `a453152690b8c183710ea4266c50da12857bf8f795507e40f465a9e75657d3cf`. A rotação das credenciais
@@ -887,8 +1034,8 @@ labels das calls autorizadas. A segunda varredura ao vivo terminou sem divergên
 - sistema web completo de alistamento/processo seletivo, form builder, avaliação controlada,
   entrevistas e conversão em recruta; o fluxo básico atual do bot permanece implementado e deve ser
   integrado conforme `docs/RECRUITMENT_INTEGRITY_SYSTEM_SPEC.md`;
-- Robô Analista de Candidaturas somente leitura: implementado localmente na migration v18, com
-  provider desativado por padrão e sem envio de dados reais; rollout externo ainda não autorizado;
+- Robô Analista de Candidaturas somente leitura: migration v18 preservada e motor local
+  determinístico ativo em produção, sem envio externo ou autoridade administrativa;
 - hardening completo da futura arquitetura web/API/Supabase/Railway; o baseline atual do bot está
   descrito na seção 25 e o programa final está em `docs/SECURITY_HARDENING_SPEC.md`;
 - integração MTA;
@@ -1611,9 +1758,9 @@ Programa Web. Tudo continua na ordem de
 
 - Migration v18 adiciona contexto de avaliação, rubrica/critérios, jobs, resultados e feedback
   versionados. A análise utiliza input hash, cache, retry limitado e preserva todo histórico.
-- `choque/recruitment_analysis.py` isola o provider sem tools. A configuração padrão é `disabled`;
-  um endpoint OpenAI-compatible/NVIDIA NIM só pode ser ativado com segredo de ambiente e ação de
-  Comando. Nenhuma candidatura real foi transmitida nesta entrega.
+- `choque/recruitment_analysis.py` isola o motor sem tools. Desde 2026-08-24, o padrão é
+  `local-deterministic`; a compatibilidade OpenAI-compatible continua apenas opt-in e não é
+  necessária. Nenhuma candidatura real foi transmitida para serviço externo.
 - Dados enviados são minimizados e estruturados. O backend valida schema estrito, evidências e IDs
   de questão, sanitiza conteúdo ativo, recalcula a nota ponderada e mantém integridade objetiva
   separada da análise qualitativa. A IA nunca decide ou altera o processo.
@@ -1941,3 +2088,98 @@ Programa Web. Tudo continua na ordem de
   `main.py --check`, `LIVE_PHASE12_OK`, estrutura 98/98 e bot local online em instância única.
 - Próxima ordem: item 26 Gerenciador de Cadastros; item 27 conformidade de patente sem cadastro em
   72 horas; item 28 demais filtros disciplinares e auditoria de ações; Discloud Diamond por último.
+# Atualização operacional — 2026-08-24 — Status do Bot concluído
+
+- Central de Tags já está concluída em produção com migration 35 e 386 testes.
+- Status do Bot foi publicado com migration 36. O público vê uma única mensagem fixada com o estado
+  geral e oito componentes; a administração possui painel privado persistente para overrides
+  auditados, versionados e com expiração opcional.
+- Detecção automática usa health, Gateway e filas atuais com histerese. Falhas antigas já esgotadas
+  permanecem no histórico, mas não deixam o painel atual falsamente degradado.
+- Validação final: todos os componentes operacionais, painéis recuperados sem duplicata após restart,
+  aplicação combinada online, um Gateway, 395 testes, Ruff, compileall, `main.py --check` e backup
+  remoto com `quick_check=ok`, FK=0 e migration 36.
+- Próxima frente ativa: evolução completa de bate-ponto, patrulhas e viaturas, sem rollout parcial.
+
+# Atualização operacional — 2026-08-24 — Bate-ponto, patrulhas e viaturas concluídos
+
+- O item 49 foi publicado integralmente na aplicação combinada com migration 37. A presença nas calls
+  agora coordena ponto, segmentos, viatura, composição e comandante por uma única camada idempotente.
+- Troca de call mantém a sessão e o histórico; restart reconcilia Discord/SQLite; capacidade, cargos e
+  ponto automático são configurados por ID. O painel agrupa efetivo por viatura e mostra “sem viatura”.
+- Relatórios PTR duráveis congelam composição e aceitam ocorrências, artigos e evidências. Correções
+  administrativas guardam motivo, antes/depois e auditoria; membros veem somente sua visão segura.
+- Gates finais: 419 pytest, 41 testes web, Ruff, compileall, `main.py --check`, lint, typecheck e build.
+  Produção: health 200, migration 37, único Gateway e backup remoto íntegro. A recuperação observou
+  sessões/viatura reais sem duplicidade, vínculos inválidos ou ação pendente na outbox.
+- Próxima frente ativa: item 50, começando pela progressão de carreira, mérito e oficialato sobre as
+  fontes canônicas já entregues; nenhuma autoridade paralela será criada.
+
+# Atualização operacional — 2026-08-24 — Carreira, mérito e oficialato concluídos
+
+- As migrations 38 e 39 foram publicadas sobre as fontes canônicas de identidade, ponto e patente.
+  A progressão automática respeita horas válidas, tempo mínimo e o limite de Cadete; promoções
+  posteriores, mérito e decisões de oficialato permanecem humanas e auditadas.
+- A candidatura a Oficial usa questionário ativo e versionado com 30 perguntas, dez competências,
+  relatório determinístico apenas consultivo, atribuição de responsável, notas humanas, entrevista,
+  decisão condicionada e proteção contra autoavaliação ou decisão concorrente.
+- Discord e portal foram configurados sem criar autoridade paralela: o cargo responsável existente
+  foi reutilizado, cinco canais foram vinculados por ID, o painel de Carreira ganhou candidatura e o
+  site publicou as áreas privadas do candidato e dos avaliadores sob RBAC e step-up.
+- O incidente de inicialização concorrente do questionário foi detectado antes do encerramento e
+  corrigido com rechecagem transacional. A regressão cobre inicializações simultâneas e a produção
+  manteve um único questionário ativo, trinta perguntas e um Gateway.
+- Validação final: 429 pytest, 41 testes web, Ruff, compileall, `main.py --check`, lint, typecheck e
+  build. Vercel sem erros nas rotas novas; backup pós-publicação com `quick_check=ok`, FK=0,
+  migration 39 e nenhuma notificação de carreira pendente ou falha.
+- Próxima frente ativa: Robô Analista local e híbrido, com regras determinísticas como autoridade e
+  modelo aberto opcional apenas para resumo, sem aprovação ou reprovação automática.
+
+# Atualização operacional — 2026-08-24 — Robô Analista local concluído
+
+- O analista agora usa `local-deterministic/transparent-rules-v1` como motor padrão. Não há chave,
+  provider externo, chamada de rede, app adicional ou RAM reservada; a aplicação combinada continuou
+  em cerca de 166 MB.
+- Perguntas e grupos versionados definem quais critérios recebem evidência. Texto do candidato não
+  escolhe a rubrica; instruções dirigidas ao analisador são ignoradas como comando e transformadas
+  apenas em ponto de revisão humana.
+- Resumo, score assistivo, evidências, pontos de atenção, inconsistências e perguntas de entrevista
+  ficam no dossiê fechado. O motor não aprova, reprova, altera status, cria membro, toca em cargos ou
+  executa qualquer ação administrativa.
+- A ativação aposentou o único job antigo esgotado como `OUTDATED`, sem reanalisar candidatura já
+  decidida. O validador ao vivo confirmou as oito opções ativas, preview com dez critérios, nenhum
+  job ativo/esgotado e zero resultado sintético persistido em candidatura real.
+- Gates: 433 pytest, 41 testes web, Ruff, compileall, `main.py --check`, lint, typecheck e build.
+  Benchmark de 500 execuções idênticas ficou abaixo de 2,7 ms; Vercel sem erro e backup remoto com
+  `quick_check=ok`, FK=0 e migration 39.
+- O Qwen local permanece somente como experimento futuro opcional e fora da fila ativa. Próxima
+  etapa: auditoria final da continuidade, reconciliação dos relatórios e fechamento das pendências
+  técnicas que não exigem decisão humana externa.
+
+# Fechamento operacional — 2026-08-24 — auditoria final da continuidade
+
+- A fila autônoma acordada foi encerrada: Central de Tags, Status do Bot, bate-ponto/patrulhas/
+  viaturas, carreira/mérito/oficialato e Robô Analista local estão publicados e documentados.
+- O último gate funcional permanece em 433 testes Python e 41 testes web, além de Ruff, compileall,
+  lint, typecheck e build. `main.py --check` confirmou migration 39, 18 cogs, 46 comandos e 25 views
+  persistentes.
+- A auditoria reproduzível de interação percorreu 22 módulos, 279 interfaces e 390 componentes:
+  107 IDs explícitos sem duplicidade, nenhum callback ausente e nenhuma interface ativa órfã.
+- O scanner local terminou `SECRET_SCAN_OK` e o diff não contém erro de whitespace. O ajuste do
+  scanner evita falso positivo em atribuições cujo valor é uma chamada de função, sem relaxar a
+  detecção de segredos literais.
+- Produção continua com a aplicação combinada saudável, migration 39 e um único Gateway. Os backups
+  pós-publicação já validados preservam integridade do banco e possibilidade de retorno.
+- Permanecem fora do encerramento somente duas decisões deliberadas: a compactação estrutural do
+  Discord, adiada pelo proprietário, e a rotação de credenciais/menor privilégio/testes humanos de
+  sessão, que dependem de ações externas do proprietário. Nenhuma delas foi mascarada como concluída.
+
+# Canal oficial de atualizações — publicado em 2026-08-24
+
+- Foi criado em Informações o canal de leitura `Atualizações do Bot`, com permissões herdadas da
+  categoria e publicação restrita aos perfis institucionais já autorizados.
+- A primeira mensagem, fixada, resume Central de Tags, Status do Bot, bate-ponto/patrulhas/viaturas,
+  carreira/mérito/oficialato, Robô Analista local e os gates finais de qualidade.
+- `scripts/publish_system_updates.py` é idempotente: localiza canal e mensagem pela identidade
+  estável, edita em vez de duplicar, bloqueia menções e valida categoria, pin e permissões após a
+  publicação. A segunda execução ao vivo reutilizou ambos com sucesso.

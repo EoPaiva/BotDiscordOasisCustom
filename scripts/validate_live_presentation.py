@@ -12,14 +12,13 @@ EXPECTED = {
     "MEMBER": (
         "registration.panel",
         "🛡️ PORTARIA DIGITAL • CHOQUE - BGR",
-        {"choque:member:identify:v2"},
+        {"choque:member:identify:v2", "choque:member:register:v3"},
     ),
     "POINT": (
         "point.panel",
         "⏱️ CONTROLE OPERACIONAL DE SERVIÇO",
         {
-            "choque:shift:start:v1",
-            "choque:shift:stop:v1",
+            "choque:shift:status:v1",
             "choque:shift:hours:v1",
             "choque:shift:history:v1",
         },
@@ -95,6 +94,8 @@ def main() -> int:
         }
         if not expected_custom_ids <= custom_ids:
             failures.append(f"missing-components:{panel_type}")
+        if panel_type == "MEMBER" and custom_ids != expected_custom_ids:
+            failures.append(f"unexpected-components:{panel_type}")
         if panel_type == "PARTNERSHIP_TERMS":
             link_count = sum(1 for item in components(message) if item.get("url"))
             if link_count != 3:

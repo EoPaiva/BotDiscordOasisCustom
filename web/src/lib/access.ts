@@ -190,6 +190,7 @@ const PUBLIC_ROUTES = new Set([
   "/recrutamento",
   "/recrutamento/avaliacao",
   "/status",
+  "/candidatura-oficial",
 ]);
 
 /** Cada página real do route group `(command)` possui uma regra explícita. */
@@ -199,11 +200,12 @@ const ROUTE_RULES: RouteRule[] = [
   { path: "/changes", permissions: ["changes.view"] },
   { path: "/dashboard", permissions: ["patrol.view.self", "operations.view"] },
   { path: "/discipline", permissions: ["discipline.manage"] },
-  { path: "/discord", permissions: ["identity.manage", "identity.configure", "identity.reconcile"] },
+  { path: "/identity/discord", permissions: ["identity.manage", "identity.configure", "identity.reconcile"] },
   { path: "/identity", permissions: ["integrity.view"] },
   { path: "/inbox", permissions: ["admin.inbox.view"] },
   { path: "/maintenance", permissions: ["maintenance.manage", "settings.manage"] },
   { path: "/members", permissions: ["member.view"] },
+  { path: "/officer-candidacies", permissions: ["officer.review"] },
   { path: "/patrols", permissions: ["patrol.view.all"] },
   { path: "/profile", permissions: [] },
   { path: "/qualifications", permissions: ["qualification.view.all"] },
@@ -239,6 +241,7 @@ export function canAccessPath(context: AccessContext, pathname: string): boolean
     return Number(memberMatch[1]) === context.member.discord_id || can(context, "dossier.view");
   }
   if (/^\/recruitment\/\d+$/.test(path)) return can(context, "recruitment.read");
+  if (/^\/officer-candidacies\/\d+$/.test(path)) return can(context, "officer.review");
   if (/^\/settings\/[^/]+$/.test(path)) return can(context, "settings.manage");
 
   const rule = ROUTE_RULES.find((candidate) => path === candidate.path);

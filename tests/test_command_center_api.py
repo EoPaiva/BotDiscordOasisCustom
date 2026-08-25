@@ -596,6 +596,55 @@ def test_member_cannot_access_command_center_dashboard(api_client) -> None:
     assert "Centro de Comando" in response.json()["detail"]
 
 
+def test_command_center_access_matrix_is_server_authoritative(api_client) -> None:
+    """URLs and API calls stay closed even when a caller bypasses the web menu."""
+
+    client, database_path, _ = api_client
+
+    # No browser session / signed server context cannot read a protected endpoint.
+    assert client.get("/v1/me").status_code == 401
+
+    # A Discord identity that is not an active Choque member never gets a portal context.
+    outsider = client.get("/v1/me", headers=_headers(9_999_991))
+    assert outsider.status_code == 403
+    assert "member" not in outsider.text.lower()
+
+    # A regular member and a non-command role cannot disclose data through direct URLs
+    # nor mutate a member by calling the API directly.
+    for discord_id in (MEMBER_DISCORD_ID, INSTRUCTOR_DISCORD_ID):
+        assert client.get("/v1/me", headers=_headers(discord_id)).status_code == 403
+        assert client.get("/v1/members", headers=_headers(discord_id)).status_code == 403
+        assert (
+            client.post(
+                f"/v1/members/{MEMBER_DISCORD_ID}/rank",
+                headers=_headers(discord_id),
+                json={"target_rank_id": 1, "action": "PROMOTION", "reason": "Forjado"},
+            ).status_code
+            == 403
+        )
+
+    # An active command member is admitted by the backend, not by the client navigation.
+    assert client.get("/v1/me", headers=_headers(ADMIN_DISCORD_ID)).status_code == 200
+    assert client.get("/v1/dashboard", headers=_headers(ADMIN_DISCORD_ID)).status_code == 200
+
+    # Loss of guild presence invalidates access immediately on the next server request,
+    # including for the configured technical administrator in a development fixture.
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            UPDATE members
+            SET discord_present=0, identity_sync_status='DISCORD_ABSENT',
+                authorization_version=authorization_version+1
+            WHERE guild_id=? AND discord_id=?
+            """,
+            (GUILD_ID, ADMIN_DISCORD_ID),
+        )
+        connection.commit()
+    removed = client.get("/v1/me", headers=_headers(ADMIN_DISCORD_ID))
+    assert removed.status_code == 403
+    assert "vínculo atual" in removed.json()["detail"].lower()
+
+
 def test_command_can_view_inbox_and_rank_change_creates_outbox_atomically(api_client) -> None:
     client, database_path, seeded = api_client
     dashboard = client.get("/v1/dashboard", headers=_headers(ADMIN_DISCORD_ID))
@@ -640,9 +689,15 @@ def test_command_can_view_inbox_and_rank_change_creates_outbox_atomically(api_cl
 
 def test_high_command_can_manage_qualification_and_member_cannot(api_client) -> None:
     client, database_path, _ = api_client
+    discord_snowflake = 395061579101503491
+    course_role_snowflake = 1146622062895579186
     connection = sqlite3.connect(database_path)
     try:
         now = 1_700_000_250_000
+        connection.execute(
+            "UPDATE members SET discord_id=? WHERE guild_id=? AND discord_id=?",
+            (discord_snowflake, GUILD_ID, MEMBER_DISCORD_ID),
+        )
         cursor = connection.execute(
             """
             INSERT INTO course_catalog(
@@ -650,10 +705,10 @@ def test_high_command_can_manage_qualification_and_member_cannot(api_client) -> 
                 course_role_name, passing_score, cooldown_days, enrollment_status,
                 source_channel_id, source_message_id, source_content_sha256,
                 active, created_at, updated_at
-            ) VALUES (?, 'abordagem_avancada', 'Abordagem Avançada', 'Curso API', 97701,
+            ) VALUES (?, 'abordagem_avancada', 'Abordagem Avançada', 'Curso API', ?,
                       'Abordagem Avançada', 80, 14, 'OPEN', 10, 11, 'api-test', 1, ?, ?)
             """,
-            (GUILD_ID, now, now),
+            (GUILD_ID, course_role_snowflake, now, now),
         )
         course_id = int(cursor.lastrowid)
         connection.commit()
@@ -661,7 +716,9 @@ def test_high_command_can_manage_qualification_and_member_cannot(api_client) -> 
         connection.close()
 
     payload = {
-        "discord_id": MEMBER_DISCORD_ID,
+        # The web layer preserves Discord snowflakes as strings so JavaScript
+        # never rounds them before this Python boundary.
+        "discord_id": str(discord_snowflake),
         "course_id": course_id,
         "granted": True,
         "reason": "Concessão pelo painel de teste.",
@@ -685,8 +742,11 @@ def test_high_command_can_manage_qualification_and_member_cannot(api_client) -> 
     member = next(
         item
         for item in matrix.json()["members"]
-        if item["member"]["discord_id"] == MEMBER_DISCORD_ID
+        if item["member"]["discord_id"] == str(discord_snowflake)
     )
+    assert isinstance(member["member"]["discord_id"], str)
+    assert member["member"]["discord_id"] == str(discord_snowflake)
+    assert matrix.json()["courses"][0]["course_role_id"] == str(course_role_snowflake)
     assert member["courses"]["abordagem_avancada"]["granted"] is True
     connection = sqlite3.connect(database_path)
     try:
@@ -696,7 +756,7 @@ def test_high_command_can_manage_qualification_and_member_cannot(api_client) -> 
             FROM web_action_outbox ORDER BY id DESC LIMIT 1
             """
         ).fetchone()
-        assert action == ("QUALIFICATION_SYNC", MEMBER_DISCORD_ID, "PENDING")
+        assert action == ("QUALIFICATION_SYNC", discord_snowflake, "PENDING")
     finally:
         connection.close()
 
@@ -718,10 +778,198 @@ def test_career_overview_is_real_and_command_only(api_client) -> None:
     assert payload["movements"] == []
 
 
+def test_specialized_officer_reviewer_enters_only_the_officer_queue(api_client) -> None:
+    client, database_path, seeded = api_client
+    now = int(time.time() * 1000)
+    role_id = 9_399
+    with sqlite3.connect(database_path) as connection:
+        profile_id = int(
+            connection.execute(
+                """
+                SELECT id FROM access_profiles
+                WHERE guild_id=? AND code='RESPONSAVEL_UPAMENTO'
+                """,
+                (GUILD_ID,),
+            ).fetchone()[0]
+        )
+        mapping_id = int(
+            connection.execute(
+                """
+                INSERT INTO discord_role_mappings(
+                    guild_id, discord_role_id, mapping_type, internal_code,
+                    display_name, priority, access_profile_id, enabled,
+                    created_at, updated_at, created_by
+                ) VALUES (?, ?, 'ACCESS', 'OFFICER_REVIEW_QA',
+                          'Responsável por upamento QA', 60, ?, 1, ?, ?, ?)
+                """,
+                (GUILD_ID, role_id, profile_id, now, now, ADMIN_DISCORD_ID),
+            ).lastrowid
+        )
+        connection.execute(
+            """
+            INSERT INTO member_access_profiles(
+                member_id, access_profile_id, source_mapping_id,
+                source_role_id, assigned_at, last_seen_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (seeded["member_id"], profile_id, mapping_id, role_id, now, now),
+        )
+        connection.commit()
+
+    headers = _headers(MEMBER_DISCORD_ID)
+    identity = client.get("/v1/me", headers=headers)
+    queue = client.get("/v1/officer-applications", headers=headers)
+    settings = client.get("/v1/settings", headers=headers)
+    career = client.get("/v1/career", headers=headers)
+
+    assert identity.status_code == 200, identity.text
+    assert "officer.review" in identity.json()["permissions"]
+    assert "settings.manage" not in identity.json()["permissions"]
+    assert queue.status_code == 200, queue.text
+    assert settings.status_code == 403
+    assert career.status_code == 403
+
+
+def test_officer_candidacy_is_member_owned_lossless_and_human_decided(api_client) -> None:
+    client, database_path, seeded = api_client
+    now = int(time.time() * 1000)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            UPDATE members
+            SET rank_id=?, status='ACTIVE', rank_sync_status='SYNCED', updated_at=?
+            WHERE guild_id=? AND discord_id=?
+            """,
+            (seeded["soldier_rank"], now, GUILD_ID, MEMBER_DISCORD_ID),
+        )
+        connection.execute(
+            """
+            INSERT INTO shifts(
+                guild_id, member_id, status, started_at, ended_at, closed_at,
+                end_reason, created_by, created_at, gross_duration_ms,
+                patrol_duration_ms, validation_status, automatic_validation_status,
+                validation_source, validated_at
+            ) VALUES (?, ?, 'CLOSED', ?, ?, ?, 'API_TEST', ?, ?, ?, ?, 'VALID',
+                      'VALID', 'AUTO', ?)
+            """,
+            (
+                GUILD_ID,
+                seeded["member_id"],
+                now - 6 * 3_600_000,
+                now,
+                now,
+                ADMIN_DISCORD_ID,
+                now - 6 * 3_600_000,
+                6 * 3_600_000,
+                6 * 3_600_000,
+                now,
+            ),
+        )
+        connection.commit()
+
+    member_headers = _headers(MEMBER_DISCORD_ID)
+    eligibility = client.get(
+        "/v1/officer-candidacy/eligibility", headers=member_headers
+    )
+    questionnaire = client.get(
+        "/v1/officer-candidacy/questionnaire", headers=member_headers
+    )
+    started = client.post(
+        "/v1/officer-candidacy/application", headers=member_headers
+    )
+    assert eligibility.status_code == 200, eligibility.text
+    assert eligibility.json()["eligible"] is True
+    assert questionnaire.status_code == 200, questionnaire.text
+    assert len(questionnaire.json()["questions"]) == 30
+    assert started.status_code == 200, started.text
+    application_id = int(started.json()["id"])
+
+    for question in questionnaire.json()["questions"]:
+        answer = client.put(
+            f"/v1/officer-candidacy/applications/{application_id}/answers/{question['id']}",
+            headers=member_headers,
+            json={
+                "answer": (
+                    "Eu preservaria a segurança, comunicaria a equipe e registraria "
+                    "a decisão com ética, justificativa e responsabilidade."
+                )
+            },
+        )
+        assert answer.status_code == 200, answer.text
+
+    submitted = client.post(
+        f"/v1/officer-candidacy/applications/{application_id}/submit",
+        headers=member_headers,
+    )
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["status"] == "SUBMITTED"
+    assert "analysis" not in submitted.json()
+
+    admin_headers = _headers(ADMIN_DISCORD_ID)
+    queue = client.get("/v1/officer-applications", headers=admin_headers)
+    stale_admin_headers = {
+        **admin_headers,
+        "X-Session-Issued-At": str(int(time.time()) - 7_201),
+    }
+    stale_claim = client.post(
+        f"/v1/officer-applications/{application_id}/claim",
+        headers=stale_admin_headers,
+    )
+    claimed = client.post(
+        f"/v1/officer-applications/{application_id}/claim", headers=admin_headers
+    )
+    decided = client.post(
+        f"/v1/officer-applications/{application_id}/decision",
+        headers=admin_headers,
+        json={
+            "decision": "APPROVED",
+            "reason": "Respostas compatíveis, com decisão final registrada por avaliador humano.",
+        },
+    )
+    assert queue.status_code == 200, queue.text
+    assert queue.json()[0]["discord_id"] == str(MEMBER_DISCORD_ID)
+    assert stale_claim.status_code == 401
+    assert claimed.status_code == 200, claimed.text
+    assert decided.status_code == 200, decided.text
+    assert decided.json()["status"] == "APPROVED"
+    assert decided.json()["reviewed_by"] == str(ADMIN_DISCORD_ID)
+
+    mine = client.get("/v1/officer-candidacy/application", headers=member_headers)
+    assert mine.status_code == 200, mine.text
+    assert "analysis_report" not in mine.json()
+    assert "score_summary" not in mine.json()
+    assert all("actor_id" not in event for event in mine.json()["events"])
+    assert all("metadata_json" not in event for event in mine.json()["events"])
+    assert mine.json()["application"]["status"] == "APPROVED"
+
+
 def test_member_cannot_open_admin_settings(api_client) -> None:
     client, _, _ = api_client
     response = client.get("/v1/settings", headers=_headers(MEMBER_DISCORD_ID))
     assert response.status_code == 403
+
+
+def test_admin_settings_never_returns_financial_pix_key(api_client) -> None:
+    client, database_path, _ = api_client
+    secret = "dummy-pix-key-that-must-never-leave-settings"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO guild_settings(guild_id, setting_key, value_json, updated_at, updated_by)
+            VALUES (?, 'financial_pix_key', ?, ?, ?)
+            """,
+            (GUILD_ID, json.dumps(secret), 1_700_000_000_000, ADMIN_DISCORD_ID),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    response = client.get("/v1/settings", headers=_headers(ADMIN_DISCORD_ID))
+    assert response.status_code == 200, response.text
+    settings = {item["setting_key"]: item for item in response.json()["general"]}
+    assert settings["financial_pix_key"]["value"] == {"configured": True}
+    assert secret not in response.text
 
 
 def test_admin_configures_calls_and_rbac_by_registry_id(api_client) -> None:
@@ -901,7 +1149,9 @@ def test_recruitment_ai_configuration_is_command_only_and_never_exposes_secret(
     current = client.get("/v1/admin/recruitment/ai/config", headers=admin_headers)
     assert denied.status_code == 403
     assert current.status_code == 200
-    assert current.json()["provider_ready"] is False
+    assert current.json()["provider_ready"] is True
+    assert current.json()["provider"] == "local-deterministic"
+    assert current.json()["model"] == "transparent-rules-v1"
     assert "api_key" not in current.text.casefold()
     disabled = client.put(
         "/v1/admin/recruitment/ai/config",
@@ -917,7 +1167,7 @@ def test_recruitment_ai_configuration_is_command_only_and_never_exposes_secret(
             "show_score": True,
         },
     )
-    unavailable = client.put(
+    enabled = client.put(
         "/v1/admin/recruitment/ai/config",
         headers=admin_headers,
         json={
@@ -932,7 +1182,8 @@ def test_recruitment_ai_configuration_is_command_only_and_never_exposes_secret(
         },
     )
     assert disabled.status_code == 200
-    assert unavailable.status_code == 422
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True
 
 
 def test_context_rejects_profile_downgrade_outside_command(
@@ -1327,6 +1578,96 @@ def test_discord_mapping_and_reconciliation_endpoints_are_audited(
     )
     assert lockdown.status_code == 200
     assert blocked.status_code == 423
+
+
+def test_recruitment_signed_target_and_recent_authentication_boundaries(api_client) -> None:
+    """The list target and its mutations must preserve distinct auth guarantees."""
+    client, database_path, _ = api_client
+    started = client.post(
+        "/v1/recruitment/applications/start",
+        headers=_headers(CANDIDATE_DISCORD_ID),
+        json={
+            "candidate_nick": "Candidato_Assinatura",
+            "bgr_id": "5599",
+            "age": 20,
+            "consent_accepted": True,
+            "idempotency_key": "candidate-api-signed-target-key",
+        },
+    ).json()
+    application_id = int(started["id"])
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "UPDATE recruitment_applications SET status='SUBMITTED' WHERE id=?",
+            (application_id,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    list_path = "/v1/admin/recruitment/applications"
+    valid_list = client.get(
+        list_path,
+        headers=_signed_headers("GET", list_path, discord_id=ADMIN_DISCORD_ID),
+    )
+    signed_empty_query = client.get(
+        list_path,
+        headers=_signed_headers("GET", f"{list_path}?", discord_id=ADMIN_DISCORD_ID),
+    )
+    assert valid_list.status_code == 200, valid_list.text
+    assert signed_empty_query.status_code == 401
+    assert signed_empty_query.json()["detail"] == "Credencial interna inválida."
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "UPDATE recruitment_applications SET assigned_to=? WHERE id=?",
+            (ADMIN_DISCORD_ID, application_id),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    assigned_list_path = f"{list_path}?assigned_to={ADMIN_DISCORD_ID}"
+    assigned_list = client.get(
+        assigned_list_path,
+        headers=_signed_headers("GET", assigned_list_path, discord_id=ADMIN_DISCORD_ID),
+    )
+    assert assigned_list.status_code == 200, assigned_list.text
+    assert [item["id"] for item in assigned_list.json()["applications"]] == [application_id]
+
+    assign_path = f"/v1/admin/recruitment/applications/{application_id}/assign"
+    payload = json.dumps({"expected_version": 1}, separators=(",", ":"))
+    stale = client.post(
+        assign_path,
+        content=payload,
+        headers={
+            **_signed_headers(
+                "POST",
+                assign_path,
+                discord_id=ADMIN_DISCORD_ID,
+                body=payload,
+                issued_at=int(time.time()) - 1_801,
+            ),
+            "Content-Type": "application/json",
+        },
+    )
+    assert stale.status_code == 401
+    assert stale.json()["detail"] == "Autenticação recente necessária. Entre novamente."
+
+    assigned = client.post(
+        assign_path,
+        content=payload,
+        headers={
+            **_signed_headers(
+                "POST",
+                assign_path,
+                discord_id=ADMIN_DISCORD_ID,
+                body=payload,
+            ),
+            "Content-Type": "application/json",
+        },
+    )
+    assert assigned.status_code == 200, assigned.text
+    assert assigned.json()["status"] == "UNDER_REVIEW"
 
 
 def test_rank_mapping_and_legacy_rank_editor_share_the_canonical_registry(api_client) -> None:

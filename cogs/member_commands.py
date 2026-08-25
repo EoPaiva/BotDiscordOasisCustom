@@ -12,18 +12,10 @@ from choque.embeds import branded_embed
 from choque.errors import NotFoundError, PermissionDenied, ValidationError
 from choque.models import MemberStatus
 from choque.time_utils import discord_timestamp, format_duration
-from choque.web_urls import recruitment_portal_url
 from cogs.config_ui import respond_error
 from cogs.member_sync import sync_registered_member
 
 LOGGER = logging.getLogger(__name__)
-
-
-def should_open_registration_form(intent) -> bool:
-    """Garante que o botão de cadastro nunca vire uma consulta para quem não se cadastrou."""
-    current = intent.get("current")
-    current_status = str(current["status"]) if current else None
-    return intent.get("mode") == "FORM" or current_status == "UNREGISTERED"
 
 
 def build_registration_panel_embed(bot: ChoqueBot) -> discord.Embed:
@@ -31,27 +23,28 @@ def build_registration_panel_embed(bot: ChoqueBot) -> discord.Embed:
         bot.config.branding,
         title="🛡️ PORTARIA DIGITAL • CHOQUE - BGR",
         description=(
-            "**ESCOLHA O CAMINHO CORRETO PARA NÃO PERDER TEMPO**\n\n"
-            "Se você **ainda não pertence à CHOQUE - BGR**, comece por "
-            "**Candidatar-me agora**. A Portaria é destinada a quem já foi aprovado, já é membro "
-            "ou possui vínculo funcional reconhecido."
+            "**IDENTIFICAÇÃO E CADASTRO FUNCIONAL**\n\n"
+            "Este painel é destinado a quem já possui vínculo com a CHOQUE - BGR ou foi "
+            "aprovado no processo seletivo. Escolha **Identificar vínculo** ou "
+            "**Realizar cadastro**."
         ),
     )
     embed.add_field(
-        name="🪖 Ainda não é membro?",
+        name="🪪 Identificar vínculo",
         value=(
-            "Clique em **Candidatar-me agora**. Você será levado diretamente ao processo seletivo "
-            "e poderá acompanhar o andamento pelo mesmo portal."
+            "Use quando já possui um vínculo funcional, precisa localizar um perfil existente ou "
+            "acompanhar uma conferência administrativa."
         ),
         inline=False,
     )
     embed.add_field(
-        name="🪪 Já é membro, foi aprovado ou é Companheiro de Farda?",
+        name="📝 Realizar cadastro",
         value=(
-            "`01` Selecione **Identificar vínculo**.\n"
+            "Use depois da aprovação no alistamento, ou quando a Administração orientar uma "
+            "nova identificação.\n"
             "`02` Informe somente seu **nick BGR** e **ID BGR**.\n"
-            "`03` O sistema procura vínculo de membro ou candidatura já existente.\n"
-            "`04` Cargos, patente e nickname são sincronizados após a validação."
+            "`03` O sistema verifica elegibilidade e evita duplicidade.\n"
+            "`04` Casos que exigem conferência seguem para a fila do Alto Comando."
         ),
         inline=False,
     )
@@ -61,8 +54,8 @@ def build_registration_panel_embed(bot: ChoqueBot) -> discord.Embed:
             "`VISITANTE` recepção, tickets, recrutamento e transferências.\n"
             "`CANDIDATO` área do processo seletivo.\n"
             "`RECRUTA / MEMBRO` áreas internas conforme cargo e patente.\n"
-            "`COMPANHEIRO DE FARDA` pode realizar o mesmo cadastro pela Portaria e, "
-            "após validação, usa o prefixo funcional `[COMP.F]`."
+            "`COMPANHEIRO DE FARDA` pode realizar o mesmo cadastro pela Portaria após "
+            "a validação do vínculo."
         ),
         inline=False,
     )
@@ -75,10 +68,10 @@ def build_registration_panel_embed(bot: ChoqueBot) -> discord.Embed:
         inline=False,
     )
     embed.add_field(
-        name="🔒 Privacidade e suporte",
+        name="🔒 Privacidade e orientação",
         value=(
-            "Seus dados e sua situação aparecem somente em respostas privadas. Use **Preciso de "
-            "ajuda** se não reconhecer o vínculo exibido."
+            "Seus dados e sua situação aparecem somente em respostas privadas. Em caso de dúvida, "
+            "procure um responsável pelo atendimento."
         ),
         inline=False,
     )
@@ -149,6 +142,23 @@ class RegistrationModal(discord.ui.Modal, title="Portaria Digital • Identifica
                 mta_nick=str(self.mta_nick),
                 bgr_id=str(self.character_id),
             )
+            submission_outcome = (
+                str(record.get("submission_outcome") or "")
+                if isinstance(record, dict)
+                else ""
+            )
+            if submission_outcome == "ALREADY_REGISTERED":
+                embed = registration_status_embed(bot, interaction.user, record)
+                embed.add_field(
+                    name="Cadastro existente",
+                    value=(
+                        "Você já possui um cadastro ou vínculo canônico. Nenhum dado foi "
+                        "alterado e nenhuma nova solicitação foi criada."
+                    ),
+                    inline=False,
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
             notification_pending = False
             if record["status"] in {"PENDING", "REQUIRES_REVIEW"}:
                 gate_cog = bot.get_cog("RegistrationGateSystem")
@@ -232,37 +242,24 @@ def application_result_embed(bot: ChoqueBot, application) -> discord.Embed:
 
 
 class RegistrationPanelView(discord.ui.View):
-    def __init__(self, recruitment_public_url: str | None = None) -> None:
+    def __init__(self) -> None:
         super().__init__(timeout=None)
-        if isinstance(recruitment_public_url, str) and recruitment_public_url.startswith("https://"):
-            self.add_item(
-                discord.ui.Button(
-                    label="Candidatar-me agora",
-                    emoji="🪖",
-                    style=discord.ButtonStyle.link,
-                    url=recruitment_portal_url(recruitment_public_url),
-                    row=0,
-                )
-            )
 
     @discord.ui.button(
         label="Identificar vínculo",
         emoji="🪪",
         style=discord.ButtonStyle.danger,
         custom_id="choque:member:identify:v2",
-        row=1,
+        row=0,
     )
-    async def register(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+    async def identify(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         if not interaction.guild:
-            raise ValidationError("Cadastro disponível somente no servidor.")
+            raise ValidationError("Identificação disponível somente no servidor.")
         bot = cast("ChoqueBot", interaction.client)
         await bot.services.modules.require_enabled(interaction.guild.id, "REGISTRATION")
         intent = await bot.services.registration_gate.registration_intent(
             interaction.guild.id, interaction.user.id
         )
-        if should_open_registration_form(intent):
-            await interaction.response.send_modal(RegistrationModal())
-            return
         if intent["mode"] == "CONFIRM_EXISTING":
             if intent["kind"] == "MEMBER":
                 record = await bot.services.registration_gate.request_existing_member_review(
@@ -292,64 +289,40 @@ class RegistrationPanelView(discord.ui.View):
                 embed=registration_status_embed(bot, interaction.user, record), ephemeral=True
             )
             return
-        if intent["mode"] in {"BLOCKED", "STATUS"}:
-            current = intent["current"]
-            if current and current["status"] in {"PENDING", "REQUIRES_REVIEW"}:
-                gate_cog = bot.get_cog("RegistrationGateSystem")
-                if gate_cog and hasattr(gate_cog, "publish_registration_for_review"):
-                    await gate_cog.publish_registration_for_review(interaction.guild, current)
-                    current = await bot.services.registration_gate.status(
-                        interaction.guild.id, interaction.user.id
-                    )
+        current = intent.get("current")
+        if current and current["status"] in {"PENDING", "REQUIRES_REVIEW"}:
+            gate_cog = bot.get_cog("RegistrationGateSystem")
+            if gate_cog and hasattr(gate_cog, "publish_registration_for_review"):
+                await gate_cog.publish_registration_for_review(interaction.guild, current)
+                current = await bot.services.registration_gate.status(
+                    interaction.guild.id, interaction.user.id
+                )
+        if current:
             await interaction.response.send_message(
                 embed=registration_status_embed(bot, interaction.user, current),
                 ephemeral=True,
             )
             return
-        await interaction.response.send_modal(RegistrationModal())
-
-    @discord.ui.button(
-        label="Consultar situação",
-        emoji="📋",
-        style=discord.ButtonStyle.secondary,
-        custom_id="choque:registration:status:v1",
-        row=1,
-    )
-    async def status(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            raise ValidationError("Consulta disponível somente no servidor.")
-        bot = cast("ChoqueBot", interaction.client)
-        record = await bot.services.registration_gate.status(
-            interaction.guild.id, interaction.user.id
-        )
         await interaction.response.send_message(
-            embed=registration_status_embed(bot, interaction.user, record), ephemeral=True
-        )
-
-    @discord.ui.button(
-        label="Preciso de ajuda",
-        emoji="🆘",
-        style=discord.ButtonStyle.primary,
-        custom_id="choque:registration:help:v1",
-        row=1,
-    )
-    async def help(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        if not interaction.guild:
-            raise ValidationError("Suporte disponível somente no servidor.")
-        bot = cast("ChoqueBot", interaction.client)
-        support_id = await bot.services.settings.get(
-            interaction.guild.id, "registration_support_channel_id"
-        )
-        support = interaction.guild.get_channel(int(support_id)) if support_id else None
-        destination = (
-            support.mention if isinstance(support, discord.TextChannel) else "o painel de Tickets"
-        )
-        await interaction.response.send_message(
-            "🆘 **SUPORTE DA PORTARIA DIGITAL**\n"
-            f"Abra um atendimento em {destination} e informe que precisa de ajuda com o cadastro. "
-            "Não publique seu ID ou outros dados em canais abertos.",
+            "Nenhum vínculo funcional foi localizado. Se você foi aprovado no alistamento, "
+            "use **Realizar cadastro**; caso contrário, procure a área de Recrutamento.",
             ephemeral=True,
         )
+
+    @discord.ui.button(
+        label="Realizar cadastro",
+        emoji="📝",
+        style=discord.ButtonStyle.success,
+        custom_id="choque:member:register:v3",
+        row=0,
+    )
+    async def register(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        if not interaction.guild:
+            raise ValidationError("Cadastro disponível somente no servidor.")
+        # O botão é somente a porta de entrada para os dois campos declarados pelo
+        # próprio usuário. Toda decisão autoritativa (cadastro existente, bloqueio,
+        # conflito ou novo ciclo) acontece no submit, dentro da transação do serviço.
+        await interaction.response.send_modal(RegistrationModal())
 
     async def on_error(
         self,
@@ -374,12 +347,7 @@ class MemberCommands(commands.Cog):
         guild: discord.Guild,
         channel: discord.TextChannel,
     ) -> discord.Message:
-        recruitment_public_url = await self.services.settings.get(
-            guild.id, "recruitment_public_url"
-        )
-        panel_view = RegistrationPanelView(
-            recruitment_public_url if isinstance(recruitment_public_url, str) else None
-        )
+        panel_view = RegistrationPanelView()
         async with self._panel_lock:
             panel = await self.services.settings.get_panel(guild.id, "MEMBER")
             message = None
@@ -477,51 +445,103 @@ class MemberCommands(commands.Cog):
         guild: discord.Guild,
         application_id: int,
         actor_id: int,
-    ) -> discord.Message:
+    ) -> discord.Message | None:
         application = await self.services.members.get_application(application_id)
         if not application or int(application["guild_id"]) != guild.id:
             raise NotFoundError("Solicitação não encontrada neste servidor.")
         if application["status"] == "PENDING":
             raise ValidationError("A solicitação ainda não foi analisada.")
+        claim_token = await self.services.members.claim_application_result_delivery(application_id)
+        if claim_token is None:
+            current = await self.services.members.get_application(application_id)
+            if current and current["result_channel_id"] and current["result_message_id"]:
+                existing_channel = guild.get_channel(int(current["result_channel_id"]))
+                if isinstance(existing_channel, discord.TextChannel):
+                    try:
+                        result = await existing_channel.fetch_message(
+                            int(current["result_message_id"])
+                        )
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        result = None
+                    await self.cleanup_application_review_card(guild, current, result)
+                    return result
+            return None
         destination = await self._history_channel(guild)
-        result_message = None
-        if application["result_channel_id"] and application["result_message_id"]:
-            existing_channel = guild.get_channel(int(application["result_channel_id"]))
-            if isinstance(existing_channel, discord.TextChannel):
-                try:
-                    result_message = await existing_channel.fetch_message(
-                        int(application["result_message_id"])
-                    )
-                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                    result_message = None
-        if result_message is None:
-            result_message = await destination.send(
-                embed=application_result_embed(self.bot, application),
-                allowed_mentions=discord.AllowedMentions.none(),
+        try:
+            result_message = None
+            if application["result_channel_id"] and application["result_message_id"]:
+                existing_channel = guild.get_channel(int(application["result_channel_id"]))
+                if isinstance(existing_channel, discord.TextChannel):
+                    try:
+                        result_message = await existing_channel.fetch_message(
+                            int(application["result_message_id"])
+                        )
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        result_message = None
+            if result_message is None:
+                result_message = await destination.send(
+                    embed=application_result_embed(self.bot, application),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            else:
+                await result_message.edit(embed=application_result_embed(self.bot, application))
+            await self.services.members.mark_application_delivered(
+                application_id,
+                actor_id,
+                result_message.channel.id,
+                result_message.id,
+                claim_token=claim_token,
             )
-        else:
-            await result_message.edit(embed=application_result_embed(self.bot, application))
-        await self.services.members.mark_application_delivered(
-            application_id,
-            actor_id,
-            result_message.channel.id,
-            result_message.id,
-        )
+        except Exception:
+            await self.services.members.release_application_delivery_claim(
+                application_id, "RESULT", claim_token
+            )
+            raise
+        await self.cleanup_application_review_card(guild, application, result_message)
+        return result_message
 
-        if application["review_channel_id"] and application["review_message_id"]:
+    async def cleanup_application_review_card(
+        self,
+        guild: discord.Guild,
+        application,
+        result_message: discord.Message | None = None,
+    ) -> bool:
+        if not application["review_channel_id"] or not application["review_message_id"]:
+            return False
+        application_id = int(application["id"])
+        claim_token = await self.services.members.claim_application_cleanup(application_id)
+        if claim_token is None:
+            return False
+        try:
             source_channel = guild.get_channel(int(application["review_channel_id"]))
             if isinstance(source_channel, discord.TextChannel):
                 try:
-                    source = await source_channel.fetch_message(int(application["review_message_id"]))
-                    if source.id != result_message.id:
+                    source = await source_channel.fetch_message(
+                        int(application["review_message_id"])
+                    )
+                    if result_message is None or source.id != result_message.id:
                         await source.delete()
                 except discord.NotFound:
                     pass
-                except (discord.Forbidden, discord.HTTPException):
-                    LOGGER.exception(
-                        "Falha ao retirar cadastro analisado %s da fila", application_id
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    LOGGER.warning(
+                        "Falha ao retirar ficha temporária de membro %s: %s",
+                        application_id,
+                        exc,
                     )
-        return result_message
+                    await self.services.members.release_application_delivery_claim(
+                        application_id, "CLEANUP", claim_token
+                    )
+                    return False
+            await self.services.members.mark_application_cleanup_completed(
+                application_id, claim_token=claim_token
+            )
+            return True
+        except Exception:
+            await self.services.members.release_application_delivery_claim(
+                application_id, "CLEANUP", claim_token
+            )
+            raise
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -560,6 +580,13 @@ class MemberCommands(commands.Cog):
                     LOGGER.exception(
                         "Falha ao entregar resultado do cadastro %s", application["id"]
                     )
+            for application in await self.services.members.pending_application_cleanup(guild.id):
+                try:
+                    await self.cleanup_application_review_card(guild, application)
+                except Exception:
+                    LOGGER.exception(
+                        "Falha ao recuperar limpeza da ficha temporária %s", application["id"]
+                    )
 
     async def _require(self, member: discord.Member, permission: str) -> None:
         if not await self.services.permissions.has(member, permission):
@@ -581,6 +608,19 @@ class MemberCommands(commands.Cog):
         embed.add_field(name="ID do personagem", value=row["character_id"] or "—")
         embed.add_field(name="Horas válidas", value=format_duration(total))
         embed.add_field(name="Ingresso", value=discord_timestamp(int(row["joined_at"]), "d"))
+        financial = await self.services.financial_aid.member_honor_snapshot(guild_id, member.id)
+        honors = financial["honors"]
+        achievements = financial["achievements"]
+        embed.add_field(
+            name="Honrarias simbólicas",
+            value="\n".join(f"◈ {item['title']}" for item in honors[:5]) or "Nenhuma honraria ativa.",
+            inline=False,
+        )
+        embed.add_field(
+            name="Conquistas de apoio",
+            value="\n".join(f"✓ {item['title']}" for item in achievements[:8]) or "Nenhuma conquista registrada.",
+            inline=False,
+        )
         if row["notes"]:
             embed.add_field(name="Observações", value=str(row["notes"])[:1024], inline=False)
         return embed

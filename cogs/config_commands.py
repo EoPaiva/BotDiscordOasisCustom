@@ -162,6 +162,7 @@ class ConfigurationCommands(commands.Cog):
             "SUPERVISOR",
             "COMANDO",
             "ALTO_COMANDO",
+            "RESPONSAVEL_UPAMENTO",
             "ADMINISTRADOR",
         ],
     ) -> None:

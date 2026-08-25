@@ -22,6 +22,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async jwt({ token, profile, account }) {
       if (profile?.id) token.discordId = profile.id;
       if (account?.access_token) {
+        // A completed OAuth callback is the only event that can renew the
+        // recent-authentication window accepted by the API. Keep ordinary JWT
+        // refreshes from extending it indefinitely.
+        token.sessionIssuedAt = Math.floor(Date.now() / 1000);
         token.guildVerified = false;
         const guildId = process.env.DEFAULT_GUILD_ID;
         if (guildId) {

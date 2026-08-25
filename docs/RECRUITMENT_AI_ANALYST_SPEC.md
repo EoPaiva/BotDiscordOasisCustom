@@ -1,17 +1,23 @@
 # Robô Analista de Candidaturas — CHOQUE BGR
 
-Status: **IMPLEMENTADO LOCALMENTE EM 2026-08-22 — PROVIDER DESATIVADO POR PADRÃO**.
+Status: **CONCLUÍDO E ATIVO EM PRODUÇÃO EM 2026-08-24 — MOTOR LOCAL, SEM CHAVE, PROVEDOR EXTERNO
+OU DECISÃO AUTOMÁTICA**.
 
 Posição: depois do Sistema de Alistamento, Recrutamento e Integridade e antes do Security Hardening
 final.
 
 Fonte: complemento recebido em 2026-08-22 e preservado integralmente abaixo.
 
-## Evidência da implementação
+## Evidência final da implementação
 
 - Migration v18 com contexto, rubrica, critérios, jobs, resultados e feedback versionados.
-- `RecruitmentAnalysisProvider` desacoplado, provider desativado seguro e integração opcional com
-  endpoint compatível com OpenAI/NVIDIA NIM somente mediante segredo de ambiente.
+- Motor determinístico local ativo como autoridade e fallback: rubricas/versionamento, pesos,
+  critérios objetivos, cruzamentos configurados e sinais de integridade persistidos. O motor não
+  acessa rede, secrets, Discord, banco além da entrada minimizada entregue pelo serviço ou tools.
+- A associação pergunta → critério usa somente a pergunta e o grupo versionados; palavras inseridas
+  pelo candidato não escolhem o critério que pontuam. Completude, detalhamento, instruções dirigidas
+  ao analisador, respostas genéricas e contradições transparentes geram evidências e perguntas para
+  entrevista, nunca uma decisão.
 - Entrada minimizada e estruturada, sem atributos protegidos ou identificadores desnecessários;
   saída validada estritamente, pontuação recalculada no backend e prompt injection tratada como
   conteúdo não confiável.
@@ -19,11 +25,27 @@ Fonte: complemento recebido em 2026-08-22 e preservado integralmente abaixo.
 - Recomendações permanecem secundárias e nunca aprovam, reprovam, alteram membro ou executam tools.
 - Administração web para configuração segura, rubrica/contexto versionados, preview sintético,
   reanálise, feedback e divergências; candidatos não recebem a análise automatizada.
-- QA: 183 testes Python, 16 Vitest e 6 E2E, além de Ruff, compileall, typecheck, lint, build e
-  `main.py --check`. Revisão visual desktop/mobile realizada somente com dados sintéticos.
-- Rollout local: migration 18 íntegra, zero violações de FK, bot conectado e nenhum job real. A IA
-  continua desligada até existir provider, segredo e autorização específica para tratamento de
-  dados; Lovable estava sem créditos e nenhum deploy externo foi realizado.
+- QA final: 433 testes Python e 41 Vitest, além de Ruff, compileall, typecheck, lint, build e
+  `main.py --check`. Um benchmark sintético de 500 execuções produziu saída idêntica em todas elas,
+  com mediana de 1,385 ms, p95 de 1,517 ms e máximo de 2,669 ms no ambiente local.
+- Rollout: o backend combinado permaneceu com cerca de 166 MB, health 200, banco v39 e um Gateway.
+  As oito configurações do analista foram ativadas; jobs antigos do motor desativado foram marcados
+  `OUTDATED` sem reanalisar decisões encerradas. O backup pós-publicação confirmou `quick_check=ok`,
+  FK=0, nenhum job ativo/esgotado e nenhum resultado fabricado para candidatura real.
+- O spike Qwen3-0.6B continua apenas como experimento futuro opcional, fora da fila ativa. Não foi
+  criado app nem reservada RAM porque o motor transparente já cumpre o fluxo sem custo, latência ou
+  risco de variação; um modelo só poderá ser adicionado depois de benchmark humano separado.
+
+## Decisão de arquitetura de 2026-08-23
+
+- O motor determinístico calcula notas, elegibilidade e alertas explicáveis. O modelo local, se o
+  spike for aprovado, apenas resume respostas abertas, organiza evidências e sugere sinais.
+- Respostas abertas só recebem verificações transparentes: completude, coerência estrutural,
+  contradições configuradas e termos/regras explicitamente cadastrados. Não simular compreensão
+  semântica de LLM nem emitir decisão por inferência opaca.
+- Nenhum endpoint, botão, job ou integração pode aprovar/reprovar automaticamente por saída do
+  modelo. Validação e decisão final são sempre humanas, com RBAC, auditoria, privacidade e
+  idempotência preservados.
 
 ## Regras de entrada e integração
 

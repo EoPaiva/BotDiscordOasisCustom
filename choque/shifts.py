@@ -77,7 +77,12 @@ class ShiftService:
         *,
         has_authorized_role: bool,
         actor_id: int | None = None,
+        source: str = "MANUAL",
+        role_snapshot: str | None = None,
     ) -> ShiftResult:
+        source = source.strip().upper()
+        if source not in {"MANUAL", "VOICE_AUTO", "ADMIN", "RECOVERY"}:
+            raise ValidationError("Origem de abertura do ponto inválida.")
         if not has_authorized_role:
             raise ValidationError("Você não possui um cargo autorizado para o serviço.")
         if not await self.settings.is_authorized_voice(guild_id, voice_channel_id):
@@ -109,8 +114,10 @@ class ShiftService:
                         INSERT INTO shifts(
                             guild_id, member_id, status, started_at, created_by, created_at,
                             minimum_patrol_ms, validation_status,
-                            automatic_validation_status, validation_source
-                        ) VALUES (?, ?, 'ACTIVE', ?, ?, ?, ?, 'PENDING', 'PENDING', 'AUTO')
+                            automatic_validation_status, validation_source, start_source,
+                            initial_voice_channel_id, role_snapshot
+                        ) VALUES (?, ?, 'ACTIVE', ?, ?, ?, ?, 'PENDING', 'PENDING', 'AUTO',
+                                  ?, ?, ?)
                         """,
                         (
                             guild_id,
@@ -119,6 +126,9 @@ class ShiftService:
                             actor_id or discord_id,
                             now,
                             minimum_patrol_ms,
+                            source,
+                            voice_channel_id,
+                            (role_snapshot or "").strip()[:100] or None,
                         ),
                     )
                 except aiosqlite.IntegrityError as exc:
@@ -147,6 +157,7 @@ class ShiftService:
                         "voice_channel_id": voice_channel_id,
                         "minimum_patrol_ms": minimum_patrol_ms,
                         "counts_toward_patrol_minimum": counts_toward_patrol,
+                        "source": source,
                     },
                     connection=connection,
                 )
@@ -226,6 +237,8 @@ class ShiftService:
         after_channel_id: int | None,
         *,
         has_authorized_role: bool,
+        before_allowed_override: bool | None = None,
+        after_allowed_override: bool | None = None,
     ) -> ShiftStatus | None:
         member = await self.database.fetchone(
             "SELECT id FROM members WHERE guild_id=? AND discord_id=?",
@@ -235,6 +248,10 @@ class ShiftService:
             return None
         before_allowed = await self.settings.is_authorized_voice(guild_id, before_channel_id)
         after_allowed = await self.settings.is_authorized_voice(guild_id, after_channel_id)
+        if before_allowed_override is not None:
+            before_allowed = bool(before_allowed_override)
+        if after_allowed_override is not None:
+            after_allowed = bool(after_allowed_override)
         now = self.clock()
         key = (guild_id, discord_id)
         schedule: tuple[int, int] | None = None
@@ -260,7 +277,14 @@ class ShiftService:
                         "VOICE_STATE_UPDATE",
                         now,
                         json.dumps(
-                            {"before_allowed": before_allowed, "after_allowed": after_allowed}
+                            {
+                                "before_allowed": before_allowed,
+                                "after_allowed": after_allowed,
+                                "automatic_patrol_transition": (
+                                    before_allowed_override is not None
+                                    or after_allowed_override is not None
+                                ),
+                            }
                         ),
                     ),
                 )
@@ -827,6 +851,16 @@ class ShiftService:
                 current = await cursor.fetchone()
                 if not current or current["status"] not in {"ACTIVE", "GRACE"}:
                     return None
+                if str(current["start_source"]) in {"VOICE_AUTO", "RECOVERY"}:
+                    patrol_cursor = await connection.execute(
+                        """
+                        SELECT 1 FROM patrol_channels
+                        WHERE guild_id=? AND channel_id=? AND channel_type='ACTIVE'
+                          AND enabled=1 AND automatic_clock=1
+                        """,
+                        (guild_id, current_channel_id),
+                    )
+                    current_allowed = bool(await patrol_cursor.fetchone())
                 if current["status"] == "GRACE":
                     deadline = int(current["grace_deadline"] or 0)
                     if current_allowed and current_channel_id is not None and now <= deadline:

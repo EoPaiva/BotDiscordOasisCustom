@@ -5,12 +5,35 @@ Atualizada em 2026-08-23.
 Esta é a ordem oficial de continuidade. Uma fase só sai da fila depois de implementação, testes,
 validação proporcional ao risco e atualização do `PROJECT_HANDOFF.md`.
 
+## Hotfixes publicados nesta continuidade
+
+- ✅ **Dashboard de Qualificações — concluído e validado ao vivo em 2026-08-23**: o digest Vercel
+   `1027291490` revelou que a matriz GET ainda devolvia snowflake como número JSON e o navegador o
+   arredondava antes do POST. A API agora emite snowflakes como texto decimal e a página tipa o ID
+   como string; 404 de membro/curso entre renderização e clique retorna à matriz com orientação, sem
+   derrubar React. A prova humana concedeu Abordagem Avançada a Paiva e o cargo foi sincronizado em
+   uma tentativa, sem erro.
+- ✅ **Ficha temporária de cadastro — concluída em 2026-08-23**: a Portaria reinicia seu ciclo de
+   entrega ao reutilizar um registro e a limpeza só aceita estados terminais com decisão. A
+   recuperação pós-restart reparou a ficha pendente observada sem apagar histórico nem o painel
+   fixo da Central Administrativa.
+- ✅ **Ruído de Auditoria do Bot — concluído em 2026-08-23**: política de entrega por ação impede
+   sucessos técnicos rotineiros de inundarem o canal, preservando-os no banco. Falhas, segurança,
+   decisões e mudanças administrativas relevantes continuam visíveis. Gateway único e 324 pytest
+   foram validados antes do rollout.
+
 O inventário completo dos pedidos, incluindo as fontes originais, está em
 `docs/REQUEST_LEDGER.md`. Nenhum item abaixo deve ser interpretado como implementado apenas por
 estar documentado.
 
 ## Lote 0 — correções urgentes de produção
 
+0. 🟡 **Dashboard de Recrutamento — hotfix web publicado em 2026-08-23**: a lista sem filtros deixou
+   de assinar um `?` ausente na API e as Server Actions agora conduzem a expiração do step-up para
+   reautenticação OAuth explícita, preservando RBAC e janela de 30 minutos. O deploy Vercel
+   `dpl_9nW66UQb428mSuwR6YbWJvkT6DBe` está `READY`; falta validação humana autenticada de assumir,
+   aprovar e reprovar. A continuação de Auditoria/Histórico e migrations permanece bloqueada pela
+   suíte Python completa, nunca pelo hotfix web.
 1. ✅ **Permissões de visitantes/novos membros — concluída em 2026-08-22**: política centralizada
    e aplicada pelos 19 IDs de categoria e 97 IDs de canal. Uma conta real sem cargos enxerga
    somente Recepção, Ticket, Recrutamento e Transferências e Parcerias; filas/resultados internos
@@ -120,12 +143,13 @@ Regras obrigatórias:
 
 ## Robô Analista de Candidaturas
 
-16. 🟡 **Robô Analista de Candidaturas — implementação concluída; ativação externa pendente.**
-   Executado a partir de `docs/RECRUITMENT_AI_ANALYST_SPEC.md`. O módulo auxilia recrutadores por
-   rubrica e evidências e não possui autoridade administrativa. A API de produção confirmou
-   `enabled=false` e `provider_ready=false`: não existe `RECRUITMENT_AI_API_KEY`/provider no runtime.
-   Ativar e validar a análise qualitativa exige cadastrar uma credencial de provedor compatível na
-   hospedagem; até lá, o sistema não fabrica classificação e mantém a decisão exclusivamente humana.
+16. ✅ **Robô Analista de Candidaturas — concluído e ativo em produção em 2026-08-24.**
+   A autoridade é determinística e local: rubricas/versionamento, pesos, critérios objetivos,
+   cruzamentos configurados e sinais de integridade persistidos. Não depende de provedor externo,
+   chave de IA ou envio de respostas a terceiros. O produto foi encerrado com o motor transparente
+   `local-deterministic`; ele entrega resumo, organização de evidências e perguntas explicáveis sem
+   calcular decisão final. O possível Qwen3-0.6B GGUF Q4_0 via `llama.cpp` ficou como experimento
+   futuro opcional, fora da fila ativa, pois não é necessário para o sistema funcionar.
 
 Regras obrigatórias:
 
@@ -440,14 +464,26 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     verdes. O Lovable não disponibilizou ferramenta callable nesta sessão e nenhum dado real foi
     reenviado; a referência já incorporada foi conferida nos artefatos e na publicação.
 
-37. 🟠 **Robô Analista em produção — aguardando integração externa.** O módulo existe, mas
-    `provider_ready=false`. Ativar somente após provider OpenAI-compatible/NVIDIA configurado por
-    mecanismo protegido e aprovação de privacidade/custo. Enquanto aguarda, seguir outros itens.
+37. ✅ **Robô Analista — motor local concluído e ativo em produção.** A análise
+    determinística será a autoridade e o fallback permanente. O assistente opcional de modelo
+    aberto será prototipado apenas em processo/app isolado, com uma análise por vez, contexto curto,
+    timeout, circuit breaker, dados minimizados/anônimos e schema de saída estrito. Capacidade
+    registrada: plano Diamond 4096 MB; manter API (1024 MB) e standalone offline (900 MB), reservar
+    inicialmente 1536 MB para o spike e medir pico real antes de qualquer decisão de rollout.
+    O rollout final adotou `local-deterministic/transparent-rules-v1`, sem app separado, segredo ou
+    envio externo. A associação de critérios não usa palavras inseridas pelo candidato; prompt
+    injection é tratada como dado e força revisão humana. Benchmark: 500 execuções idênticas, p95
+    1,517 ms e máximo 2,669 ms. Gates: 433 pytest, 41 testes web, Ruff, compileall,
+    `main.py --check`, lint, typecheck e build. Produção: health 200, Gateway único, oito opções
+    ativas e backup íntegro sem job ativo/esgotado. O Qwen permanece experimento futuro opcional,
+    fora da fila ativa e sem RAM reservada.
 
-38. 🟡 **Domínio próprio do portal — aguardando escolha/registro.** Trocar a divulgação do alias
-    Vercel por domínio/subdomínio próprio, configurar DNS/TLS, callbacks e redirects sem quebrar as
-    rotas públicas. O domínio ainda não foi escolhido; manter na fila e instalar/autenticar a Vercel
-    CLI quando a execução for retomada.
+38. ✅ **Domínio próprio do portal — concluído em 2026-08-24.** `choquebgr.online` e `www` estão
+    vinculados à produção Vercel com TLS; `www` redireciona permanentemente para o domínio canônico.
+    As rotas públicas e administrativas permanecem no mesmo domínio, o alias Vercel continua como
+    apoio compatível ao OAuth e `/discord` redireciona permanentemente para o convite oficial.
+    Provas finais: login e status 200, recrutamento público 200, áreas privadas redirecionam para
+    login e nenhum erro de runtime nas rotas novas.
 
 39. ✅ **Remoção intencional do módulo de medalhas — concluída em produção em 2026-08-23.** O canal
     apagado pelo proprietário não é mais exigido nem recriado: o cog saiu de `COGS`, o validador
@@ -466,9 +502,13 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     divulgadas, revisar menor privilégio do bot e repetir login/logout/revogação com contas reais.
     Nunca colocar os novos valores em chat, Git, ZIP, logs ou handoff.
 
-42. 🟢 **Auditoria contínua de pedidos e documentação.** Ao concluir cada item, reconciliar evidência
-    em `PROJECT_HANDOFF.md`, fila, ledger e relatório; corrigir contradições sem apagar histórico e
-    continuar automaticamente para o próximo item seguro.
+42. ✅ **Auditoria desta continuidade concluída em 2026-08-24; disciplina contínua preservada.**
+    `PROJECT_HANDOFF.md`, fila, ledger e relatório foram reconciliados sem apagar o histórico.
+    A auditoria AST percorreu 22 módulos, 279 interfaces e 390 componentes: 107 `custom_id`
+    explícitos sem duplicidade, zero callback ausente e zero interface ativa órfã. O
+    `main.py --check` confirmou migration 39, 18 cogs, 46 comandos e 25 views persistentes;
+    `security_scan.py` terminou `SECRET_SCAN_OK` e `git diff --check` permaneceu verde. A mesma
+    reconciliação documental continua obrigatória em toda entrega futura.
 
 43. ✅ **Correções recuperadas da conversa — concluídas em produção em 2026-08-23.** A campanha
     ainda bloqueava candidatos de 15 anos embora a mensagem pública dissesse 15. A migration 27
@@ -486,3 +526,220 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     verdes, o estado consolidado foi enviado explicitamente somente para `private/main` no commit
     `1fa51db`. `.env`, tokens, bancos, WAL/SHM, backups, logs e dados pessoais não entraram; o remoto
     público não recebeu push.
+
+46. ✅ **Mesa de Análise de candidaturas — concluída e publicada em 2026-08-23.** A mesma ficha
+    privada agora apresenta estado, responsável, atribuição, decisão e datas, preservando os controles
+    existentes e acrescentando Aprovar/Reprovar persistentes com modal, justificativa, RBAC único,
+    anti-autoavaliação, idempotência e auditoria de origem Discord/correlation. Recuperação atualiza
+    somente a ficha original em cadência segura; cartão inexistente nunca é recriado. O portal filtra
+    por status/responsável. Produção confirmou Gateway único/migration 28; Vercel
+    `dpl_EJZedEhLbTyjaJFYAjhVseEzhX9v` está READY. A demonstração isolada e sem mutação foi publicada
+    uma vez na Mesa (`1541248708203774013`). Gates: 335 pytest, 40 Vitest, Ruff, compileall,
+    `main.py --check`, lint, typecheck e build.
+
+47. ✅ **Central de Tags, Set e Identidade — concluída e publicada em 2026-08-24.**
+    Fonte integral imutável: `C:\Users\mpaii\.codex\attachments\827849b6-d049-43a9-ba32-c1ff7b9ee7f4\pasted-text.txt`
+    (SHA-256 `6330CC70FE7920C2BA0DA5B4F85A9A29310F935530BDC837475DD8F81A8978B1`). A implementação deve
+    reutilizar cadastro/identidade, solicitações, cargos, auditoria, painéis, banco e permissões
+    existentes; não criar autoridade ou fluxo paralelo e não publicar parcialmente.
+
+    Cobertura obrigatória, preservada pelas 40 seções da fonte:
+
+    1. fluxo completo `SOLICITAÇÃO → AGUARDANDO SET → SET REALIZADO → AGUARDANDO CONFIRMAÇÃO → CONCLUÍDO`,
+       inclusive recusa, cancelamento, expiração, pendência, reabertura, correção, auditoria,
+       reatribuição e sincronização de cargos;
+    2. cargos configurados por IDs (`TAG SETADA`, `AGUARDANDO SET`, `RESPONSÁVEL POR TAG`), sem nomes
+       visuais como chave;
+    3. painel fixo do membro, elegibilidade por identidade, ID MTA, persistência, cargo pendente,
+       aviso aos responsáveis e orientação à DP de Los Santos;
+    4. prevenção de solicitação duplicada e indicação clara de solicitação ativa;
+    5. estados controlados, transições e mensagens coerentes;
+    6. fila ordenada, pesquisável e atualizada para quem aguarda set;
+    7. notificações centralizadas, sem spam, para os responsáveis;
+    8. assumir atendimento com concorrência segura;
+    9. liberar, reatribuir e manter o histórico de responsável;
+    10. registrar realização do set com dados e responsável;
+    11. confirmação exclusiva pelo próprio membro;
+    12. confirmação positiva atômica: status, cargos, horários, executores, cadastro, painel e auditoria;
+    13. caminho de tag não recebida, justificativa, pendência e reabertura;
+    14. expiração configurável, recuperação e histórico;
+    15. recusa com motivo obrigatório e observação;
+    16. cancelamento seguro e histórico preservado;
+    17. correção auditada do ID MTA;
+    18. conflito de ID MTA tratado de modo controlado;
+    19. painel administrativo Central de Tags com indicadores, busca e ações por permissão;
+    20. visão completa de quem falta setar, com busca/listagem paginada;
+    21. fila própria de aguardando confirmação;
+    22. chamada para a DP por canal/DM, cooldown e trilha;
+    23. tempos, timestamps e métricas operacionais;
+    24. timeline integral e imutável por solicitação;
+    25. integração bidirecional com o cadastro central de identidade;
+    26. reconciliação segura banco/Discord dos cargos de tag, sem remoção indevida;
+    27. integridade de dados e transições no domínio/banco;
+    28. permissões distintas para membro, responsável por tag e administração;
+    29. auditoria de toda ação administrativa e de identidade;
+    30. arquitetura de banco com tabelas, índices, FKs e unicidade de ativo;
+    31. idempotência de ações, entregas e eventos;
+    32. recuperação persistente após restart, inclusive fila, atendimentos, painéis e pendências;
+    33. base para métricas futuras;
+    34. experiência simples do membro do pedido à conclusão;
+    35. experiência operacional clara do responsável;
+    36. UX por painéis/mensagens limitadas/modais, sem poluição;
+    37. testes de solicitação, atendimento, set, finalização, exceções, concorrência e recuperação;
+    38. critérios de conclusão integralmente validados, sem etapa manual implícita;
+    39. entrega técnica com arquivos, migrations, entidades, regras, permissões, listeners, testes,
+        problemas, decisões e riscos documentados;
+    40. princípio de integração: identidade, cargos, solicitação, atendimento, confirmação e auditoria
+        formam uma única cadeia extensível para módulos futuros.
+
+    Gate de produção cumprido: migration 35, fluxo completo, painéis persistentes, reconciliação,
+    idempotência, permissões e recuperação foram publicados após 386 testes verdes. O painel do membro
+    possui Solicitar tag, Minha tag já foi setada e Minha tag; declaração legada sempre exige revisão.
+    A confirmação por DM foi corrigida e a aplicação combinada permaneceu como único Gateway.
+
+48. ✅ **Status do Bot — concluído e publicado em 2026-08-24.**
+    Painel público persistente, em **uma única mensagem editável**, com estado global e componentes
+    separados: Bot/Gateway; API/Site; Portaria/Cadastro; Recrutamento/Mesa; notificações e filas;
+    Auditoria/Histórico; Bate-ponto/Patrulhas; Central de Tags quando disponível. Estados humanos
+    permitidos: `OPERACIONAL`, `ATUALIZANDO`, `EM_MANUTENCAO`, `INSTAVEL_DEGRADADO`,
+    `TEMPORARIAMENTE_DESATIVADO` e `INDISPONIVEL`. Cada componente informa resumo simples, início,
+    última atualização, responsável e previsão **somente** quando registrada.
+
+    A detecção automática só poderá refletir evidência confiável (health, Gateway, último sucesso,
+    falha/idade de fila), com debounce/histerese e sem declarar normal apenas porque o processo
+    respondeu. Overrides administrativos persistem componente, estado, motivo, responsável, início,
+    previsão opcional, expiração/resolução e timeline; exigem RBAC backend, CAS, auditoria e modal.
+    Público tem apenas Atualizar/Detalhes; administração possui ações explícitas de manutenção,
+    instabilidade, desativação e normalização. Avisos ocorrem apenas no início/resolução relevante,
+    com cooldown, e nunca expõem stack traces, IDs internos, segredos ou dados pessoais. Jobs críticos
+    devem pausar/reter a fila com segurança e retomar sem perda. Testar restart, painel apagado,
+    clique/override concorrente, detecção, fila atrasada, resolução, cooldown e falha do monitor.
+    Publicação concluída após 395 testes, Ruff, compileall e `main.py --check`. O canal público
+    `1541298034825236500` mantém uma única mensagem fixada (`1541298362450452531`) com Atualizar e
+    Detalhes; o canal administrativo privado `1541298038117761084` mantém a mensagem fixada
+    `1541298363134255175` com os seis controles explícitos. Migration 36, oito componentes, CAS,
+    auditoria, timeline, detecção com histerese, cooldown, recuperação pós-restart e Gateway único
+    foram confirmados. Falhas históricas terminais não degradam o estado atual; o painel ao vivo
+    terminou com os oito componentes operacionais. Backup pós-publicação: `quick_check=ok`, FK=0.
+
+49. ✅ **Evolução completa de bate-ponto, patrulhas e viaturas — concluída e publicada em 2026-08-24.**
+    A migration 37, orquestração única de voz, ponto automático, viaturas duráveis, comando por
+    hierarquia, timeline de composição, painel agrupado, relatórios PTR, ocorrências/evidências,
+    configuração por ID e correções administrativas auditadas foram publicadas como um único conjunto.
+    Trocas de call preservam a sessão; restart reconcilia presença sem duplicar tempo; capacidade e
+    cargos são aplicados no backend. Gates: 419 pytest, 41 testes web, Ruff, compileall,
+    `main.py --check`, lint, typecheck e build. Produção confirmou health 200, migration 37, um Gateway,
+    backup íntegro, uma viatura real recuperada e zero duplicidade/inconsistência nas invariantes.
+
+50. ✅ **Extensão integrada Viatura → Operação → PTR → Carreira → Mérito → Oficialato — concluída e publicada em 2026-08-24.**
+    Fonte integral imutável: `docs/source-prompts/16-vehicle-operation-ptr-career-merit-officer-original.md`,
+    importada de `C:\Users\mpaii\.codex\attachments\0c76f83a-06c6-4868-9af6-d576daef0804\pasted-text.txt`,
+    SHA-256 `11EC9D26F62AB5C646C66CAE7215F633C6748A7E884AB9BAC020C15A5F12AD15`.
+    Não é um projeto separado: deve consolidar e estender, sem recriar, identidade, Central de Tags,
+    bate-ponto, patrulhas, cargos, auditoria, outboxes, painéis e banco. A premissa da fonte de que
+    Central de Tags e as fundações de bate-ponto/patrulhas já foram cumpridas pelos itens 47 e 49.
+    A continuação agora começa em progressão, carreira, mérito e oficialato, sempre reutilizando a
+    identidade, os pontos, as viaturas, os relatórios e a auditoria canônicos. Não publicar
+    implementação parcial: o conjunto relevante exige E2E, migrations seguras, idempotência,
+    recovery, RBAC e testes completos.
+
+    As 64 seções e todos os seus critérios são obrigatórios pela fonte integral preservada:
+    1 Contexto; 2 Objetivo; 3 Princípio de integração; 4 Viaturas; 5 Call e viatura; 6 Identificador;
+    7 Comandante automático; 8 Regras do comandante; 9 Histórico da viatura; 10 Efetivo em serviço;
+    11 Membros sem viatura; 12 PTR; 13 Ocorrências/perdas; 14 Exemplo; 15 Categorias; 16 Artigos;
+    17 Relatório final PTR; 18 Progressão automática; 19 Metas; 20 Horas acumuladas; 21 Tempo mínimo;
+    22 Regras de promoção; 23 Promoção automática; 24 Processamento pós-restart; 25 Canais de promoção;
+    26 Promoções manuais; 27 Rebaixamentos; 28 Canal de rebaixamento; 29 Mérito após Cadete;
+    30 Histórico de carreira; 31 Candidatura para Oficial; 32 Requisitos; 33 Validação; 34 Formulário;
+    35 Dimensões; 36 Qualidade; 37 Tipos de questão; 38 Pontuação; 39 Pesos; 40 Red flags;
+    41 Consistência; 42 Análise de perfil; 43 Compatibilidade hierárquica; 44 Histórico do candidato;
+    45 Relatório de candidatura; 46 Responsável por upamento; 47 Painel do avaliador; 48 Análise humana;
+    49 Entrevista; 50 Aprovação condicionada; 51 Reprovação; 52 Versionamento; 53 Área do candidato;
+    54 Canais necessários; 55 Gerenciamento de canais; 56 Auditoria; 57 Idempotência;
+    58 Sincronização de cargos; 59 Segurança; 60 Configurações; 61 Dashboard de carreira;
+    62 Testes obrigatórios; 63 Critério de conclusão; 64 Instrução final ao desenvolvedor.
+
+    Entrega verificada: as fundações Viatura/Operação/PTR permanecem na migration 37 e a migration
+    38 adiciona progressão automática até Cadete, mérito auditado e candidatura a Oficial com
+    questionário versionado de 30 perguntas. A migration 39 adiciona notificações duráveis. A
+    avaliação automática é apenas consultiva; elegibilidade, notas, entrevista e decisão final
+    continuam protegidas por RBAC e autoridade humana. Produção confirmou health 200, banco v39,
+    um Gateway, cinco canais configurados por ID e questionário ativo único. O portal publicou as
+    áreas do candidato e dos responsáveis sem 5xx. Gates finais: 429 pytest, 41 testes web, Ruff,
+    compileall, `main.py --check`, lint, typecheck e build; backup pós-publicação com
+    `quick_check=ok`, zero violações de FK e zero notificação de carreira falha ou pendente.
+
+51. 🟡 **Central de Auxílio Financeiro, Metas, Transparência e Honrarias — em desenvolvimento isolado.**
+    Fonte integral imutável: `C:\Users\mpaii\.codex\attachments\dbcc3e73-3d46-4cc6-a021-2680bab85abc\pasted-text.txt`
+    (SHA-256 `EC9FA0507AC4CC2F43C1CAD93BF739A050488FB57A8584573273CB7AF70F75B2`). O módulo deve reutilizar
+    identidade, membros, RBAC, auditoria, settings, outbox, registro de painéis e padrão visual já
+    existentes. Não pode criar um caixa, autoridade, sincronizador ou painel paralelo. Produção permanece
+    inalterada até o fluxo completo, recuperação pós-restart, revisão adversarial e gate final.
+
+    Os 40 blocos obrigatórios da fonte são preservados por referência integral e por esta cobertura:
+
+    1. contribuições inteiramente voluntárias, sem mínimo, máximo, mensalidade ou penalidade;
+    2. vedação absoluta de compra de poder, promoção, prioridade, influência ou acesso;
+    3. canal e mensagem persistente `💰・auxílio-financeiro` como Central institucional;
+    4. fluxo de doação com PIX configurado com segurança, cópia, declaração e cancelamento;
+    5. declaração de valor, destino, observação, visibilidade e projeto ativo opcional;
+    6. estados PENDENTE, CONFIRMADA, NÃO CONFIRMADA e CANCELADA, com confirmação administrativa;
+    7. visibilidade pública/anônima sem expor valores individuais por padrão;
+    8. metas/projetos com identificador, orçamento exato, responsável, prazo, estado e timeline;
+    9. apresentação visual de meta, progresso e bloqueio de novas contribuições ao concluir;
+    10. fundo geral com arrecadado, utilizado, saldo e movimentações;
+    11. apadrinhamento voluntário de projeto, sem obrigação financeira;
+    12. metas comunitárias e mensagem explícita de que pequenas contribuições importam;
+    13. prestação de contas agregada, relevante e privada por padrão;
+    14. lançamentos financeiros imutáveis, auditáveis, canceláveis/estornáveis, nunca apagados;
+    15. sugestões de melhoria via painel administrativo;
+    16. mural de apoiadores sem ranking financeiro;
+    17. honrarias simbólicas com regras claras e Patrono sempre humano/discricionário;
+    18. cargos Discord simbólicos, sem permissões administrativas ou operacionais;
+    19. perfil de honrarias e conquistas do membro;
+    20. conquistas automáticas explicáveis e não orientadas por faixas de dinheiro;
+    21. certificado digital sem valor financeiro por padrão, com código de validação;
+    22. eventual preview antecipado somente não sensível;
+    23. créditos de projeto apenas com autorização;
+    24. concessão manual de honraria com justificativa, responsável e duração opcional;
+    25. remoção de honraria preservando trilha completa;
+    26. log de honrarias auditável;
+    27. painel financeiro administrativo protegido e dividido por ações;
+    28. permissões separadas para Financeiro, Projetos, Honrarias, Auditor e Administração;
+    29. PIX somente em configuração segura, alteração elevada e auditada;
+    30. validação server-side, valores exatos positivos, idempotência e auditoria;
+    31. minimização de dados e comprovantes sempre restritos;
+    32. jornada completa feita por botões, selects, modais e embeds, sem comandos de texto;
+    33. conclusão automática idempotente de projeto e suas atualizações correlatas;
+    34. reconhecimento institucional de toda contribuição, sem loja de títulos;
+    35. pontos de extensão documentados para automação PIX e relatórios futuros;
+    36. entidades com IDs, constraints, FKs e timestamps consistentes;
+    37. UX militar/institucional da CHOQUE, legível e sem aspecto comercial;
+    38. regras de negócio financeiras e de igualdade protegidas por testes;
+    39. mensagem institucional de encerramento;
+    40. resultado integrado Auxílio + Projetos + Transparência + Reconhecimento, sem regressões.
+
+52. ⏳ **Revisão de canais e painéis persistentes já publicados — adiada até a conclusão financeira.**
+    Começará pelo painel de bate-ponto, cuja mensagem poderá estar desatualizada. O inventário deverá
+    comparar cada painel persistente ao comportamento canônico atual de ponto, patrulhas, viaturas,
+    carreira e demais fluxos; editará a mensagem original somente quando o conteúdo estiver comprovadamente
+    obsoleto. Não recriará canais, não duplicará mensagens, não mencionará membros e preservará permissões,
+    IDs, recuperação pós-restart e histórico. Cada alteração só será publicada após testes de apresentação,
+    recovery e validação ao vivo, com registro posterior em Atualizações do Bot.
+
+53. ⏳ **Notificações institucionais de promoção e rebaixamento — sistema futuro.**
+    Depois da Central Financeira e da revisão dos painéis, publicar uma única mensagem no canal próprio
+    somente após a transação canônica de carreira: militar, patente anterior/nova, responsável, data e
+    origem. Distinguir explicitamente `PROMOÇÃO`, `REBAIXAMENTO`, `CORREÇÃO` e `REVERSÃO`; a publicação
+    nunca espera o motivo. Um controle RBAC separado **Incluir motivo** editará a mesma mensagem e a auditoria,
+    com versionamento e autor da inclusão/alteração, sem criar duplicata. Garantir idempotência e recovery.
+    Reconciliação/sincronização técnica de cargos nunca pode gerar publicação. Não mencionar todos nem
+    expor dados privados, e preservar o histórico inclusive em correções ou reversões.
+
+54. ✅ **Simplificação da Central de Tags — concluída e publicada em 2026-08-25.**
+    Cada solicitação ativa mantém **uma única ficha editável** no canal da Central. Pedido novo mostra
+    somente `Assumir` e `Ver detalhes`; após assumir, a própria ficha oferece `Chamar para DP`,
+    `Tag aplicada`/validação e `Mais ações`, com ações raras protegidas. A conclusão mantém o histórico
+    em cinza e sem controles. A migration 43 versiona a projeção, e todas as treze pendências existentes
+    foram migradas para o novo layout. Após reinício controlado continuaram treze fichas, zero ausentes,
+    zero desatualizadas e zero duplicidades; 58 testes focados e 507 testes da suíte completa passaram.

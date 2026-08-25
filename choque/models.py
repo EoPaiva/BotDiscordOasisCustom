@@ -29,6 +29,7 @@ class RbacProfile(StrEnum):
     SUPERVISOR = "SUPERVISOR"
     COMMAND = "COMANDO"
     HIGH_COMMAND = "ALTO_COMANDO"
+    OFFICER_REVIEWER = "RESPONSAVEL_UPAMENTO"
     ADMIN = "ADMINISTRADOR"
 
 
@@ -41,6 +42,7 @@ RBAC_PROFILE_METADATA: dict[RbacProfile, tuple[str, int]] = {
     RbacProfile.SUPERVISOR: ("Supervisor", 50),
     RbacProfile.COMMAND: ("Comando", 70),
     RbacProfile.HIGH_COMMAND: ("Alto Comando", 90),
+    RbacProfile.OFFICER_REVIEWER: ("Responsável por Upamento", 60),
     RbacProfile.ADMIN: ("Administrador técnico", 100),
 }
 

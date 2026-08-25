@@ -2,11 +2,17 @@ import { ArrowRight, LockKeyhole, RadioTower } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { authConfigurationReady, getDiscordIdentity } from "@/lib/identity";
+import { resolveLoginDestination } from "@/lib/login-return";
 
 import { loginWithDiscord } from "./actions";
 
-export default async function LoginPage() {
-  if (await getDiscordIdentity()) redirect("/dashboard");
+export default async function LoginPage({
+  searchParams,
+}: PageProps<"/login">) {
+  const query = await searchParams;
+  const renewing = query.reauth === "1";
+  const destination = resolveLoginDestination(query);
+  if (!renewing && await getDiscordIdentity()) redirect(destination);
   const ready = authConfigurationReady();
 
   return (
@@ -23,15 +29,17 @@ export default async function LoginPage() {
       <section className="login-panel">
         <div className="technical-index">AUT / 01</div>
         <RadioTower size={27} strokeWidth={1.5} aria-hidden="true" />
-        <h2>Identificação operacional</h2>
-        <p>
-          Entre com sua conta Discord. O acesso será conferido novamente contra o
-          cadastro, a situação funcional e as permissões vigentes.
-        </p>
+          <h2>{renewing ? "Renovar identificação" : "Identificação operacional"}</h2>
+          <p>
+          {renewing
+            ? "Sua confirmação recente expirou. Entre novamente pelo Discord para concluir a ação que estava em andamento."
+            : "Entre com sua conta Discord. O acesso será conferido novamente contra o cadastro, a situação funcional e as permissões vigentes."}
+          </p>
         {ready ? (
           <form action={loginWithDiscord}>
+            <input name="returnTo" type="hidden" value={destination} />
             <button className="button button-primary login-button" type="submit">
-              Entrar com Discord <ArrowRight size={17} aria-hidden="true" />
+              {renewing ? "Renovar com Discord" : "Entrar com Discord"} <ArrowRight size={17} aria-hidden="true" />
             </button>
           </form>
         ) : (
@@ -47,4 +55,3 @@ export default async function LoginPage() {
     </main>
   );
 }
-

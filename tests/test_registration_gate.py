@@ -42,6 +42,28 @@ async def test_registration_gate_reconciles_active_member(service_bundle):
 
 
 @pytest.mark.asyncio
+async def test_registration_sync_grant_is_idempotent_after_gateway_retries(service_bundle):
+    gate = service_bundle["registration_gate"]
+    database = service_bundle["database"]
+    record = await gate.reconcile_identity(GUILD_ID, DISCORD_ID, source="REJOIN")
+
+    first, second = await asyncio.gather(
+        gate.mark_sync(int(record["id"]), success=True),
+        gate.mark_sync(int(record["id"]), success=True),
+    )
+
+    grants = await database.fetchone(
+        """
+        SELECT COUNT(*) AS total FROM audit_logs
+        WHERE action='REGISTRATION_ACCESS_GRANTED' AND target_id=?
+        """,
+        (DISCORD_ID,),
+    )
+    assert sorted((first, second)) == [False, True]
+    assert int(grants["total"]) == 1
+
+
+@pytest.mark.asyncio
 async def test_legacy_active_member_requires_human_review_before_confirmation(service_bundle):
     gate = service_bundle["registration_gate"]
     settings = service_bundle["settings"]
@@ -247,6 +269,71 @@ async def test_high_command_directory_deactivation_is_logical_and_recoverable(se
         (GUILD_ID, DISCORD_ID),
     )
     assert int(members["total"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_accidental_unlinked_block_with_current_rank_cycle_reopens_registration_form(
+    service_bundle,
+):
+    gate = service_bundle["registration_gate"]
+    settings = service_bundle["settings"]
+    database = service_bundle["database"]
+    discord_id = 91_777
+    await settings.set(GUILD_ID, "registration_gate_enabled", True, DISCORD_ID)
+    await open_managed_rank_registration(service_bundle, discord_id, 89_177)
+    pending = await gate.submit(
+        GUILD_ID,
+        discord_id,
+        mta_nick="Identidade anterior",
+        bgr_id="3270",
+    )
+    blocked = await gate.deactivate_directory_registration(
+        int(pending["id"]),
+        actor_id=DISCORD_ID,
+        reason="Bloqueio aplicado em teste",
+    )
+    assert blocked["member_id"] is None
+    assert (blocked["status"], blocked["conflict_code"]) == (
+        "BLOCKED",
+        "ADMIN_DEACTIVATED",
+    )
+
+    reopened = await gate.reopen_for_review(
+        int(blocked["id"]),
+        actor_id=DISCORD_ID,
+        reason="bloqueio aplicado por engano",
+    )
+    intent = await gate.registration_intent(GUILD_ID, discord_id)
+
+    assert reopened["status"] == "UNREGISTERED"
+    assert reopened["member_id"] is None
+    assert (intent["mode"], intent["kind"]) == ("FORM", "CURRENT_CYCLE")
+    resubmitted = await gate.submit(
+        GUILD_ID,
+        discord_id,
+        mta_nick="Sheikh",
+        bgr_id="3270",
+    )
+    assert int(resubmitted["id"]) == int(blocked["id"])
+    assert (resubmitted["status"], resubmitted["conflict_code"]) == (
+        "PENDING",
+        "FUNCTIONAL_ROLE_REVIEW_REQUIRED",
+    )
+    assert resubmitted["delivery_status"] == "PENDING"
+    assert await database.fetchone(
+        "SELECT 1 FROM members WHERE guild_id=? AND discord_id=?",
+        (GUILD_ID, discord_id),
+    ) is None
+    audit = await database.fetchone(
+        """
+        SELECT reason FROM audit_logs
+        WHERE guild_id=? AND action='REGISTRATION_REOPENED_FOR_REVIEW'
+          AND target_id=?
+        ORDER BY id DESC LIMIT 1
+        """,
+        (GUILD_ID, discord_id),
+    )
+    assert audit["reason"] == "bloqueio aplicado por engano"
 
 
 @pytest.mark.asyncio
@@ -642,6 +729,196 @@ async def test_registration_review_notification_and_archive_are_persisted(servic
     assert int(delivered["result_channel_id"]) == 81
     assert int(delivered["result_message_id"]) == 82
     assert await gate.undelivered_review_results(GUILD_ID) == []
+
+
+@pytest.mark.asyncio
+async def test_registration_result_and_temporary_card_cleanup_are_claimed_once(service_bundle):
+    gate = service_bundle["registration_gate"]
+    settings = service_bundle["settings"]
+    await settings.set(GUILD_ID, "registration_gate_enabled", True, DISCORD_ID)
+    await open_managed_rank_registration(service_bundle, 9_123, 89_123)
+    pending = await gate.submit(
+        GUILD_ID,
+        9_123,
+        mta_nick="Ficha Temporária",
+        bgr_id="9123",
+    )
+    await gate.record_review_notification(int(pending["id"]), 71, 72)
+    approved = await gate.approve_new_member(
+        int(pending["id"]),
+        reviewer_id=DISCORD_ID,
+        reason="Aprovado para teste de entrega",
+        discord_nick="Ficha Temporária",
+    )
+
+    claims = await asyncio.gather(
+        gate.claim_review_result_delivery(int(approved["id"])),
+        gate.claim_review_result_delivery(int(approved["id"])),
+    )
+    claim_token = next(item for item in claims if item is not None)
+    assert sum(item is not None for item in claims) == 1
+    await gate.mark_review_result_delivered(
+        int(approved["id"]),
+        actor_id=DISCORD_ID,
+        channel_id=81,
+        message_id=82,
+        claim_token=claim_token,
+    )
+
+    # A failed Discord delete releases only the cleanup claim.  It never
+    # republishes the final history message and remains recoverable at startup.
+    cleanup_claim = await gate.claim_review_cleanup(int(approved["id"]))
+    assert cleanup_claim is not None
+    await gate.release_delivery_claim(int(approved["id"]), "CLEANUP", cleanup_claim)
+    assert [int(row["id"]) for row in await gate.pending_review_cleanup(GUILD_ID)] == [
+        int(approved["id"])
+    ]
+
+    cleanup_claim = await gate.claim_review_cleanup(int(approved["id"]))
+    assert cleanup_claim is not None
+    await gate.mark_review_cleanup_completed(
+        int(approved["id"]), claim_token=cleanup_claim
+    )
+    delivered = await gate.get(int(approved["id"]))
+    assert delivered["delivery_status"] == "DELIVERED"
+    assert delivered["review_channel_id"] is None
+    assert delivered["review_message_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_reused_delivered_registration_starts_a_fresh_review_cycle(service_bundle):
+    """A prior result delivery must never remove the card of a new review."""
+    gate = service_bundle["registration_gate"]
+    settings = service_bundle["settings"]
+    await settings.set(GUILD_ID, "registration_gate_enabled", True, DISCORD_ID)
+    await open_managed_rank_registration(service_bundle, 9_124, 89_124)
+
+    first = await gate.submit(
+        GUILD_ID,
+        9_124,
+        mta_nick="Ciclo anterior",
+        bgr_id="9124",
+    )
+    await gate.record_review_notification(int(first["id"]), 71, 72)
+    first_decision = await gate.approve_new_member(
+        int(first["id"]),
+        reviewer_id=DISCORD_ID,
+        reason="Primeiro ciclo concluído",
+        discord_nick="Ciclo anterior",
+    )
+    result_claim = await gate.claim_review_result_delivery(int(first_decision["id"]))
+    assert result_claim is not None
+    await gate.mark_review_result_delivered(
+        int(first_decision["id"]),
+        actor_id=DISCORD_ID,
+        channel_id=81,
+        message_id=82,
+        claim_token=result_claim,
+    )
+
+    # A new self-identification with a divergent ID reuses the durable row,
+    # but must begin a distinct pending delivery cycle.
+    second = await gate.submit(
+        GUILD_ID,
+        9_124,
+        mta_nick="Ciclo novo",
+        bgr_id="9125",
+    )
+    assert int(second["id"]) == int(first["id"])
+    assert second["status"] == "REQUIRES_REVIEW"
+    assert second["delivery_status"] == "PENDING"
+    assert second["reviewed_at"] is None
+    assert second["review_channel_id"] is None
+    assert second["review_message_id"] is None
+    assert second["result_channel_id"] is None
+    assert second["result_message_id"] is None
+
+    # This is the startup/retry path.  It must publish/recover the pending
+    # review, never clean it up because the previous cycle was delivered.
+    await gate.record_review_notification(int(second["id"]), 171, 172)
+    assert [int(row["id"]) for row in await gate.pending_review_notifications(GUILD_ID)] == [
+        int(second["id"])
+    ]
+    assert await gate.pending_review_cleanup(GUILD_ID) == []
+    assert await gate.claim_review_cleanup(int(second["id"])) is None
+
+    rejected = await gate.reject(
+        int(second["id"]), reviewer_id=DISCORD_ID, reason="Divergência confirmada"
+    )
+    result_claim = await gate.claim_review_result_delivery(int(rejected["id"]))
+    assert result_claim is not None
+    await gate.mark_review_result_delivered(
+        int(rejected["id"]),
+        actor_id=DISCORD_ID,
+        channel_id=181,
+        message_id=182,
+        claim_token=result_claim,
+    )
+    assert [int(row["id"]) for row in await gate.pending_review_cleanup(GUILD_ID)] == [
+        int(second["id"])
+    ]
+    cleanup_claim = await gate.claim_review_cleanup(int(second["id"]))
+    assert cleanup_claim is not None
+    await gate.mark_review_cleanup_completed(int(second["id"]), claim_token=cleanup_claim)
+    assert await gate.claim_review_cleanup(int(second["id"])) is None
+    assert (await gate.get(int(second["id"])))["review_message_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_pending_review_recovery_repairs_stale_result_delivery_without_losing_card(
+    service_bundle,
+):
+    gate = service_bundle["registration_gate"]
+    settings = service_bundle["settings"]
+    database = service_bundle["database"]
+    await settings.set(GUILD_ID, "registration_gate_enabled", True, DISCORD_ID)
+    await open_managed_rank_registration(service_bundle, 9_125, 89_125)
+    first = await gate.submit(
+        GUILD_ID,
+        9_125,
+        mta_nick="Recuperação de ficha",
+        bgr_id="9125",
+    )
+    await gate.record_review_notification(int(first["id"]), 71, 72)
+    approved = await gate.approve_new_member(
+        int(first["id"]),
+        reviewer_id=DISCORD_ID,
+        reason="Ciclo anterior",
+        discord_nick="Recuperação de ficha",
+    )
+    result_claim = await gate.claim_review_result_delivery(int(approved["id"]))
+    assert result_claim is not None
+    await gate.mark_review_result_delivered(
+        int(approved["id"]),
+        actor_id=DISCORD_ID,
+        channel_id=81,
+        message_id=82,
+        claim_token=result_claim,
+    )
+
+    # A row left by an old deployment may be PENDING while it still carries
+    # the previous terminal delivery.  Startup reconciliation must repair it
+    # and retain the current temporary-card pointer.
+    await database.execute(
+        """
+        UPDATE registration_gate_records
+        SET status='REQUIRES_REVIEW', completed_at=NULL, reviewed_at=NULL,
+            reviewed_by=NULL, review_reason=NULL, review_channel_id=171,
+            review_message_id=172
+        WHERE id=?
+        """,
+        (int(approved["id"]),),
+    )
+    recovered = await gate.prepare_pending_review_delivery(int(approved["id"]))
+    assert recovered["status"] == "REQUIRES_REVIEW"
+    assert recovered["delivery_status"] == "PENDING"
+    assert int(recovered["review_channel_id"]) == 171
+    assert int(recovered["review_message_id"]) == 172
+    assert recovered["result_channel_id"] is None
+    assert recovered["result_message_id"] is None
+    assert recovered["reviewed_at"] is None
+    assert await gate.pending_review_cleanup(GUILD_ID) == []
+    assert await gate.claim_review_cleanup(int(approved["id"])) is None
 
 
 @pytest.mark.asyncio

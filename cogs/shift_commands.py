@@ -10,7 +10,7 @@ from discord.ext import commands, tasks
 from choque.embeds import branded_embed
 from choque.errors import ChoqueError, NotFoundError, PermissionDenied, ValidationError
 from choque.models import ShiftStatus
-from choque.time_utils import discord_timestamp, format_duration, period_bounds
+from choque.time_utils import discord_timestamp, format_duration, period_bounds, utc_now_ms
 from cogs.config_ui import respond_error
 
 
@@ -26,17 +26,18 @@ def build_point_panel_embed(bot: commands.Bot) -> discord.Embed:
         title="⏱️ CONTROLE OPERACIONAL DE SERVIÇO",
         description=(
             "**SISTEMA OFICIAL DE BATE-PONTO • CHOQUE - BGR**\n\n"
-            "Registre somente o período em que estiver efetivamente disponível para o serviço. "
-            "O sistema acompanha sua presença nas calls autorizadas, distingue patrulha efetiva "
-            "de espera/treinamento e mantém auditoria de cada ação."
+            "Você **não precisa abrir ou fechar o ponto manualmente**: entrar em uma call de "
+            "patrulha abre o registro, e sair inicia o encerramento seguro. Trocas diretas entre "
+            "patrulhas mantêm a mesma sessão e nunca duplicam horas. Este painel serve somente "
+            "para acompanhar o ponto, as horas válidas e o histórico."
         ),
     )
     embed.add_field(
         name="🟢 Entrada em serviço",
         value=(
-            "`01` Entre em uma call operacional autorizada.\n"
-            "`02` Confirme que possui cargo e cadastro ativos.\n"
-            "`03` Pressione **Iniciar Serviço** uma única vez."
+            "`01` Confirme que possui cargo e cadastro ativos.\n"
+            "`02` Entre em uma call configurada como patrulha.\n"
+            "`03` O ponto e a viatura serão vinculados automaticamente."
         ),
         inline=False,
     )
@@ -98,22 +99,13 @@ class PointPanelView(discord.ui.View):
         await cog.handle_panel_action(interaction, action)
 
     @discord.ui.button(
-        label="Iniciar Serviço",
+        label="Meu Ponto",
         emoji="🟢",
-        style=discord.ButtonStyle.success,
-        custom_id="choque:shift:start:v1",
+        style=discord.ButtonStyle.primary,
+        custom_id="choque:shift:status:v1",
     )
-    async def start(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self._run(interaction, "start")
-
-    @discord.ui.button(
-        label="Finalizar Serviço",
-        emoji="🔴",
-        style=discord.ButtonStyle.danger,
-        custom_id="choque:shift:stop:v1",
-    )
-    async def stop(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self._run(interaction, "stop")
+    async def status(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await self._run(interaction, "status")
 
     @discord.ui.button(
         label="Minhas Horas",
@@ -417,6 +409,12 @@ class ShiftCommands(commands.Cog):
             elif action == "stop":
                 text = await self._stop_member(member)
                 await interaction.followup.send(text, ephemeral=True)
+            elif action == "status":
+                embed = await self._status_embed(member)
+                if embed is None:
+                    await interaction.followup.send("⚫ Você está fora de serviço.", ephemeral=True)
+                else:
+                    await interaction.followup.send(embed=embed, ephemeral=True)
             elif action == "hours":
                 embed = await self._hours_embed(member)
                 await interaction.followup.send(embed=embed, ephemeral=True)
@@ -494,6 +492,29 @@ class ShiftCommands(commands.Cog):
         embed.add_field(name="Total", value=format_duration(total_ms), inline=True)
         return embed
 
+    async def _status_embed(self, member: discord.Member) -> discord.Embed | None:
+        active = await self.services.shifts.get_active(member.guild.id, member.id)
+        if not active:
+            return None
+        progress = await self.services.shifts.patrol_progress(member.guild.id, member.id)
+        channel = (
+            f"<#{active['voice_channel_id']}>" if active["voice_channel_id"] else "Em tolerância"
+        )
+        embed = branded_embed(self.branding, title="🟢 EM SERVIÇO")
+        embed.add_field(name="Entrada", value=discord_timestamp(int(active["started_at"]), "t"))
+        validation = (
+            "✅ Requisito mínimo atingido"
+            if progress["requirement_met"]
+            else (
+                f"⏳ {format_duration(int(progress['patrol_duration_ms']))} / "
+                f"{format_duration(int(progress['minimum_patrol_ms']))}"
+            )
+        )
+        embed.add_field(name="Validação da sessão", value=validation, inline=False)
+        embed.add_field(name="Call atual", value=channel, inline=False)
+        embed.add_field(name="Sessão", value=f"#{active['id']}")
+        return embed
+
     async def _history_embed(
         self, member: discord.Member, page: int = 0
     ) -> tuple[discord.Embed, bool]:
@@ -537,27 +558,10 @@ class ShiftCommands(commands.Cog):
     @ponto.command(name="status", description="Mostra o estado do seu ponto.")
     async def point_status(self, interaction: discord.Interaction) -> None:
         member = _member_from_interaction(interaction)
-        active = await self.services.shifts.get_active(member.guild.id, member.id)
-        if not active:
+        embed = await self._status_embed(member)
+        if embed is None:
             await interaction.response.send_message("⚫ Você está fora de serviço.", ephemeral=True)
             return
-        progress = await self.services.shifts.patrol_progress(member.guild.id, member.id)
-        channel = (
-            f"<#{active['voice_channel_id']}>" if active["voice_channel_id"] else "Em tolerância"
-        )
-        embed = branded_embed(self.branding, title="🟢 EM SERVIÇO")
-        embed.add_field(name="Entrada", value=discord_timestamp(int(active["started_at"]), "t"))
-        validation = (
-            "✅ Requisito mínimo atingido"
-            if progress["requirement_met"]
-            else (
-                f"⏳ {format_duration(int(progress['patrol_duration_ms']))} / "
-                f"{format_duration(int(progress['minimum_patrol_ms']))}"
-            )
-        )
-        embed.add_field(name="Validação da sessão", value=validation, inline=False)
-        embed.add_field(name="Call atual", value=channel, inline=False)
-        embed.add_field(name="Sessão", value=f"#{active['id']}")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @ponto.command(name="painel", description="Publica ou atualiza o painel fixo de ponto.")
@@ -683,31 +687,49 @@ class ShiftCommands(commands.Cog):
         )
 
     async def build_service_embed(self, guild_id: int) -> discord.Embed:
-        rows = await self.services.shifts.list_active(guild_id)
+        overview = await self.services.duty_patrols.service_overview(guild_id)
         embed = branded_embed(self.branding, title="CHOQUE - BGR • EFETIVO EM SERVIÇO")
-        if not rows:
+        if not overview["member_count"]:
             embed.description = "Nenhum membro em serviço."
             return embed
-        lines = []
-        for index, row in enumerate(rows, start=1):
-            channel = f"<#{row['voice_channel_id']}>" if row["voice_channel_id"] else "Tolerância"
-            progress = await self.services.shifts.patrol_progress(
-                guild_id, int(row["discord_id"])
+        now = utc_now_ms()
+        lines: list[str] = []
+        for patrol in overview["patrols"][:10]:
+            commander = (
+                f"<@{patrol['commander_discord_id']}>"
+                if patrol["commander_discord_id"]
+                else "Não definido"
             )
-            validation = (
-                "✅ Validado"
-                if progress["requirement_met"]
-                else (
-                    f"⏳ {format_duration(int(progress['patrol_duration_ms']))} / "
-                    f"{format_duration(int(progress['minimum_patrol_ms']))}"
+            members = "\n".join(
+                f"• {row['rank_name'] or 'Sem patente'} • <@{row['discord_id']}>"
+                for row in patrol["members"][:15]
+            )
+            duration = max(0, now - int(patrol["started_at"] or now))
+            lines.append(
+                f"**VIATURA {int(patrol['sequence_number']):02d} • "
+                f"<#{patrol['voice_channel_id']}>**\n"
+                f"Comandante: {commander} • {len(patrol['members'])} integrante(s) • "
+                f"{format_duration(duration)}\n{members}"
+            )
+        unassigned = overview["unassigned"]
+        if unassigned:
+            lines.append(
+                "**EFETIVO SEM VIATURA**\n"
+                + "\n".join(
+                    f"• {row['rank_name'] or 'Sem patente'} • <@{row['discord_id']}> • "
+                    f"{('<#' + str(row['voice_channel_id']) + '>') if row['voice_channel_id'] else 'Tolerância'}"
+                    for row in unassigned[:20]
                 )
             )
-            lines.append(
-                f"**{index:02d} • {row['mta_nick']}**\n"
-                f"{row['rank_name'] or 'Sem patente'} • {channel} • {validation}"
-            )
-        embed.description = "\n\n".join(lines)
-        embed.add_field(name="Total em serviço", value=str(len(rows)), inline=False)
+        embed.description = "\n\n".join(lines)[:4096]
+        embed.add_field(
+            name="Resumo operacional",
+            value=(
+                f"Em serviço **{overview['member_count']}** • Viaturas ativas "
+                f"**{len(overview['patrols'])}** • Sem viatura **{len(unassigned)}**"
+            ),
+            inline=False,
+        )
         return embed
 
     async def open_invalidated_admin(self, interaction: discord.Interaction) -> None:
@@ -786,31 +808,13 @@ class ShiftCommands(commands.Cog):
         await self.services.audit.deliver_pending()
 
     @commands.Cog.listener()
-    async def on_voice_state_update(
-        self,
-        member: discord.Member,
-        before: discord.VoiceState,
-        after: discord.VoiceState,
-    ) -> None:
-        if member.bot:
-            return
-        authorized = await self.services.permissions.has_authorized_service_role(member)
-        await self.services.shifts.handle_voice_transition(
-            member.guild.id,
-            member.id,
-            before.channel.id if before.channel else None,
-            after.channel.id if after.channel else None,
-            has_authorized_role=authorized,
-        )
-
-    @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
         if before.roles == after.roles:
             return
         was_authorized = await self.services.permissions.has_authorized_service_role(before)
         is_authorized = await self.services.permissions.has_authorized_service_role(after)
         if was_authorized and not is_authorized:
-            await self.services.shifts.finalize_role_loss(after.guild.id, after.id)
+            await self.services.duty_patrols.handle_role_loss(after.guild.id, after.id)
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:

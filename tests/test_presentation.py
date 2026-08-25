@@ -10,9 +10,9 @@ from choque.config import Branding
 from choque.web_urls import recruitment_portal_url, recruitment_status_url
 from cogs.medals_system import MEDALS, MedalsPanelView, build_medals_embed
 from cogs.member_commands import (
+    RegistrationModal,
     RegistrationPanelView,
     build_registration_panel_embed,
-    should_open_registration_form,
 )
 from cogs.shift_commands import PointPanelView, build_point_panel_embed
 from cogs.ticket_commands import (
@@ -44,29 +44,49 @@ class SettingsStub:
         }[key]
 
 
-def test_unregistered_registration_button_always_opens_the_form() -> None:
-    assert should_open_registration_form(
-        {
-            "mode": "STATUS",
-            "kind": "UNREGISTERED",
-            "current": {"status": "UNREGISTERED"},
-        }
+@pytest.mark.asyncio
+async def test_registration_button_always_opens_two_field_modal_without_querying_status() -> None:
+    class ModulesStub:
+        async def require_enabled(self, guild_id: int, module: str) -> None:
+            assert guild_id == 123
+            assert module == "REGISTRATION"
+
+    class RegistrationGateStub:
+        async def registration_intent(self, *_args, **_kwargs):
+            pytest.fail("o clique não deve consultar intent/status antes de abrir o modal")
+
+    class ResponseStub:
+        modal = None
+
+        async def send_modal(self, modal) -> None:
+            self.modal = modal
+
+    response = ResponseStub()
+    interaction = SimpleNamespace(
+        guild=SimpleNamespace(id=123),
+        user=SimpleNamespace(id=456),
+        client=SimpleNamespace(
+            services=SimpleNamespace(
+                modules=ModulesStub(),
+                registration_gate=RegistrationGateStub(),
+            )
+        ),
+        response=response,
     )
-    assert should_open_registration_form(
-        {
-            "mode": "CONFIRM_EXISTING",
-            "kind": "MEMBER",
-            "current": {"status": "UNREGISTERED"},
-        }
+    view = RegistrationPanelView()
+    register_button = next(
+        item
+        for item in view.children
+        if item.custom_id == "choque:member:register:v3"
     )
-    assert should_open_registration_form({"mode": "FORM", "kind": "VISITOR", "current": None})
-    assert not should_open_registration_form(
-        {
-            "mode": "STATUS",
-            "kind": "REQUIRES_REVIEW",
-            "current": {"status": "REQUIRES_REVIEW"},
-        }
-    )
+
+    await register_button.callback(interaction)
+
+    assert isinstance(response.modal, RegistrationModal)
+    assert [item.label for item in response.modal.children] == [
+        "Nick utilizado no BGR",
+        "ID no BGR",
+    ]
 
 
 @pytest.mark.asyncio
@@ -76,22 +96,22 @@ async def test_registration_and_point_panels_are_detailed_and_keep_persistent_ac
 
     assert registration.title == "🛡️ PORTARIA DIGITAL • CHOQUE - BGR"
     assert len(registration.fields) == 5
-    assert "Candidatar-me agora" in (registration.description or "")
+    assert "Realizar cadastro" in (registration.description or "")
+    assert "Candidatar-me agora" not in (registration.description or "")
     assert custom_ids(RegistrationPanelView()) == {
         "choque:member:identify:v2",
-        "choque:registration:status:v1",
-        "choque:registration:help:v1",
+        "choque:member:register:v3",
     }
+    assert [item.label for item in RegistrationPanelView().children] == [
+        "Identificar vínculo",
+        "Realizar cadastro",
+    ]
+    assert not [item for item in RegistrationPanelView().children if item.url]
 
-    public_registration = RegistrationPanelView("https://example.test")
-    recruitment_links = [item.url for item in public_registration.children if item.url]
-    assert recruitment_links == ["https://example.test/recrutamento"]
-
-    already_scoped_registration = RegistrationPanelView(
-        "https://example.test/recrutamento"
-    )
-    assert [item.url for item in already_scoped_registration.children if item.url] == [
-        "https://example.test/recrutamento"
+    registration_modal = RegistrationModal()
+    assert [item.label for item in registration_modal.children] == [
+        "Nick utilizado no BGR",
+        "ID no BGR",
     ]
 
     public_recruitment = RecruitmentPanelView("https://example.test")
@@ -118,9 +138,9 @@ async def test_registration_and_point_panels_are_detailed_and_keep_persistent_ac
     assert len(point.fields) == 6
     assert any(field.name == "🎯 Validação mínima de patrulha" for field in point.fields)
     assert "fora da call nunca é contabilizado" in point.fields[1].value
+    assert "não precisa abrir ou fechar o ponto manualmente" in (point.description or "").lower()
     assert custom_ids(PointPanelView()) == {
-        "choque:shift:start:v1",
-        "choque:shift:stop:v1",
+        "choque:shift:status:v1",
         "choque:shift:hours:v1",
         "choque:shift:history:v1",
     }

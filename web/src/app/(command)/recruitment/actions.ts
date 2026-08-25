@@ -1,9 +1,40 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { commandCenterFetch } from "@/lib/api";
+import { CommandCenterApiError, commandCenterFetch as requestCommandCenter } from "@/lib/api";
+
+function returnPathFor(path: string): string {
+  const application = path.match(/^\/v1\/admin\/recruitment\/applications\/(\d+)/);
+  if (application) return `/recruitment/${application[1]}`;
+  if (path.includes("/campaign")) return "/recruitment/campaign";
+  if (path.includes("/question") || path.includes("/form/")) return "/recruitment/form";
+  if (path.includes("/blocks")) return "/recruitment/blocks";
+  if (path.includes("/ai/")) return "/recruitment/ai";
+  return "/recruitment";
+}
+
+/**
+ * All recruitment mutations share the same recent-authentication recovery.
+ * A Server Action must redirect to the renewal page instead of propagating a
+ * 401 into React's Server Component error boundary.
+ */
+async function commandCenterFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  try {
+    return await requestCommandCenter<T>(path, init);
+  } catch (error) {
+    if (
+      error instanceof CommandCenterApiError
+      && error.status === 401
+      && error.message === "Autenticação recente necessária. Entre novamente."
+    ) {
+      redirect(`/login?reauth=1&returnTo=${encodeURIComponent(returnPathFor(path))}`);
+    }
+    throw error;
+  }
+}
 
 const versioned = z.object({
   applicationId: z.coerce.number().int().positive(),

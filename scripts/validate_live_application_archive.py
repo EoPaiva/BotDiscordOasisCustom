@@ -79,7 +79,7 @@ def main() -> int:
     registry = settings.get("discord_layout_registry_v2", {})
     history_id = int(settings.get("registration_history_channel_id") or 0)
     expected_history_id = int(registry.get("channels", {}).get("archive.members") or 0)
-    archive_category_id = int(registry.get("categories", {}).get("archive") or 0)
+    audit_category_id = int(registry.get("categories", {}).get("audit") or 0)
     history_channel = discord_get(f"/channels/{history_id}", config.token)
     admin_message = discord_get(
         f"/channels/{admin_channel_id}/messages/{admin_message_id}",
@@ -104,8 +104,8 @@ def main() -> int:
         failures.append(f"columns-missing={sorted(EXPECTED_COLUMNS - columns)}")
     if not history_id or history_id != expected_history_id:
         failures.append("history-setting-mismatch")
-    if int(history_channel.get("parent_id") or 0) != archive_category_id:
-        failures.append("history-outside-archive")
+    if int(history_channel.get("parent_id") or 0) != audit_category_id:
+        failures.append("history-outside-audit")
     if default_overwrite is None or not (int(default_overwrite["deny"]) & VIEW_CHANNEL):
         failures.append("history-visible-to-everyone")
     if undelivered:

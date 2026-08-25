@@ -36,7 +36,6 @@ CATEGORY_IDS = {
     "admin": 1540540581728485597,
     "audit": 1146622066527850585,
     "community": 1146622065399566420,
-    "archive": 1146622065110171669,
 }
 
 CATEGORY_NAMES = {
@@ -48,7 +47,6 @@ CATEGORY_NAMES = {
     "admin": "06・🛡️ ADMINISTRAÇÃO",
     "audit": "07・📜 AUDITORIA",
     "community": "08・💬 COMUNIDADE",
-    "archive": "99・🗃️ ARQUIVO LEGADO",
 }
 
 ROLE_IDS = {
@@ -91,8 +89,6 @@ CHANNEL_LAYOUT: dict[int, tuple[str, str]] = {
     1146622064736882707: ("info", "📘│regras-gerais"),
     1164287787898503228: ("info", "📕│regulamento-interno"),
     1146622065110171661: ("info", "📋│procedimentos-patrulha"),
-    1161833937232990330: ("info", "🏍️│doutrina-rocam"),
-    1161835204642603128: ("info", "🚁│doutrina-águia"),
     1146622065110171664: ("info", "👮│fardamentos"),
     1146622065110171665: ("info", "🚓│viaturas"),
     1146622065110171667: ("info", "⌨️│binds-operacionais"),
@@ -146,20 +142,8 @@ CHANNEL_LAYOUT: dict[int, tuple[str, str]] = {
     1201450207917899786: ("community", "💬│chat-geral"),
     1153774907088441354: ("community", "💡│sugestões"),
     1161829510627459172: ("community", "📷│mídia-e-instagram"),
-    # Arquivo legado
-    1147292121234161783: ("archive", "📜│histórico-de-membros"),
-    1161811169795899412: ("archive", "🚨│regras-antigas-do-ponto"),
-    1147293613886283817: ("archive", "📝│painel-antigo-do-ponto"),
-    1161828543152541726: ("archive", "💠│registros-antigos-do-ponto"),
-    1161766293628801034: ("archive", "🔻│rebaixamentos-legados"),
-    1161766389116325978: ("archive", "🔙│exonerações-legadas"),
-    1167387428277981214: ("archive", "⬛│blacklist-legada"),
-    1162977145426022400: ("archive", "📤│pedidos-de-saída-legados"),
-    1147294480005877826: ("archive", "💤│ausências-legadas"),
-    1147294527846092820: ("archive", "🌐│central-antiga"),
-    1164316808933822487: ("archive", "📩│indicações-legadas"),
-    1166194316935446539: ("archive", "🔖│solicitações-de-tag-legadas"),
-    1163015080141664378: ("archive", "💭│chat-amigos-legado"),
+    # Histórico preservado do arquivo legado.
+    1147292121234161783: ("audit", "📜│histórico-de-membros"),
 }
 
 EMPTY_CHANNELS_TO_DELETE = {
@@ -198,8 +182,6 @@ AUTHORIZED_VOICE_IDS = {
 MEMBER_ONLY_INFO_IDS = {
     1164287787898503228,
     1146622065110171661,
-    1161833937232990330,
-    1161835204642603128,
     1146622065110171664,
     1146622065110171665,
     1146622065110171667,
@@ -220,8 +202,6 @@ CHANNEL_ORDER = {
         "📘│regras-gerais",
         "📕│regulamento-interno",
         "📋│procedimentos-patrulha",
-        "🏍️│doutrina-rocam",
-        "🚁│doutrina-águia",
         "👮│fardamentos",
         "🚓│viaturas",
         "⌨️│binds-operacionais",
@@ -512,7 +492,6 @@ class ProvisionClient(discord.Client):
             "admin": lambda: self.private_overwrites(guild),
             "audit": lambda: self.private_overwrites(guild, ("corrections",)),
             "community": lambda: self.public_readonly_overwrites(guild),
-            "archive": lambda: self.private_overwrites(guild),
         }
         for index, key in enumerate(CATEGORY_NAMES):
             desired_name = elegant_monospace(CATEGORY_NAMES[key])

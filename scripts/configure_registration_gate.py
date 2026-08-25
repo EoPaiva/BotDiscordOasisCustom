@@ -700,11 +700,10 @@ class RegistrationGateConfigurator(discord.Client):
         }
         expected_ids = {
             "choque:member:identify:v2",
-            "choque:registration:status:v1",
-            "choque:registration:help:v1",
+            "choque:member:register:v3",
         }
-        if not expected_ids.issubset(custom_ids):
-            raise RuntimeError("Painel da Portaria não contém as três ações persistentes.")
+        if custom_ids != expected_ids:
+            raise RuntimeError("Painel da Portaria deve conter somente as duas ações persistentes.")
         allowed_categories = {
             resource_id
             for (kind, resource_id), access_class in classes.items()

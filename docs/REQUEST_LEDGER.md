@@ -1,6 +1,153 @@
 # Registro consolidado de pedidos — CHOQUE BGR
 
-Atualizado em 2026-08-23.
+Atualizado em 2026-08-25.
+
+## Central de Auxílio Financeiro, Metas, Transparência e Honrarias — em desenvolvimento isolado
+
+| Pedido | Estado | Fonte e garantia de escopo |
+|---|---|---|
+| Central voluntária de apoio financeiro, projetos, prestação de contas e honrarias | EM DESENVOLVIMENTO LOCAL, SEM ROLLOUT | Fonte integral: `C:\Users\mpaii\.codex\attachments\dbcc3e73-3d46-4cc6-a021-2680bab85abc\pasted-text.txt`, SHA-256 `EC9FA0507AC4CC2F43C1CAD93BF739A050488FB57A8584573273CB7AF70F75B2`; seus 40 blocos são obrigatórios na fase 51 da fila. |
+| Igualdade, privacidade e integridade financeira | BLOQUEIO DE ARQUITETURA | Contribuição não compra poder nem prioridade; valores usam unidade exata; registros são append-only com estorno/cancelamento; PIX fica somente em configuração segura; confirmação, RBAC e auditoria são server-side. |
+| Publicação | PROIBIDA ATÉ O GATE FINAL | Nenhuma migration, painel, cargo, canal ou outbox parcial será enviado à produção. O corte exige fluxo E2E completo, recovery, idempotência, testes focados + suíte completa e autorização final. |
+
+## Simplificação da Central de Tags — concluída em produção em 2026-08-25
+
+| Pedido | Estado | Garantia de escopo |
+|---|---|---|
+| Uma ficha única por solicitação ativa | CONCLUÍDO EM PRODUÇÃO | A mesma mensagem é editada durante todo o ciclo, com status, membro, responsável e datas; as treze solicitações ativas existentes foram migradas sem mensagem ausente ou pedido duplicado. |
+| UX contextual enxuta | CONCLUÍDO EM PRODUÇÃO | Pedido novo mostra `Assumir` e `Ver detalhes`; após assumir, a própria ficha oferece `Chamar para DP`, `Tag aplicada`/validação e `Mais ações`. Fichas encerradas permanecem no histórico, em cinza e sem controles. |
+| Notificação, recovery e concorrência | CONCLUÍDO EM PRODUÇÃO | A migration 43 versiona a projeção da ficha. O reinício controlado preservou as treze fichas, sem reenvio ou duplicação, com Gateway único; 58 testes focados e 507 testes da suíte completa passaram. |
+
+## Notificação automática de promoções e rebaixamentos — futuro
+
+| Pedido | Estado | Garantia de escopo |
+|---|---|---|
+| Publicar somente mudanças reais de patente | PLANEJADO, POSTERIOR À CENTRAL FINANCEIRA E À REVISÃO DE PAINÉIS | A decisão persistida, e não a reconciliação de cargos, será a única origem de uma mensagem idempotente e auditada. |
+| Promoção, rebaixamento, correção e reversão | PLANEJADO | A publicação sai logo após a transação, sem esperar motivo. Um controle RBAC Incluir motivo editará a mesma mensagem/auditoria com versão e autor, sem duplicar. Militar, antes/depois, responsável, data e origem serão mostrados sem menções coletivas ou dados privados. |
+
+## Mesa de Análise — concluída e publicada em 2026-08-23
+
+| Pedido | Estado verificado | Destino |
+|---|---|---|
+| Aprovar/Reprovar diretamente na ficha Discord | CONCLUÍDO: botões persistentes, modal obrigatório, serviço/RBAC único, concorrência/idempotência, auditoria e atualização no mesmo cartão | app combinado Discloud |
+| Estado, responsável e datas da análise | CONCLUÍDO: pendente/em análise/final, responsável, atribuição, decisor e justificativa renderizados sem duplicar a ficha; portal filtra estado/responsável | Discord + Vercel `dpl_EJZedEhLbTyjaJFYAjhVseEzhX9v` |
+| Demonstração segura da Mesa | CONCLUÍDO: mensagem única `1541248708203774013`, identificada TESTE/DEMONSTRAÇÃO, sem candidatura ou mutação clicável | Mesa de Análise |
+
+## Extensão Viatura → Operação → PTR → Carreira → Mérito → Oficialato — concluída em 2026-08-24
+
+| Pedido | Estado | Fonte e garantia de escopo |
+|---|---|---|
+| Extensão integrada de 64 seções | CONCLUÍDA EM PRODUÇÃO | Fonte integral preservada em `docs/source-prompts/16-vehicle-operation-ptr-career-merit-officer-original.md`; fundações Viatura/Operação/PTR na migration 37 e Carreira/Mérito/Oficialato nas migrations 38–39; 429 testes Python, 41 web, Gateway único e backup íntegro |
+
+Ordem explícita: concluir a Mesa de Análise; concluir a Central de Tags; implementar por completo as
+fundações de bate-ponto/patrulhas/viaturas; somente então iniciar esta extensão integrada. Ela deve
+reaproveitar a fonte de verdade de ponto e identidade existentes, nunca criar módulos paralelos ou
+publicar partes isoladas. O rollout de qualquer componente de patrulhas/viaturas permanece sujeito a
+testes E2E completos e publicação controlada somente após todos os gates verdes.
+
+O conjunto foi encerrado com progressão automática limitada a Cadete, mérito auditado, questionário
+de Oficial versionado com 30 perguntas, análise local somente consultiva, responsável por upamento,
+avaliação/entrevista e decisão final humanas. O backup pós-publicação confirmou migration 39,
+`quick_check=ok`, zero violações de FK e zero notificação de carreira pendente ou falha.
+
+## Central de Tags, Set e Identidade — concluída e publicada em 2026-08-24
+
+| Pedido | Estado | Fonte e garantia de escopo |
+|---|---|---|
+| Central de Tags, Set e Identidade | CONCLUÍDA EM PRODUÇÃO | Prompt integral de 40 seções preservado; migration 35, painéis persistentes, fila, confirmação, reconciliação, recuperação e revisão de tag legada publicados após 386 testes verdes |
+
+Ordem explícita: concluir primeiro a Mesa de Análise já em execução; depois entregar a Central de
+Tags completa; somente depois retomar o módulo grande de bate-ponto/patrulhas/viaturas, que continua
+proibido de ir parcialmente à produção. A Central deve reutilizar identidade, solicitações, cargos,
+auditoria, painéis, banco e permissões existentes. Não está autorizada uma publicação parcial: só
+após fluxo completo E2E, persistência, idempotência, recuperação, RBAC, migrations seguras, testes e
+validação dos 40 critérios da fonte.
+
+## Status do Bot — concluído e publicado em 2026-08-24
+
+| Pedido | Estado | Garantia de escopo |
+|---|---|---|
+| Painel público persistente de estado operacional | CONCLUÍDO EM PRODUÇÃO | Uma mensagem fixada e recuperável exibe situação geral e oito componentes; público possui somente Atualizar e Detalhes. Estado ao vivo validado com todos os componentes operacionais. |
+| Overrides, saúde e incidentes | CONCLUÍDO EM PRODUÇÃO | RBAC backend, CAS, motivo/timeline/auditoria, detecção com histerese, cooldown e recuperação após restart publicados. Falhas históricas terminais não geram degradação falsa. 395 testes e backup pós-corte íntegro. |
+
+## Bate-ponto, patrulhas e viaturas — concluído e publicado em 2026-08-24
+
+| Pedido | Estado | Garantia de escopo |
+|---|---|---|
+| Ponto automático por call e troca sem duplicar horas | CONCLUÍDO EM PRODUÇÃO | Orquestrador único, locks/índices, segmentos canônicos, grace e recuperação idempotente após restart. |
+| Viatura, comandante e composição duráveis | CONCLUÍDO EM PRODUÇÃO | Uma viatura ativa por call, composição/trocas append-only, comando por hierarquia e correção administrativa com antes/depois. |
+| Painel de serviço e PTR evoluído | CONCLUÍDO EM PRODUÇÃO | Efetivo agrupado por viatura e sem viatura; relatório congelado com ocorrências, artigos, evidências e visão privada segura do membro. |
+| Qualidade e rollout integral | CONCLUÍDO EM PRODUÇÃO | Migration 37, 419 testes Python, 41 web, gates estáticos/build verdes, health 200, Gateway único e backup remoto íntegro sem violações de FK. |
+
+## Robô Analista local — concluído e publicado em 2026-08-24
+
+| Pedido | Estado | Garantia de escopo |
+|---|---|---|
+| Funcionar sem provedor, chave ou mensalidade | CONCLUÍDO EM PRODUÇÃO | Motor `local-deterministic`, sem rede, tools ou app separado; oito opções ativas no backend combinado. |
+| Auxiliar com resumo, evidências e entrevista | CONCLUÍDO EM PRODUÇÃO | Resumo estrutural, rubrica, pontos positivos/atenção, contradições transparentes e perguntas sugeridas, sempre em área administrativa separada. |
+| Decisão obrigatoriamente humana | CONCLUÍDO E PROTEGIDO | O motor não altera candidatura, status, membro, cooldown ou Discord; score/recomendação são apenas consultivos e recalculados pelo backend. |
+| Segurança, consistência e rollout | CONCLUÍDO EM PRODUÇÃO | Prompt injection tratada como dado; keyword stuffing não escolhe critério; 500 execuções idênticas, 433 pytest, 41 web, Gateway único e backup íntegro sem job ativo/esgotado. |
+
+## Auditoria final da continuidade — concluída em 2026-08-24
+
+| Verificação | Estado | Evidência |
+|---|---|---|
+| Alcançabilidade e integridade dos controles Discord | CONCLUÍDO | 22 módulos, 279 interfaces, 390 componentes, 107 IDs explícitos sem duplicidade, zero callback ausente e zero interface ativa órfã |
+| Inicialização e recuperação | CONCLUÍDO | `main.py --check`: migration 39, 18 cogs, 46 comandos e 25 views persistentes |
+| Segredos e consistência do diff | CONCLUÍDO | `SECRET_SCAN_OK` e `git diff --check` verde |
+| Reconciliação da documentação | CONCLUÍDO | handoff, fila, ledger, relatório, especificação e ADR atualizados sem apagar o histórico |
+| Compactação estrutural do Discord | ADIADA PELO PROPRIETÁRIO | escopo preservado; nenhuma exclusão executada |
+| Rotação de credenciais, menor privilégio e validações humanas de sessão | PENDÊNCIA EXTERNA OBRIGATÓRIA | requer ação do proprietário fora do repositório |
+
+## Canal oficial de atualizações — concluído em 2026-08-24
+
+| Pedido | Estado | Garantia |
+|---|---|---|
+| Criar canal de atualizações e publicar as entregas | CONCLUÍDO NO DISCORD | Canal de leitura institucional criado em Informações, mensagem-resumo fixada e permissões herdadas da categoria |
+| Evitar duplicidade em publicações futuras | CONCLUÍDO | Reexecução atualiza a mesma mensagem e reutiliza o mesmo canal; teste ao vivo confirmou `created=false` na segunda execução |
+
+## Requisitos na Hierarquia — concluído em 2026-08-24
+
+| Pedido | Estado | Garantia |
+|---|---|---|
+| Mostrar requisitos de cada patente | CONCLUÍDO EM PRODUÇÃO | Painel único exibe horas cumulativas, permanência mínima, próxima patente e tipo de progressão usando as regras canônicas da carreira |
+| Corrigir os dois últimos níveis automáticos | CONCLUÍDO | Equivalência entre `Subtenente` e `Sub Tenente` recuperou os marcos de 33 e 40 horas sem alterar os valores oficiais |
+| Separar cargos estratégicos | CONCLUÍDO | Subcomandante e Comandante não possuem requisito público comum; Comandante-Geral é cargo exclusivo do proprietário, não promoção/upamento |
+
+## Retorno do login para Oficialato e Upamentos — concluído em 2026-08-24
+
+| Pedido | Estado | Garantia |
+|---|---|---|
+| Voltar à Candidatura de Oficial após o login Discord | CONCLUÍDO EM PRODUÇÃO | O destino usa `returnTo`, é preservado durante o OAuth e também funciona para uma sessão que já estava autenticada |
+| Voltar à Central de Upamentos após o login Discord | CONCLUÍDO NO PORTAL E DISCORD | O botão persistente abre o login com a fila como destino; mensagem ao vivo conferida após a atualização |
+| Impedir redirecionamento inseguro | CONCLUÍDO | Somente caminhos internos são aceitos; URLs externas, caminhos relativos a protocolo e barras invertidas retornam ao dashboard seguro |
+
+## Integridade da Portaria e Qualificações — 2026-08-23
+
+| Pedido | Estado verificado | Destino |
+|---|---|---|
+| Ficha de cadastro deve permanecer até decisão humana | CONCLUÍDO: novo ciclo zera entrega/resultado/claims antigos; cleanup exige decisão terminal e preserva o painel fixo | app combinado Discloud |
+| Resultado final único no Histórico e remoção idempotente da ficha | CONCLUÍDO: resultado é preservado, ficha usa claim e retry somente após estado terminal | Portaria e member applications |
+| Corrigir Qualificações do Paiva sem #441/404 | CONCLUÍDO e validado humanamente: GRANT Web e sincronização Discord em uma tentativa | Vercel + app combinado Discloud |
+| Evitar novo deploy incompleto na Discloud | CONCLUÍDO: stage limpo de deploy impede `.discloudignore` legado de excluir código atual | `scripts/deploy_discloud_staged.ps1` |
+
+## Correções verificadas após o hotfix de Recrutamento — 2026-08-23
+
+| Pedido | Estado verificado | Destino |
+|---|---|---|
+| Corrigir #441 em Qualificações ao clicar no curso de Paiva | CONCLUÍDO E VALIDADO PELO USUÁRIO: snowflake preservado como texto, GRANT Web registrado e cargo Discord sincronizado em uma tentativa | Vercel + app combinado Discloud |
+| Manter autenticação, autorização e step-up na correção | CONCLUÍDO: a correção altera somente o DTO da ação; login/RBAC permanecem inalterados | regressão coberta por testes |
+| Reduzir o flood de Auditoria do Bot | CONCLUÍDO: sucessos rotineiros são suprimidos apenas no canal e preservados no histórico técnico; alertas críticos permanecem | app combinado Discloud, Gateway único |
+| Evolução completa de bate-ponto/patrulhas/viaturas | CONCLUÍDA E PUBLICADA | `docs/PATROL_VEHICLE_EVOLUTION_PLAN.md`; migration 37, recuperação ao vivo e invariantes sem duplicidade confirmadas |
+| Demonstração de Mesa de Análise | CONCLUÍDA: fixture isolada, controles desabilitados e sem vínculo com candidatura real | Mesa privada, mensagem `1541248708203774013` |
+
+## Hotfix de Recrutamento e correção pré-rollout — 2026-08-23
+
+| Pedido | Estado verificado | Destino |
+|---|---|---|
+| Parar React #441 ao abrir/operar Recrutamento | CONCLUÍDO E VALIDADO: canonicalização HMAC, reautenticação OAuth e ações autenticadas sem boundary React | Vercel em produção |
+| Manter step-up, sem enfraquecer a segurança | CONCLUÍDO no código/publicação: janela de 30 min preservada | item ativo de QA |
+| Não publicar bot/API com migration falha | CONCLUÍDO: runner aplica versões ausentes e a regressão continuou verde até a migration 39 e 433 testes | app combinado Discloud |
 
 ## Auditoria complementar da conversa — 2026-08-23
 
@@ -14,8 +161,8 @@ somente mencionados ou resumidos genericamente. A fila detalhada está nos itens
 | Gestão site ↔ Discord de qualificações | CONCLUÍDO e publicado | item 34 |
 | Recrutas e Gestão de Carreira sem conteúdo útil | CONCLUÍDO e publicado | item 35 |
 | Redesign autoral do recrutamento | CONCLUÍDO e validado responsivamente | item 36 |
-| Robô Analista | IMPLEMENTADO, DESATIVADO sem provider | item 37 |
-| Domínio/subdomínio sem marca Vercel | NÃO EXECUTADO; depende de escolha | item 38 |
+| Robô Analista | CONCLUÍDO E ATIVO: motor local determinístico, sem provider externo e com decisão humana | item 37 |
+| Domínio/subdomínio sem marca Vercel | CONCLUÍDO: `choquebgr.online`, `www`, TLS, rotas e `/discord` validados | item 38 |
 | Medalhas apagadas intencionalmente | CONCLUÍDO; módulo e recriação estrutural desabilitados | item 39 |
 | Compactação detalhada do servidor | ADIADA; plano preservado | item 40 |
 | Rotação de segredos/menor privilégio | PENDÊNCIA externa obrigatória | item 41 |
@@ -143,7 +290,7 @@ para a decisão arquitetural do Programa Web.
 | Handoff vivo atualizado a cada fase | ATIVO | `PROJECT_HANDOFF.md`, `source-prompts/07-*` |
 | Centro de Comando Web com Lovable | IMPLEMENTADO localmente; rollout externo não provisionado | `docs/COMMAND_CENTER_WEB_SPEC.md`, `source-prompts/09-*` |
 | Recrutamento, alistamento e integridade | IMPLEMENTADO localmente e validado na migration v17; campanha permanece DRAFT | `docs/RECRUITMENT_INTEGRITY_SYSTEM_SPEC.md`, `source-prompts/11-*` |
-| Robô Analista de candidaturas | IMPLEMENTADO localmente na migration v18; provider desativado e sem envio de dados reais | `docs/RECRUITMENT_AI_ANALYST_SPEC.md`, `source-prompts/12-*`, `choque/recruitment_analysis.py` |
+| Robô Analista de candidaturas | CONCLUÍDO EM PRODUÇÃO: regras locais determinísticas, resumo/evidências/entrevista, sem decisão automática nem envio a terceiros | `docs/RECRUITMENT_AI_ANALYST_SPEC.md`, `source-prompts/12-*`, `choque/recruitment_analysis.py` |
 | Security Hardening completo | IMPLEMENTADO localmente; gate público FAIL por pendências externas registradas | `SECURITY.md`, `docs/SECURITY_CONTROL_MATRIX.md`, `source-prompts/10-*` |
 | Separador `U+3164` em nomes de canais | SUPERADO pela decisão visual posterior: API remove U+3164/U+2800; formatador legado preservado só para rollback e Small Caps usa hífen | `docs/CHANNEL_NAMING_STANDARD.md`, `scripts/probe_channel_separators.py` |
 | Comandante automático de patrulha | IMPLEMENTADO e validado na migration v20/Fase 16 | `docs/PATROL_COMMANDER_SPEC.md`, `source-prompts/13-*` |
@@ -156,8 +303,8 @@ para a decisão arquitetural do Programa Web.
 | Permissões de visitantes por registry | IMPLEMENTADO e validado com conta real sem cargos | `choque/visitor_access.py`, `scripts/enforce_visitor_permissions.py` |
 | Sala privada por ticket e arquivo | IMPLEMENTADO e validado pela API Discord | `choque/tickets.py`, `cogs/ticket_commands.py`, `scripts/validate_live_ticket_rooms.py` |
 | Arquivo de cadastros analisados | IMPLEMENTADO e validado no registry/DB/API | `choque/members.py`, `cogs/member_commands.py`, `scripts/validate_live_application_archive.py` |
-| Encaminhamento da Portaria para recrutador/Comando | IMPLEMENTADO localmente na migration v23; rollout real pendente | `choque/registration_gate.py`, `cogs/registration_gate_system.py`, `cogs/member_commands.py` |
-| Restaurar apelido anterior no desligamento | IMPLEMENTADO localmente na migration v23; rollout real pendente | `choque/rank_sync.py`, `cogs/member_sync.py`, `cogs/personnel_commands.py` |
+| Encaminhamento da Portaria para recrutador/Comando | CONCLUÍDO EM PRODUÇÃO; ficha de revisão persistente e limpeza somente após decisão humana | `choque/registration_gate.py`, `cogs/registration_gate_system.py`, `cogs/member_commands.py` |
+| Restaurar apelido anterior no desligamento | CONCLUÍDO E VALIDADO EM PRODUÇÃO; exoneração preserva o usuário, remove cargos gerenciados e restaura nome seguro | `choque/rank_sync.py`, `cogs/member_sync.py`, `cogs/personnel_commands.py` |
 | Lote visual cadastro/ponto/medalhas/parcerias | IMPLEMENTADO e validado pela API | `cogs/member_commands.py`, `cogs/shift_commands.py`, `cogs/medals_system.py`, `cogs/ticket_commands.py` |
 | Piloto Small Caps e migração visual global | IMPLEMENTADO e validado ao vivo; item 25 concluído | `docs/CHANNEL_NAMING_STANDARD.md`, `docs/PHASE_QUEUE.md` |
 | Gerenciador completo de cadastros para o Alto Comando | CONCLUÍDO; item 26 da fila | `docs/PHASE_QUEUE.md` |
@@ -178,8 +325,10 @@ para a decisão arquitetural do Programa Web.
   entrega no canal administrativo pelo outbox. O registro de QA foi retirado depois da entrega.
 - O teste encontrou o uso do atributo legado `branding.footer_text`; o hotfix usa a propriedade
   central `branding.footer`, possui teste de regressão e já está ativo na Discloud.
-- O Robô Analista permanece bloqueado somente pela ausência de provider/credencial no runtime. A
-  decisão humana e todo o recrutamento básico continuam operacionais sem classificação fabricada.
+- O Robô Analista não depende mais de provider ou credencial externos. Após a Central de Tags, a
+  evolução começa pelo motor determinístico local; o possível assistente Qwen local é somente um
+  spike isolado e opcional, sem autoridade para aprovar/reprovar. A decisão humana e o recrutamento
+  básico continuam operacionais sem classificação fabricada.
 
 ## Entrada pública simplificada — 2026-08-23
 

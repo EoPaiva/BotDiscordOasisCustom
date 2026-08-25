@@ -60,6 +60,72 @@ def plain(value: Any) -> Any:
     return value
 
 
+def qualification_matrix_payload(value: Any) -> dict[str, object]:
+    """Build the browser contract without lossy JavaScript snowflake numbers.
+
+    Discord resource IDs routinely exceed ``Number.MAX_SAFE_INTEGER``.  The
+    operations service deliberately keeps native integers for Discord cogs and
+    database calls, while this API boundary emits every snowflake exposed by
+    the qualifications matrix as a decimal string.
+    """
+
+    payload = plain(value)
+    if not isinstance(payload, dict):
+        return {"courses": [], "members": []}
+
+    def decimal_snowflake(item: object) -> str | None:
+        return None if item is None else str(int(item))
+
+    courses = payload.get("courses")
+    if isinstance(courses, list):
+        for course in courses:
+            if isinstance(course, dict) and "course_role_id" in course:
+                course["course_role_id"] = decimal_snowflake(course["course_role_id"])
+
+    members = payload.get("members")
+    if isinstance(members, list):
+        for entry in members:
+            if not isinstance(entry, dict):
+                continue
+            member = entry.get("member")
+            if isinstance(member, dict) and "discord_id" in member:
+                member["discord_id"] = decimal_snowflake(member["discord_id"])
+            qualifications = entry.get("courses")
+            if not isinstance(qualifications, dict):
+                continue
+            for qualification in qualifications.values():
+                if isinstance(qualification, dict) and qualification.get("actor_id") is not None:
+                    qualification["actor_id"] = decimal_snowflake(qualification["actor_id"])
+
+    return payload
+
+
+def officer_payload(value: Any) -> Any:
+    """Keep Discord snowflakes lossless at the browser boundary."""
+
+    snowflake_keys = {
+        "discord_id",
+        "assigned_to",
+        "reviewed_by",
+        "actor_id",
+        "interviewer_id",
+        "responsible_id",
+    }
+    if hasattr(value, "keys"):
+        value = {key: value[key] for key in value.keys()}
+    if isinstance(value, Mapping):
+        result: dict[str, object] = {}
+        for key, item in value.items():
+            if key in snowflake_keys and item is not None:
+                result[str(key)] = str(int(item))
+            else:
+                result[str(key)] = officer_payload(item)
+        return result
+    if isinstance(value, list | tuple):
+        return [officer_payload(item) for item in value]
+    return value
+
+
 def _job_with_observability(value: Any, *, observed_at: int) -> dict[str, object]:
     payload = plain(value) if value is not None else {}
     if not isinstance(payload, dict):
@@ -304,6 +370,9 @@ class RankChangeBody(StrictBody):
     target_rank_id: int
     action: str
     reason: str = Field(min_length=3, max_length=500)
+    evidence_locator: str | None = Field(default=None, max_length=1000)
+    observations: str | None = Field(default=None, max_length=2000)
+    article_code: str | None = Field(default=None, max_length=100)
 
 
 class MaintenanceBody(StrictBody):
@@ -563,6 +632,29 @@ class SecuritySessionRevocationBody(StrictBody):
     discord_id: int | None = Field(default=None, gt=0)
     reason: str = Field(min_length=10, max_length=500)
     confirmation: str = Field(min_length=7, max_length=20)
+
+
+class OfficerAnswerBody(StrictBody):
+    answer: str = Field(min_length=20, max_length=4000)
+
+
+class OfficerDecisionBody(StrictBody):
+    decision: str = Field(min_length=8, max_length=30)
+    reason: str = Field(min_length=10, max_length=2000)
+    condition_text: str | None = Field(default=None, max_length=2000)
+    condition_due_at: int | None = None
+
+
+class OfficerInterviewBody(StrictBody):
+    scheduled_at: int | None = None
+    result: str = Field(default="PENDING", max_length=20)
+    observations: str | None = Field(default=None, max_length=4000)
+
+
+class OfficerScoreBody(StrictBody):
+    question_id: int = Field(gt=0)
+    score: int = Field(ge=1, le=10)
+    rationale: str = Field(min_length=5, max_length=2000)
 
 
 @app.exception_handler(ChoqueError)
@@ -953,6 +1045,193 @@ async def career_overview(request: Request, actor: Actor) -> Any:
     return plain(await request.app.state.services.operations.career_overview(actor.guild_id))
 
 
+async def _require_officer_candidate(request: Request, candidate: CandidateIdentity):
+    access = await request.app.state.services.permissions.resolve_member_access(
+        candidate.guild_id, candidate.discord_id
+    )
+    if access is None or not access.can("officer.apply"):
+        raise HTTPException(403, "Candidatura ao oficialato restrita ao efetivo elegível.")
+    return access
+
+
+@app.get("/v1/officer-candidacy/questionnaire")
+async def officer_questionnaire(request: Request, candidate: Candidate) -> Any:
+    await _require_officer_candidate(request, candidate)
+    await request.app.state.services.career.ensure_officer_questionnaire(
+        candidate.guild_id, actor_id=None
+    )
+    return officer_payload(
+        await request.app.state.services.career.officer_questionnaire(candidate.guild_id)
+    )
+
+
+@app.get("/v1/officer-candidacy/eligibility")
+async def officer_eligibility(request: Request, candidate: Candidate) -> Any:
+    await _require_officer_candidate(request, candidate)
+    return officer_payload(
+        await request.app.state.services.career.officer_eligibility(
+            candidate.guild_id, candidate.discord_id
+        )
+    )
+
+
+@app.get("/v1/officer-candidacy/application")
+async def current_officer_application(request: Request, candidate: Candidate) -> Any:
+    await _require_officer_candidate(request, candidate)
+    return officer_payload(
+        await request.app.state.services.career.current_officer_application(
+            candidate.guild_id, candidate.discord_id
+        )
+    )
+
+
+@app.post("/v1/officer-candidacy/application")
+async def start_officer_application(request: Request, candidate: Candidate) -> Any:
+    await _require_officer_candidate(request, candidate)
+    return officer_payload(
+        await request.app.state.services.career.start_officer_application(
+            candidate.guild_id, candidate.discord_id
+        )
+    )
+
+
+@app.put("/v1/officer-candidacy/applications/{application_id}/answers/{question_id}")
+async def save_officer_answer(
+    request: Request,
+    application_id: int,
+    question_id: int,
+    body: OfficerAnswerBody,
+    candidate: Candidate,
+) -> Any:
+    await _require_officer_candidate(request, candidate)
+    return officer_payload(
+        await request.app.state.services.career.save_officer_answer(
+            candidate.guild_id,
+            application_id,
+            candidate.discord_id,
+            question_id,
+            body.answer,
+        )
+    )
+
+
+@app.post("/v1/officer-candidacy/applications/{application_id}/submit")
+async def submit_officer_application(
+    request: Request, application_id: int, candidate: Candidate
+) -> Any:
+    await _require_officer_candidate(request, candidate)
+    submitted = await request.app.state.services.career.submit_officer_application(
+        candidate.guild_id, application_id, candidate.discord_id
+    )
+    # The local analysis is advisory material for the human review team. The
+    # candidate receives only the durable submission state, never internal
+    # scores, flags or recommendations.
+    return officer_payload({"id": submitted["id"], "status": submitted["status"]})
+
+
+@app.get("/v1/officer-applications")
+async def officer_application_queue(
+    request: Request,
+    actor: Actor,
+    status: str | None = Query(default=None, max_length=30),
+    assigned_to: int | None = Query(default=None, gt=0),
+) -> Any:
+    require_permission(actor, "officer.review")
+    return officer_payload(
+        await request.app.state.services.career.officer_queue(
+            actor.guild_id, status=status, assigned_to=assigned_to
+        )
+    )
+
+
+@app.get("/v1/officer-applications/{application_id}")
+async def officer_application_detail(
+    request: Request, application_id: int, actor: Actor
+) -> Any:
+    require_permission(actor, "officer.review")
+    return officer_payload(
+        await request.app.state.services.career.officer_application_detail(
+            actor.guild_id,
+            application_id,
+            viewer_id=actor.discord_id,
+            reviewer=True,
+        )
+    )
+
+
+@app.post("/v1/officer-applications/{application_id}/claim")
+async def claim_officer_application(
+    request: Request, application_id: int, actor: Actor
+) -> Any:
+    require_permission(actor, "officer.assign")
+    return officer_payload(
+        await request.app.state.services.career.claim_officer_application(
+            actor.guild_id, application_id, actor.discord_id
+        )
+    )
+
+
+@app.post("/v1/officer-applications/{application_id}/scores")
+async def score_officer_application(
+    request: Request,
+    application_id: int,
+    body: OfficerScoreBody,
+    actor: Actor,
+) -> Any:
+    require_permission(actor, "officer.evaluate")
+    return officer_payload(
+        await request.app.state.services.career.record_officer_score(
+            actor.guild_id,
+            application_id,
+            actor.discord_id,
+            question_id=body.question_id,
+            score=body.score,
+            rationale=body.rationale,
+        )
+    )
+
+
+@app.post("/v1/officer-applications/{application_id}/interviews")
+async def interview_officer_application(
+    request: Request,
+    application_id: int,
+    body: OfficerInterviewBody,
+    actor: Actor,
+) -> Any:
+    require_permission(actor, "officer.interview")
+    return officer_payload(
+        await request.app.state.services.career.record_officer_interview(
+            actor.guild_id,
+            application_id,
+            actor.discord_id,
+            scheduled_at=body.scheduled_at,
+            result=body.result,
+            observations=body.observations,
+        )
+    )
+
+
+@app.post("/v1/officer-applications/{application_id}/decision")
+async def decide_officer_application(
+    request: Request,
+    application_id: int,
+    body: OfficerDecisionBody,
+    actor: Actor,
+) -> Any:
+    require_permission(actor, "officer.decide")
+    return officer_payload(
+        await request.app.state.services.career.decide_officer_application(
+            actor.guild_id,
+            application_id,
+            actor.discord_id,
+            decision=body.decision,
+            reason=body.reason,
+            condition_text=body.condition_text,
+            condition_due_at=body.condition_due_at,
+        )
+    )
+
+
 @app.post("/v1/members/{discord_id}/rank")
 async def change_rank(
     request: Request,
@@ -973,6 +1252,9 @@ async def change_rank(
         actor.discord_id,
         body.reason,
         enqueue_discord_sync=True,
+        evidence_locator=body.evidence_locator,
+        observations=body.observations,
+        article_code=body.article_code,
     )
     correlation_id = result.pop("sync_correlation_id")
     return plain(
@@ -1945,7 +2227,7 @@ async def discord_identity_reconciliation(
 async def qualifications(request: Request, actor: Actor) -> Any:
     require_permission(actor, "qualification.view.all")
     result = await request.app.state.services.operations.qualification_matrix(actor.guild_id)
-    return plain(result)
+    return qualification_matrix_payload(result)
 
 
 @app.post("/v1/qualifications/manage")
@@ -2592,13 +2874,23 @@ async def settings(request: Request, actor: Actor) -> Any:
         ),
     )
     stored = {str(row["setting_key"]): row for row in rows}
+    protected_setting_keys = {
+        "financial_pix_key",
+        "financial_pix_key_fingerprint",
+    }
     decoded = []
     for key, default in services.settings.DEFAULTS.items():
         row = stored.get(key)
+        value = json.loads(row["value_json"]) if row else default
+        # The generic administrative settings endpoint must never become a
+        # second secret-management surface. PIX configuration is handled by
+        # the elevated financial panel, which returns only a masked status.
+        if key in protected_setting_keys:
+            value = {"configured": bool(value)}
         decoded.append(
             {
                 "setting_key": key,
-                "value": json.loads(row["value_json"]) if row else default,
+                "value": value,
                 "updated_at": row["updated_at"] if row else None,
                 "updated_by": row["updated_by"] if row else None,
                 "source": "DATABASE" if row else "DEFAULT",
@@ -3201,11 +3493,12 @@ async def recruitment_admin_applications(
     actor: Actor,
     status_filter: str | None = Query(default=None, alias="status"),
     search: str = Query(default="", max_length=100),
+    assigned_to: int | None = Query(default=None, ge=1),
 ) -> Any:
     require_permission(actor, "recruitment.view")
     applications, statistics = await asyncio.gather(
         request.app.state.services.recruitment.list_applications(
-            actor.guild_id, status=status_filter, search=search
+            actor.guild_id, status=status_filter, search=search, assigned_to=assigned_to
         ),
         request.app.state.services.recruitment.statistics(actor.guild_id),
     )

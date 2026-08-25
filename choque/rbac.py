@@ -29,6 +29,19 @@ _MEMBER_PERMISSIONS = {
     "qualification.view.self",
     "swap.request",
     "swap.respond",
+    "tag.request",
+    "tag.view.self",
+    "tag.confirm.self",
+    "tag.report_missing",
+    "merit.view.self",
+    "officer.apply",
+    "officer.view.self",
+    "financial.view.public",
+    "financial.contribute",
+    "financial.sponsor",
+    "financial.suggest",
+    "financial.honor.view.self",
+    "financial.certificate.view.self",
 }
 _GRADUATE_PERMISSIONS = {
     "shift.view.all",
@@ -63,6 +76,8 @@ _COMMAND_PERMISSIONS = {
     "punishment.manage",
     "request.review",
     "career.manage",
+    "career.progression.manage",
+    "merit.manage",
     "discipline.manage",
     "activity.manage",
     "reports.view",
@@ -105,6 +120,26 @@ _COMMAND_PERMISSIONS = {
     "registration.manage",
     "registration.settings",
     "registration.bypass.manage",
+    "tag.queue.view",
+    "tag.claim",
+    "tag.release",
+    "tag.set",
+    "tag.call",
+    "tag.pendency",
+    "status.manage",
+    "status.view.details",
+    "officer.review",
+    "officer.assign",
+    "officer.evaluate",
+    "officer.interview",
+    "officer.decide",
+    "financial.contribution.review",
+    "financial.project.manage",
+    "financial.expense.record",
+    "financial.suggestion.review",
+    "financial.honor.grant",
+    "financial.certificate.issue",
+    "financial.panel.manage",
 }
 _HIGH_COMMAND_PERMISSIONS = {
     "settings.manage",
@@ -113,6 +148,25 @@ _HIGH_COMMAND_PERMISSIONS = {
     "audit.read",
     "registration.directory.manage",
     "qualification.manage",
+    "tag.identity.correct",
+    "tag.reject",
+    "tag.cancel",
+    "tag.history.view",
+    "tag.settings",
+    "officer.settings",
+    "financial.settings",
+    "financial.audit.view",
+    "financial.honor.remove",
+    "financial.contribution.reverse",
+    "financial.expense.reverse",
+}
+
+_OFFICER_REVIEWER_PERMISSIONS = {
+    "officer.review",
+    "officer.assign",
+    "officer.evaluate",
+    "officer.interview",
+    "officer.decide",
 }
 
 
@@ -137,6 +191,9 @@ PROFILE_PERMISSIONS: dict[str, frozenset[str]] = {
         | _INSTRUCTOR_PERMISSIONS
         | _COMMAND_PERMISSIONS
         | _HIGH_COMMAND_PERMISSIONS
+    ),
+    RbacProfile.OFFICER_REVIEWER.value: frozenset(
+        _OFFICER_REVIEWER_PERMISSIONS
     ),
     RbacProfile.ADMIN.value: frozenset({"*"}),
 }

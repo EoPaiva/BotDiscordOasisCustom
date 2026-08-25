@@ -1,16 +1,16 @@
 # Auditoria de rotas de interação
 
-Data: 2026-08-22
+Data: 2026-08-24
 
 ## Resultado
 
-- 20 módulos Discord analisados por AST.
-- 229 classes de interface (`View`, `Select` e `Modal`).
-- 331 componentes interativos.
-- 87 `custom_id` explícitos, sem duplicidade.
+- 22 módulos Discord analisados por AST.
+- 279 classes de interface (`View`, `Select` e `Modal`).
+- 390 componentes interativos.
+- 107 `custom_id` explícitos, sem duplicidade.
 - zero callbacks ausentes.
 - zero classes de interface ativas sem referência.
-- 22 views persistentes carregadas em `main.py --check`, além das views de eventos restauradas por
+- 25 views persistentes carregadas em `main.py --check`, além das views de eventos restauradas por
   `message_id`.
 
 `AbsencePanelView` e `AbsenceListView` permanecem preservadas como implementação aposentada. Elas
@@ -32,6 +32,10 @@ criaria duas autoridades para o mesmo processo.
 | Atividade | `ActivityPanelView` | Central do Membro | membro | atividade, quadro e histórico |
 | Operações | `PatrolCentralView` | Patrulhas | membro elegível | fila, prontidão e patrulha |
 | Pós-patrulha | `PatrolReportView` | Patrulhas | participante | última patrulha e avaliação |
+| Central de Tags | `TagMemberPanelView` | Identidade | membro cadastrado | solicitar tag, consultar pedido e declarar tag existente para revisão |
+| Gestão de Tags | `TagAdminPanelView` | Administração | responsáveis configurados | fila, atendimento, confirmação, pendência, histórico e configuração |
+| Status público | `PublicStatusPanelView` | Status do Bot | leitura pública controlada | situação geral, detalhes e atualização da mesma mensagem |
+| Status administrativo | `AdminStatusPanelView` | Administração | `status.manage` | manutenção, instabilidade, indisponibilidade e normalização auditadas |
 | Treinamentos | `TrainingPanelView` | Cursos | membro | eventos, inscrições e qualificações |
 | Cursos | `CourseCatalogView` | Cursos | requisitos server-side | candidatura por curso |
 | Tickets | `TicketPanelView` | Ticket | público controlado | candidatura, transferência, denúncia e outro assunto |

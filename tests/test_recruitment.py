@@ -2,16 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 
+import discord
 import pytest
 import pytest_asyncio
 
+import choque.web_outbox as web_outbox_module
 from choque.audit import AuditService
 from choque.config import Branding
 from choque.database import Database
 from choque.errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
 from choque.recruitment import DEFAULT_QUESTIONS, GROUPS, RecruitmentService
-from choque.web_outbox import WebActionWorker
+from choque.registration_gate import RegistrationGateService
+from choque.settings import SettingsService
+from choque.web_outbox import (
+    WebActionWorker,
+    build_recruitment_review_embed,
+    build_recruitment_review_view,
+)
 from tests.conftest import MutableClock
 
 GUILD_ID = 331
@@ -71,7 +80,7 @@ async def recruitment_bundle(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_migration_27_aligns_existing_campaign_age_and_audits(tmp_path) -> None:
+async def test_migration_27_aligns_existing_campaign_age_and_audits_with_later_version_present(tmp_path) -> None:
     path = tmp_path / "recruitment-v26.db"
     database = Database(path)
     await database.open()
@@ -89,6 +98,8 @@ async def test_migration_27_aligns_existing_campaign_age_and_audits(tmp_path) ->
         (int(campaign["id"]),),
     )
     await database.execute("DELETE FROM schema_migrations WHERE version=27")
+    later = await database.fetchone("SELECT 1 FROM schema_migrations WHERE version=28")
+    assert later is not None
     await database.close()
 
     migrated = Database(path)
@@ -457,6 +468,61 @@ async def test_submission_assignment_and_human_approval_are_atomic_and_idempoten
 
 
 @pytest.mark.asyncio
+async def test_approved_recruit_can_start_one_portaria_registration_without_duplicate_member(
+    recruitment_bundle,
+) -> None:
+    service = recruitment_bundle["service"]
+    database = recruitment_bundle["database"]
+    application = await _start(service)
+    await database.execute(
+        """
+        UPDATE recruitment_application_questions
+        SET status='SUBMITTED', final_answer_json='\"Resposta de teste\"', submitted_at=?
+        WHERE application_id=?
+        """,
+        (recruitment_bundle["clock"](), application["id"]),
+    )
+    await service.submit_application(GUILD_ID, CANDIDATE_ID, int(application["id"]), 1)
+    assigned = await service.assign(GUILD_ID, int(application["id"]), ADMIN_ID, 2)
+    await service.decide(
+        GUILD_ID,
+        int(application["id"]),
+        ADMIN_ID,
+        int(assigned["version"]),
+        approved=True,
+        internal_reason="Aprovado para a identificação da Portaria",
+        candidate_message="Candidatura aprovada.",
+    )
+
+    settings = SettingsService(database)
+    await settings.set(GUILD_ID, "registration_gate_enabled", True, ADMIN_ID)
+    gate = RegistrationGateService(database, settings, recruitment_bundle["audit"])
+
+    intent = await gate.registration_intent(GUILD_ID, CANDIDATE_ID)
+    assert (intent["mode"], intent["kind"]) == ("FORM", "APPROVED_RECRUITMENT")
+
+    submitted = await gate.submit(
+        GUILD_ID,
+        CANDIDATE_ID,
+        mta_nick=f"Candidato_{CANDIDATE_ID}",
+        bgr_id="1842",
+    )
+    assert submitted["status"] == "REQUIRES_REVIEW"
+    assert submitted["member_id"] is not None
+
+    repeated_intent = await gate.registration_intent(GUILD_ID, CANDIDATE_ID)
+    assert (repeated_intent["mode"], repeated_intent["kind"]) == (
+        "STATUS",
+        "REQUIRES_REVIEW",
+    )
+    count = await database.fetchone(
+        "SELECT COUNT(*) AS total FROM members WHERE guild_id=? AND discord_id=?",
+        (GUILD_ID, CANDIDATE_ID),
+    )
+    assert int(count["total"]) == 1
+
+
+@pytest.mark.asyncio
 async def test_candidate_cannot_review_own_application(recruitment_bundle) -> None:
     service = recruitment_bundle["service"]
     database = recruitment_bundle["database"]
@@ -490,6 +556,410 @@ async def test_rejection_creates_cooldown_and_blocks_reapplication(recruitment_b
     assert rejected["status"] == "REJECTED"
     eligibility = await service.eligibility(GUILD_ID, CANDIDATE_ID)
     assert "COOLDOWN_ACTIVE" in eligibility["reasons"]
+
+
+@pytest.mark.asyncio
+async def test_discord_decision_preserves_origin_correlation_and_one_review_card_refresh(
+    recruitment_bundle,
+) -> None:
+    """Discord and web share the same decision service and durable state transition."""
+    service = recruitment_bundle["service"]
+    database = recruitment_bundle["database"]
+    application = await _start(service)
+    await database.execute(
+        "UPDATE recruitment_applications SET status='UNDER_REVIEW' WHERE id=?",
+        (application["id"],),
+    )
+
+    decided = await service.decide(
+        GUILD_ID,
+        int(application["id"]),
+        ADMIN_ID,
+        int(application["version"]),
+        approved=False,
+        internal_reason="Conhecimento operacional ainda insuficiente.",
+        candidate_message="Revise os requisitos e tente novamente no próximo período.",
+        origin="DISCORD",
+        correlation_id="discord-decision-test",
+    )
+    assert decided["status"] == "REJECTED"
+    history = await database.fetchone(
+        """
+        SELECT metadata_json FROM recruitment_history
+        WHERE application_id=? AND event_type='APPLICATION_REJECTED'
+        ORDER BY id DESC LIMIT 1
+        """,
+        (application["id"],),
+    )
+    assert json.loads(history["metadata_json"]) == {
+        "origin": "DISCORD",
+        "correlation_id": "discord-decision-test",
+    }
+    audit = await database.fetchone(
+        "SELECT correlation_id, after_json FROM audit_logs WHERE correlation_id=?",
+        ("discord-decision-test",),
+    )
+    assert audit["correlation_id"] == "discord-decision-test"
+    assert json.loads(audit["after_json"])["origin"] == "DISCORD"
+    refreshes = await database.fetchall(
+        """
+        SELECT event_key FROM recruitment_notification_outbox
+        WHERE application_id=? AND event_type='RECRUITMENT_REVIEW_CARD_REFRESH'
+        """,
+        (application["id"],),
+    )
+    assert [row["event_key"] for row in refreshes] == [
+        f"application-review-card:{application['id']}:v2"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_repeated_same_discord_decision_is_idempotent_and_opposite_is_rejected(
+    recruitment_bundle,
+) -> None:
+    service = recruitment_bundle["service"]
+    database = recruitment_bundle["database"]
+    application = await _start(service)
+    await database.execute(
+        "UPDATE recruitment_applications SET status='UNDER_REVIEW' WHERE id=?",
+        (application["id"],),
+    )
+    args = dict(
+        approved=False,
+        internal_reason="Avaliação insuficiente.",
+        candidate_message="Revise o conteúdo e tente novamente.",
+        origin="DISCORD",
+    )
+    first, repeated = await asyncio.gather(
+        service.decide(GUILD_ID, int(application["id"]), ADMIN_ID, 1, **args),
+        service.decide(GUILD_ID, int(application["id"]), ADMIN_ID, 1, **args),
+    )
+    assert first["status"] == repeated["status"] == "REJECTED"
+    cooldowns = await database.fetchone(
+        "SELECT COUNT(*) AS total FROM recruitment_cooldowns WHERE application_id=?",
+        (application["id"],),
+    )
+    assert int(cooldowns["total"]) == 1
+    with pytest.raises(ConflictError, match="decisão final diferente"):
+        await service.decide(
+            GUILD_ID,
+            int(application["id"]),
+            ADMIN_ID,
+            int(repeated["version"]),
+            approved=True,
+            internal_reason="Tentativa de decisão incompatível.",
+            candidate_message="Não deve ser enviada.",
+            origin="DISCORD",
+        )
+
+
+@pytest.mark.asyncio
+async def test_review_card_refresh_edits_the_original_message_without_sending_another(
+    recruitment_bundle, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Settings:
+        async def get(self, guild_id: int, key: str, default=None):
+            assert guild_id == GUILD_ID
+            return "https://portal.example/recrutamento" if key == "recruitment_public_url" else default
+
+    class Message:
+        id = 82
+
+        def __init__(self) -> None:
+            self.edits: list[dict[str, object]] = []
+
+        async def edit(self, **kwargs) -> None:
+            self.edits.append(kwargs)
+
+    class Channel:
+        id = 81
+
+        def __init__(self, message: Message) -> None:
+            self.message = message
+
+        async def fetch_message(self, message_id: int) -> Message:
+            assert message_id == self.message.id
+            return self.message
+
+    class Bot:
+        def __init__(self, channel: Channel) -> None:
+            self.channel = channel
+            self.config = SimpleNamespace(branding=Branding())
+
+        def get_channel(self, channel_id: int):
+            return self.channel if channel_id == self.channel.id else None
+
+    application = await _start(recruitment_bundle["service"])
+    await recruitment_bundle["database"].execute(
+        """
+        INSERT INTO recruitment_notification_outbox(
+            guild_id, application_id, event_type, event_key, payload_json, status,
+            available_at, created_at, processed_at, delivery_channel_id, delivery_message_id
+        ) VALUES (?, ?, 'RECRUITMENT_APPLICATION_SUBMITTED', ?, '{}', 'COMPLETED', ?, ?, ?, ?, ?)
+        """,
+        (
+            GUILD_ID,
+            application["id"],
+            f"application-submitted:{application['id']}",
+            recruitment_bundle["clock"](),
+            recruitment_bundle["clock"](),
+            recruitment_bundle["clock"](),
+            81,
+            82,
+        ),
+    )
+    message = Message()
+    channel = Channel(message)
+    monkeypatch.setattr(web_outbox_module.discord, "TextChannel", Channel)
+    worker = WebActionWorker(
+        recruitment_bundle["database"],
+        None,
+        SimpleNamespace(settings=Settings()),
+        Bot(channel),
+    )
+    delivery = await worker._refresh_recruitment_review_card(
+        {"guild_id": GUILD_ID},
+        {**application, "status": "UNDER_REVIEW", "assigned_to": ADMIN_ID},
+    )
+    assert delivery == (81, 82)
+    assert len(message.edits) == 1
+    assert message.edits[0]["view"] is not None
+    assert "EM ANÁLISE" in message.edits[0]["embed"].title
+
+
+@pytest.mark.asyncio
+async def test_review_card_refresh_without_original_card_finishes_without_duplication(
+    recruitment_bundle,
+) -> None:
+    """A legacy follow-up must not recreate a deleted or never-published card."""
+    application = await _start(recruitment_bundle["service"])
+    worker = WebActionWorker(
+        recruitment_bundle["database"],
+        None,
+        SimpleNamespace(settings=None),
+        None,
+    )
+
+    delivery = await worker._refresh_recruitment_review_card(
+        {"id": 999, "guild_id": GUILD_ID},
+        application,
+    )
+
+    assert delivery == (None, None)
+    rows = await recruitment_bundle["database"].fetchall(
+        "SELECT * FROM recruitment_notification_outbox WHERE application_id=?",
+        (application["id"],),
+    )
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_review_card_refresh_dispatch_converts_database_row_to_mapping(
+    recruitment_bundle, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Durable outbox rows must use the same renderer as direct Discord decisions."""
+    class Settings:
+        async def get(self, guild_id: int, key: str, default=None):
+            assert guild_id == GUILD_ID
+            return "https://portal.example/recrutamento" if key == "recruitment_public_url" else default
+
+    class Message:
+        id = 82
+
+        def __init__(self) -> None:
+            self.edits: list[dict[str, object]] = []
+
+        async def edit(self, **kwargs) -> None:
+            self.edits.append(kwargs)
+
+    class Channel:
+        id = 81
+
+        def __init__(self, message: Message) -> None:
+            self.message = message
+
+        async def fetch_message(self, message_id: int) -> Message:
+            assert message_id == self.message.id
+            return self.message
+
+    class Bot:
+        def __init__(self, channel: Channel) -> None:
+            self.channel = channel
+            self.config = SimpleNamespace(branding=Branding())
+
+        def get_channel(self, channel_id: int):
+            return self.channel if channel_id == self.channel.id else None
+
+        def get_guild(self, guild_id: int):
+            return object() if guild_id == GUILD_ID else None
+
+    database = recruitment_bundle["database"]
+    clock = recruitment_bundle["clock"]
+    application = await _start(recruitment_bundle["service"])
+    await database.execute(
+        "UPDATE recruitment_applications SET status='UNDER_REVIEW', submitted_at=? WHERE id=?",
+        (clock(), application["id"]),
+    )
+    await database.execute(
+        """
+        INSERT INTO recruitment_notification_outbox(
+            guild_id, application_id, event_type, event_key, payload_json, status,
+            available_at, created_at, processed_at, delivery_channel_id, delivery_message_id
+        ) VALUES (?, ?, 'RECRUITMENT_APPLICATION_SUBMITTED', ?, '{}', 'COMPLETED', ?, ?, ?, ?, ?)
+        """,
+        (
+            GUILD_ID,
+            application["id"],
+            f"application-submitted:{application['id']}",
+            clock(),
+            clock(),
+            clock(),
+            81,
+            82,
+        ),
+    )
+    await database.execute(
+        """
+        INSERT INTO recruitment_notification_outbox(
+            guild_id, application_id, event_type, event_key, payload_json, available_at, created_at
+        ) VALUES (?, ?, 'RECRUITMENT_REVIEW_CARD_REFRESH', ?, '{}', ?, ?)
+        """,
+        (
+            GUILD_ID,
+            application["id"],
+            f"application-review-card:{application['id']}:v1",
+            clock(),
+            clock(),
+        ),
+    )
+    row = await database.fetchone(
+        "SELECT * FROM recruitment_notification_outbox WHERE event_type='RECRUITMENT_REVIEW_CARD_REFRESH'"
+    )
+    message = Message()
+    channel = Channel(message)
+    monkeypatch.setattr(web_outbox_module.discord, "TextChannel", Channel)
+    worker = WebActionWorker(
+        database,
+        None,
+        SimpleNamespace(settings=Settings()),
+        Bot(channel),
+    )
+
+    assert await worker._dispatch_recruitment(row) == (81, 82)
+    assert len(message.edits) == 1
+    assert "EM ANÁLISE" in message.edits[0]["embed"].title
+
+
+@pytest.mark.asyncio
+async def test_review_card_recovery_enqueues_one_in_place_refresh_per_version(
+    recruitment_bundle,
+) -> None:
+    """A restart updates the existing card, never sending a second one."""
+    database = recruitment_bundle["database"]
+    clock = recruitment_bundle["clock"]
+    application = await _start(recruitment_bundle["service"])
+    await database.execute(
+        """
+        UPDATE recruitment_applications
+        SET status='UNDER_REVIEW', submitted_at=?
+        WHERE id=?
+        """,
+        (clock(), application["id"]),
+    )
+    await database.execute(
+        """
+        INSERT INTO recruitment_notification_outbox(
+            guild_id, application_id, event_type, event_key, payload_json, status,
+            available_at, created_at, processed_at, delivery_channel_id, delivery_message_id
+        ) VALUES (?, ?, 'RECRUITMENT_APPLICATION_SUBMITTED', ?, '{}', 'COMPLETED', ?, ?, ?, ?, ?)
+        """,
+        (
+            GUILD_ID,
+            application["id"],
+            f"application-submitted:{application['id']}",
+            clock(),
+            clock(),
+            clock(),
+            81,
+            82,
+        ),
+    )
+    worker = WebActionWorker(database, None, SimpleNamespace(settings=None), object())  # type: ignore[arg-type]
+
+    assert await worker._enqueue_recruitment_review_card_refreshes(clock()) == 1
+    assert await worker._enqueue_recruitment_review_card_refreshes(clock()) == 0
+    refreshes = await database.fetchall(
+        """
+        SELECT event_type, event_key, status FROM recruitment_notification_outbox
+        WHERE application_id=? AND event_type='RECRUITMENT_REVIEW_CARD_REFRESH'
+        """,
+        (application["id"],),
+    )
+    assert [(row["event_type"], row["status"] ) for row in refreshes] == [
+        ("RECRUITMENT_REVIEW_CARD_REFRESH", "PENDING")
+    ]
+    assert refreshes[0]["event_key"] == f"application-review-card:{application['id']}:v1"
+
+
+@pytest.mark.asyncio
+async def test_recovery_review_card_refreshes_are_paced_without_delaying_new_actions(
+    recruitment_bundle, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = recruitment_bundle["database"]
+    application = await _start(recruitment_bundle["service"])
+    now = [1_000]
+    monkeypatch.setattr(web_outbox_module, "utc_now_ms", lambda: now[0])
+    insert_refresh = """
+        INSERT INTO recruitment_notification_outbox(
+            guild_id, application_id, event_type, event_key, payload_json, available_at, created_at
+        ) VALUES (?, ?, 'RECRUITMENT_REVIEW_CARD_REFRESH', ?, ?, ?, ?)
+        """
+    for event_key in (
+        "application-review-card:recovery-a",
+        "application-review-card:recovery-b",
+    ):
+        await database.execute(
+            insert_refresh,
+            (GUILD_ID, application["id"], event_key, '{"recovery": true}', now[0], now[0]),
+        )
+    worker = WebActionWorker(database, None, SimpleNamespace(settings=None), object())  # type: ignore[arg-type]
+    dispatched: list[int] = []
+
+    async def dispatch(row):
+        dispatched.append(int(row["id"]))
+        return 81, 82
+
+    monkeypatch.setattr(worker, "_dispatch_recruitment", dispatch)
+    assert await worker.process_recruitment_pending() == 1
+    assert await worker.process_recruitment_pending() == 0
+    assert len(dispatched) == 1
+    now[0] += web_outbox_module.RECOVERY_REVIEW_CARD_REFRESH_INTERVAL_MS
+    assert await worker.process_recruitment_pending() == 1
+    assert len(dispatched) == 2
+
+
+@pytest.mark.asyncio
+async def test_review_card_has_direct_controls_and_final_state_disables_them() -> None:
+    pending = {"id": 91, "protocol": "AL-00091", "status": "UNDER_REVIEW"}
+    view = build_recruitment_review_view(pending, "https://portal.example/recrutamento")
+    controls = [item for item in view.children if isinstance(item, discord.ui.Button)]
+    assert [item.label for item in controls] == [
+        "Abrir dossiê",
+        "Adicionar nota",
+        "Entrevista",
+        "Decidir",
+        "Aprovar",
+        "Reprovar",
+    ]
+    assert [item.disabled for item in controls[-2:]] == [False, False]
+    final = {**pending, "status": "APPROVED", "decided_by": ADMIN_ID, "decided_at": 1_700_000_000_000}
+    final_view = build_recruitment_review_view(final, "https://portal.example/recrutamento")
+    final_controls = [item for item in final_view.children if isinstance(item, discord.ui.Button)]
+    assert [item.disabled for item in final_controls[:4]] == [False, True, True, True]
+    assert [item.disabled for item in final_controls[-2:]] == [True, True]
+    embed = build_recruitment_review_embed(Branding(), final)
+    assert "APROVADA" in embed.title
+    assert any(field.name == "Decidida por" for field in embed.fields)
 
 
 @pytest.mark.asyncio
@@ -799,6 +1269,55 @@ async def test_recruitment_notification_outbox_retries_without_new_event(
     assert (completed["delivery_channel_id"], completed["delivery_message_id"]) == (77, 88)
     assert int(total["total"]) == 2
     assert calls == 4
+
+
+@pytest.mark.asyncio
+async def test_recruitment_public_status_backlog_delivers_only_latest_card_state(
+    recruitment_bundle, monkeypatch
+) -> None:
+    """A recovered backlog must not PATCH one public Discord card repeatedly."""
+    database = recruitment_bundle["database"]
+    clock = recruitment_bundle["clock"]
+    application = await _start(recruitment_bundle["service"])
+    now = clock()
+    async with database.transaction() as connection:
+        await connection.executemany(
+            """
+            INSERT INTO recruitment_notification_outbox(
+                guild_id, application_id, event_type, event_key, payload_json,
+                available_at, created_at
+            ) VALUES (?, ?, 'RECRUITMENT_PUBLIC_STATUS', ?, '{}', ?, ?)
+            """,
+            (
+                (GUILD_ID, application["id"], "public-status:submitted", now, now),
+                (GUILD_ID, application["id"], "public-status:under-review", now, now),
+                (GUILD_ID, application["id"], "public-status:approved", now, now),
+            ),
+        )
+    worker = WebActionWorker(database, None, recruitment_bundle["audit"], object())  # type: ignore[arg-type]
+    delivered_ids: list[int] = []
+
+    async def dispatch(row):
+        delivered_ids.append(int(row["id"]))
+        return 77, 88
+
+    monkeypatch.setattr(worker, "_dispatch_recruitment", dispatch)
+
+    assert await worker.process_recruitment_pending() == 1
+    rows = await database.fetchall(
+        """
+        SELECT id, event_type, status, attempts, last_error FROM recruitment_notification_outbox
+        WHERE application_id=? ORDER BY id
+        """,
+        (application["id"],),
+    )
+    public_rows = [row for row in rows if row["event_type"] == "RECRUITMENT_PUBLIC_STATUS"]
+    assert len(public_rows) == 3
+    assert delivered_ids == [int(public_rows[-1]["id"])]
+    assert [int(row["attempts"]) for row in public_rows] == [0, 0, 1]
+    assert "Coalescida" in str(public_rows[0]["last_error"])
+    assert "Coalescida" in str(public_rows[1]["last_error"])
+    assert public_rows[-1]["last_error"] is None
 
 
 @pytest.mark.asyncio

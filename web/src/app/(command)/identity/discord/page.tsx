@@ -344,7 +344,7 @@ export default async function DiscordIdentityPage({
     {canReconcile && jobs.length > 0 && <section className="command-section discord-section">
       <SectionHeader index={canConfigure ? "05" : "03"} title="Execuções recentes" />
       <DataTable rows={jobs} columns={[
-        { key: "id", label: "JOB", render: (item) => <a className="text-link inline" href={`/discord?job=${String(item.id)}`}>#{String(item.id)}</a> },
+        { key: "id", label: "JOB", render: (item) => <a className="text-link inline" href={`/identity/discord?job=${String(item.id)}`}>#{String(item.id)}</a> },
         { key: "mode", label: "MODO", render: (item) => label(item.mode) },
         { key: "status", label: "STATUS", render: (item) => <Status value={item.status} /> },
         { key: "total_members", label: "PROCESSADOS" },

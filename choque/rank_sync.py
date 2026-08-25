@@ -1787,7 +1787,7 @@ class RankSyncService:
                     rank_event_type = "MISSING_ROLE"
                 else:
                     rank_event_type = "SYNC"
-                await connection.execute(
+                rank_event_cursor = await connection.execute(
                     """
                     INSERT INTO rank_sync_events(
                         guild_id, member_id, discord_id, event_type, source,
@@ -1811,6 +1811,53 @@ class RankSyncService:
                         now,
                     ),
                 )
+                if (
+                    rank_event_type in {"PROMOTION", "DEMOTION"}
+                    and source == "DISCORD_ROLE_CHANGE"
+                ):
+                    movement_reason = (
+                        "Promoção determinada pelo Comando, em conformidade com a "
+                        "organização do efetivo."
+                        if rank_event_type == "PROMOTION"
+                        else "Rebaixamento determinado pelo Comando, em conformidade "
+                        "com a organização do efetivo."
+                    )
+                    await connection.execute(
+                        """
+                        INSERT OR IGNORE INTO career_notifications(
+                            guild_id, notification_type, subject_id,
+                            target_discord_id, channel_setting_key, payload_json,
+                            status, attempts, available_at, correlation_id,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', 0, ?, ?, ?, ?)
+                        """,
+                        (
+                            guild_id,
+                            rank_event_type,
+                            int(rank_event_cursor.lastrowid),
+                            discord_id,
+                            (
+                                "career_promotion_channel_id"
+                                if rank_event_type == "PROMOTION"
+                                else "career_demotion_channel_id"
+                            ),
+                            json.dumps(
+                                {
+                                    "discord_id": discord_id,
+                                    "from_rank_name": before["rank_name"],
+                                    "to_rank_name": desired.rank_name,
+                                    "reason": movement_reason,
+                                    "source": source,
+                                    "actor_id": actor_id,
+                                },
+                                ensure_ascii=False,
+                            ),
+                            now,
+                            f"rank-role-notification-{correlation_id}",
+                            now,
+                            now,
+                        ),
+                    )
                 action = {
                     "MULTIPLE_RANKS": "RANK_ROLE_INCONSISTENCY",
                     "MISSING_ROLE": "RANK_ROLE_MISSING",

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, cast
 
 import discord
@@ -59,6 +61,39 @@ class ErrorModal(discord.ui.Modal):
         await respond_error(interaction, error)
 
 
+class PanelRefreshCoalescer:
+    """Collapse a burst of voice events into one Discord panel edit per guild."""
+
+    def __init__(self, *, delay_seconds: float = 1.5) -> None:
+        self.delay_seconds = max(0.0, float(delay_seconds))
+        self._tasks: dict[int, asyncio.Task[None]] = {}
+
+    def request(self, guild_id: int, callback: Callable[[], Awaitable[None]]) -> None:
+        previous = self._tasks.get(guild_id)
+        if previous and not previous.done():
+            previous.cancel()
+
+        async def runner() -> None:
+            try:
+                await asyncio.sleep(self.delay_seconds)
+                await callback()
+            except asyncio.CancelledError:
+                return
+            finally:
+                if self._tasks.get(guild_id) is asyncio.current_task():
+                    self._tasks.pop(guild_id, None)
+
+        self._tasks[guild_id] = asyncio.create_task(runner())
+
+    async def close(self) -> None:
+        tasks = list(self._tasks.values())
+        self._tasks.clear()
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
 def status_label(value: str) -> str:
     return {
         "ON_PATROL": "🚔 Em patrulha",
@@ -78,9 +113,9 @@ def commander_mention(discord_id: object, *, lowercase: bool = False) -> str:
 
 
 async def patrol_central_embed(bot: ChoqueBot, guild: discord.Guild) -> discord.Embed:
-    queue, active, readiness = await asyncio.gather(
+    queue, overview, readiness = await asyncio.gather(
         bot.services.operations.queue(guild.id),
-        bot.services.operations.active_patrols(guild.id),
+        bot.services.duty_patrols.service_overview(guild.id),
         bot.services.operations.readiness(guild.id),
     )
     minimum = int(await bot.services.settings.get(guild.id, "minimum_patrol_members", 2))
@@ -88,12 +123,23 @@ async def patrol_central_embed(bot: ChoqueBot, guild: discord.Guild) -> discord.
         f"`{index:02d}` <@{row['discord_id']}> • {row['rank_name'] or 'Sem patente'}"
         for index, row in enumerate(queue[:10], start=1)
     ]
-    patrol_lines = [
-        f"🚔 **PTR #{row['sequence_number']:04d}** • <#{row['voice_channel_id']}> • "
-        f"{row['member_count']} integrante(s)\n"
-        f"└ **Comandante:** "
-        f"{commander_mention(row['commander_discord_id'])}"
-        for row in active[:10]
+    patrol_lines: list[str] = []
+    for row in overview["patrols"][:8]:
+        members = "\n".join(
+            f"• {member['rank_name'] or 'Sem patente'} • <@{member['discord_id']}>"
+            for member in row["members"][:10]
+        )
+        patrol_lines.append(
+            f"🚔 **VIATURA {int(row['sequence_number']):02d} • "
+            f"<#{row['voice_channel_id']}>**\n"
+            f"Comandante: {commander_mention(row['commander_discord_id'])} • "
+            f"{len(row['members'])} integrante(s)\n{members}"
+        )
+    unassigned = overview["unassigned"]
+    unassigned_lines = [
+        f"• {row['rank_name'] or 'Sem patente'} • <@{row['discord_id']}> • "
+        f"{('<#' + str(row['voice_channel_id']) + '>') if row['voice_channel_id'] else 'Tolerância'}"
+        for row in unassigned[:20]
     ]
     counts = readiness["counts"]
     embed = branded_embed(
@@ -102,7 +148,7 @@ async def patrol_central_embed(bot: ChoqueBot, guild: discord.Guild) -> discord.
         description=(
             "Central operacional para disponibilidade, fila FIFO e formação automática. "
             "Entre primeiro na call **Aguardando Patrulha** e então use o botão da fila.\n\n"
-            f"**Formação mínima:** {minimum} militares • **Ponto:** sempre manual no painel próprio"
+            f"**Formação mínima:** {minimum} militares • **Ponto:** automático nas calls de patrulha"
         ),
     )
     embed.add_field(
@@ -111,8 +157,13 @@ async def patrol_central_embed(bot: ChoqueBot, guild: discord.Guild) -> discord.
         inline=False,
     )
     embed.add_field(
-        name=f"🛡️ Patrulhas ativas • {len(active)}",
-        value="\n".join(patrol_lines) or "Nenhuma patrulha em andamento.",
+        name=f"🛡️ Viaturas ativas • {len(overview['patrols'])}",
+        value=("\n\n".join(patrol_lines) or "Nenhuma viatura em andamento.")[:1024],
+        inline=False,
+    )
+    embed.add_field(
+        name=f"👤 EFETIVO SEM VIATURA • {len(unassigned)}",
+        value=("\n".join(unassigned_lines) or "Nenhum militar sem viatura.")[:1024],
         inline=False,
     )
     embed.add_field(
@@ -121,7 +172,8 @@ async def patrol_central_embed(bot: ChoqueBot, guild: discord.Guild) -> discord.
             f"Em patrulha **{counts.get('ON_PATROL', 0)}** • "
             f"Fila **{counts.get('QUEUED', 0)}** • "
             f"Disponíveis **{counts.get('AVAILABLE_FOR_PATROL', 0)}** • "
-            f"Treinamento **{counts.get('IN_TRAINING', 0)}**"
+            f"Treinamento **{counts.get('IN_TRAINING', 0)}** • Total em serviço "
+            f"**{overview['member_count']}**"
         ),
         inline=False,
     )
@@ -129,17 +181,18 @@ async def patrol_central_embed(bot: ChoqueBot, guild: discord.Guild) -> discord.
 
 
 async def patrol_report_embed(bot: ChoqueBot, guild: discord.Guild) -> discord.Embed:
+    await bot.services.duty_patrols.ensure_missing_reports(guild.id)
     rows = await bot.services.database.fetchall(
         """
-        SELECT p.*, COUNT(pm.id) AS member_count,
-               GROUP_CONCAT(pm.discord_id) AS member_ids,
-               (
-                   SELECT h.discord_id FROM patrol_commander_history h
-                   WHERE h.patrol_id=p.id ORDER BY h.started_at DESC, h.id DESC LIMIT 1
-               ) AS final_commander_discord_id
-        FROM patrols p LEFT JOIN patrol_members pm ON pm.patrol_id=p.id
-        WHERE p.guild_id=? AND p.status='CLOSED'
-        GROUP BY p.id ORDER BY p.ended_at DESC, p.id DESC LIMIT 5
+        SELECT r.*, COUNT(DISTINCT rm.id) AS member_count,
+               COUNT(DISTINCT o.id) AS occurrence_count,
+               COUNT(DISTINCT e.id) AS evidence_count
+        FROM patrol_reports r
+        LEFT JOIN patrol_report_members rm ON rm.report_id=r.id
+        LEFT JOIN patrol_report_occurrences o ON o.report_id=r.id
+        LEFT JOIN patrol_report_evidence e ON e.report_id=r.id
+        WHERE r.guild_id=?
+        GROUP BY r.id ORDER BY r.ended_at DESC, r.id DESC LIMIT 5
         """,
         (guild.id,),
     )
@@ -152,16 +205,16 @@ async def patrol_report_embed(bot: ChoqueBot, guild: discord.Guild) -> discord.E
         ),
     )
     for row in rows:
-        duration = max(0, int(row["ended_at"] or 0) - int(row["started_at"] or row["reserved_at"]))
         embed.add_field(
-            name=f"PTR #{row['sequence_number']:04d} • {row['status']}",
+            name=f"PTR #{row['vehicle_number']:04d} • {row['status']}",
             value=(
                 f"Call <#{row['voice_channel_id']}> • {row['member_count']} integrante(s) • "
-                f"{format_duration(duration)}\n"
+                f"{format_duration(row['duration_ms'])}\n"
                 f"Comandante final: "
-                f"{commander_mention(row['final_commander_discord_id'])}\n"
+                f"{commander_mention(row['commander_discord_id'])} • "
+                f"Ocorrências **{row['occurrence_count']}** • Evidências **{row['evidence_count']}**\n"
                 f"Encerrada {discord_timestamp(int(row['ended_at']), 'R')} • "
-                f"motivo `{row['end_reason'] or 'NÃO INFORMADO'}`"
+                f"situação `{row['status']}`"
             ),
             inline=False,
         )
@@ -170,6 +223,82 @@ async def patrol_report_embed(bot: ChoqueBot, guild: discord.Guild) -> discord.E
             name="Situação", value="Nenhuma patrulha foi encerrada ainda.", inline=False
         )
     return embed
+
+
+def consolidated_report_text(
+    data: dict[str, object], *, include_evidence: bool = False
+) -> str:
+    report = data["report"]
+    members = data["members"]
+    occurrences = data["occurrences"]
+    evidence = data["evidence"]
+    member_lines = "\n".join(
+        f"• {row['rank_name'] or 'Sem patente'} • <@{row['discord_id']}>"
+        for row in members[:25]
+    ) or "Nenhum integrante congelado."
+    occurrence_lines = "\n".join(
+        f"• <@{row['subject_discord_id']}> • {row['category_title']}"
+        + (f" • `{row['article_code']}`" if row["article_code"] else "")
+        for row in occurrences[:15]
+    ) or "Nenhuma ocorrência registrada."
+    evidence_lines = ""
+    if include_evidence:
+        evidence_lines = "\n\n**EVIDÊNCIAS**\n" + (
+            "\n".join(
+                f"• `{row['evidence_type']}` • {row['locator']}" for row in evidence[:15]
+            )
+            or "Nenhuma evidência vinculada."
+        )
+    observations = report.get("observations") or "Sem observações finais."
+    return (
+        f"### RELATÓRIO DE PTR • VIATURA {int(report['vehicle_number']):02d}\n"
+        f"Call <#{report['voice_channel_id']}> • Comandante "
+        f"{commander_mention(report['commander_discord_id'])}\n"
+        f"Início {discord_timestamp(report['started_at'], 'f')} • "
+        f"Término {discord_timestamp(report['ended_at'], 'f')} • "
+        f"Duração **{format_duration(report['duration_ms'])}**\n"
+        f"Situação `{report['status']}` • Evidências **{len(evidence)}**\n\n"
+        f"**EFETIVO**\n{member_lines}\n\n"
+        f"**OCORRÊNCIAS**\n{occurrence_lines}\n\n"
+        f"**DESCRIÇÃO**\n{report['description'] or 'Rascunho aguardando descrição final.'}\n\n"
+        f"**OBSERVAÇÕES**\n{observations}{evidence_lines}"
+    )[:3900]
+
+
+def member_safe_report_data(
+    data: dict[str, object], discord_id: int
+) -> dict[str, object]:
+    """Limit a member copy to their own occurrence and no evidence locators."""
+    return {
+        **data,
+        "occurrences": [
+            row
+            for row in data["occurrences"]
+            if int(row["subject_discord_id"] or 0) == int(discord_id)
+        ],
+        "evidence": [],
+    }
+
+
+def preserved_patrol_channel_policy(
+    row: dict[str, object] | None,
+) -> dict[str, object]:
+    """Keep administrator-owned limits when registry metadata is refreshed."""
+    if not row:
+        return {"capacity": 0, "allowed_role_ids": [], "automatic_clock": True}
+    try:
+        role_ids = [
+            int(value)
+            for value in json.loads(str(row.get("allowed_role_ids_json") or "[]"))
+            if str(value).isdigit() and int(value) > 0
+        ]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        role_ids = []
+    return {
+        "capacity": int(row.get("capacity") or 0),
+        "allowed_role_ids": role_ids,
+        "automatic_clock": bool(row.get("automatic_clock")),
+    }
 
 
 async def member_center_embed(bot: ChoqueBot, guild: discord.Guild) -> discord.Embed:
@@ -484,6 +613,26 @@ class PatrolReportView(ErrorView):
         ]
         await interaction.response.send_message(
             "\n\n".join(lines) or "Nenhum feedback recebido.", ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="Relatório consolidado",
+        emoji="🧾",
+        style=discord.ButtonStyle.primary,
+        custom_id="choque:operations:report:consolidated:v1",
+    )
+    async def consolidated(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        member = await require_member(interaction, "patrol.view.self")
+        data = await get_bot(interaction).services.duty_patrols.latest_report_for_member(
+            member.guild.id, member.id
+        )
+        if not data:
+            raise NotFoundError("Você ainda não possui relatório de PTR.")
+        await interaction.response.send_message(
+            consolidated_report_text(member_safe_report_data(data, member.id)),
+            ephemeral=True,
         )
 
 
@@ -1028,6 +1177,9 @@ class FinishPatrolModal(ErrorModal, title="Encerrar patrulha"):
         await get_bot(interaction).services.operations.finish_patrol(
             actor.guild.id, self.patrol_id, actor.id, str(self.reason)
         )
+        await get_bot(interaction).services.duty_patrols.ensure_report_for_patrol(
+            actor.guild.id, self.patrol_id
+        )
         cog = get_bot(interaction).get_cog("OperationsCommands")
         if cog:
             await cog.refresh_panels(actor.guild)
@@ -1059,6 +1211,226 @@ class ActivePatrolSelectView(ErrorView):
         self.add_item(ActivePatrolSelect(rows))
 
 
+class ReportOccurrenceModal(ErrorModal, title="Registrar ocorrência na PTR"):
+    category_code = discord.ui.TextInput(
+        label="Código da categoria", placeholder="Ex.: ABANDONO_PTR", max_length=80
+    )
+    article_code = discord.ui.TextInput(
+        label="Artigo (opcional)", required=False, max_length=80
+    )
+    reason = discord.ui.TextInput(label="Motivo", min_length=3, max_length=300)
+    description = discord.ui.TextInput(
+        label="Descrição", style=discord.TextStyle.paragraph, min_length=3, max_length=1200
+    )
+    evidence_url = discord.ui.TextInput(
+        label="Link de evidência (opcional)", required=False, max_length=1000
+    )
+
+    def __init__(self, report_id: int, subject_discord_id: int) -> None:
+        super().__init__()
+        self.report_id = report_id
+        self.subject_discord_id = subject_discord_id
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        actor = await require_admin(interaction, "patrol.manage")
+        duty = get_bot(interaction).services.duty_patrols
+        occurrence_id = await duty.add_occurrence(
+            actor.guild.id,
+            self.report_id,
+            self.subject_discord_id,
+            actor.id,
+            category_code=str(self.category_code),
+            article_code=str(self.article_code),
+            reason=str(self.reason),
+            description=str(self.description),
+        )
+        evidence = str(self.evidence_url).strip()
+        if evidence:
+            await duty.add_evidence(
+                actor.guild.id,
+                self.report_id,
+                actor.id,
+                evidence_type="LINK",
+                locator=evidence,
+                occurrence_id=occurrence_id,
+                description="Evidência informada junto da ocorrência.",
+            )
+        await interaction.response.send_message(
+            f"✅ Ocorrência **#{occurrence_id}** registrada e auditada.", ephemeral=True
+        )
+
+
+class ReportOccurrenceSubjectSelect(discord.ui.Select):
+    def __init__(self, report_id: int, members: list) -> None:
+        self.report_id = report_id
+        super().__init__(
+            placeholder="Integrante da composição congelada",
+            options=[
+                discord.SelectOption(
+                    label=f"{row['rank_name'] or 'SEM PATENTE'} • {row['display_name']}"[:100],
+                    value=str(row["discord_id"]),
+                    description=f"Discord {row['discord_id']}"[:100],
+                )
+                for row in members[:25]
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await require_admin(interaction, "patrol.manage")
+        await interaction.response.send_modal(
+            ReportOccurrenceModal(self.report_id, int(self.values[0]))
+        )
+
+
+class ReportOccurrenceSubjectView(ErrorView):
+    def __init__(self, report_id: int, members: list) -> None:
+        super().__init__(timeout=300)
+        self.add_item(ReportOccurrenceSubjectSelect(report_id, members))
+
+
+class ReportEvidenceModal(ErrorModal, title="Adicionar evidência ao relatório"):
+    evidence_type = discord.ui.TextInput(
+        label="Tipo: IMAGE, LINK, FILE ou NOTE", max_length=10
+    )
+    locator = discord.ui.TextInput(
+        label="Link ou conteúdo da nota", style=discord.TextStyle.paragraph, max_length=2000
+    )
+    description = discord.ui.TextInput(
+        label="Descrição (opcional)", required=False, max_length=500
+    )
+
+    def __init__(self, report_id: int) -> None:
+        super().__init__()
+        self.report_id = report_id
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        actor = await require_admin(interaction, "patrol.manage")
+        evidence_id = await get_bot(interaction).services.duty_patrols.add_evidence(
+            actor.guild.id,
+            self.report_id,
+            actor.id,
+            evidence_type=str(self.evidence_type),
+            locator=str(self.locator),
+            description=str(self.description),
+        )
+        await interaction.response.send_message(
+            f"✅ Evidência **#{evidence_id}** vinculada e auditada.", ephemeral=True
+        )
+
+
+class FinalizePatrolReportModal(ErrorModal, title="Finalizar relatório da PTR"):
+    description = discord.ui.TextInput(
+        label="Resumo da patrulha", style=discord.TextStyle.paragraph, min_length=3, max_length=1500
+    )
+    observations = discord.ui.TextInput(
+        label="Observações finais (opcional)",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=1000,
+    )
+
+    def __init__(self, report_id: int, expected_version: int) -> None:
+        super().__init__()
+        self.report_id = report_id
+        self.expected_version = expected_version
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        actor = await require_admin(interaction, "patrol.manage")
+        report = await get_bot(interaction).services.duty_patrols.finalize_report(
+            actor.guild.id,
+            self.report_id,
+            actor.id,
+            description=str(self.description),
+            observations=str(self.observations),
+            expected_version=self.expected_version,
+        )
+        cog = get_bot(interaction).get_cog("OperationsCommands")
+        if cog:
+            await cog.refresh_panels(actor.guild)
+        await interaction.response.send_message(
+            f"✅ Relatório da **Viatura {int(report['vehicle_number']):02d}** finalizado.",
+            ephemeral=True,
+        )
+
+
+class PatrolReportActionsView(ErrorView):
+    def __init__(self, report_id: int, version: int) -> None:
+        super().__init__(timeout=300)
+        self.report_id = report_id
+        self.version = version
+
+    @discord.ui.button(label="Ocorrência", emoji="⚠️", style=discord.ButtonStyle.danger)
+    async def occurrence(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await require_admin(interaction, "patrol.manage")
+        data = await get_bot(interaction).services.duty_patrols.report(
+            interaction.guild.id, self.report_id
+        )
+        members = data["members"]
+        if not members:
+            raise NotFoundError("O relatório não possui composição congelada.")
+        await interaction.response.edit_message(
+            content="Selecione o militar envolvido na ocorrência:",
+            view=ReportOccurrenceSubjectView(self.report_id, members),
+        )
+
+    @discord.ui.button(label="Evidência", emoji="📎", style=discord.ButtonStyle.primary)
+    async def evidence(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await require_admin(interaction, "patrol.manage")
+        await interaction.response.send_modal(ReportEvidenceModal(self.report_id))
+
+    @discord.ui.button(label="Ver consolidado", emoji="🧾", style=discord.ButtonStyle.secondary)
+    async def consolidated(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await require_admin(interaction, "patrol.view.all")
+        data = await get_bot(interaction).services.duty_patrols.report(
+            interaction.guild.id, self.report_id
+        )
+        await interaction.response.send_message(
+            consolidated_report_text(data, include_evidence=True), ephemeral=True
+        )
+
+    @discord.ui.button(label="Finalizar PTR", emoji="✅", style=discord.ButtonStyle.success)
+    async def finalize(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await require_admin(interaction, "patrol.manage")
+        await interaction.response.send_modal(
+            FinalizePatrolReportModal(self.report_id, self.version)
+        )
+
+
+class DraftPatrolReportSelect(discord.ui.Select):
+    def __init__(self, rows: list) -> None:
+        self.rows = {int(row["id"]): row for row in rows}
+        super().__init__(
+            placeholder="Relatório de PTR em rascunho",
+            options=[
+                discord.SelectOption(
+                    label=f"Viatura {int(row['vehicle_number']):02d} • RASCUNHO",
+                    value=str(row["id"]),
+                    description=f"Call {row['voice_channel_id']} • {format_duration(row['duration_ms'])}"[
+                        :100
+                    ],
+                )
+                for row in rows[:25]
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await require_admin(interaction, "patrol.manage")
+        report = self.rows[int(self.values[0])]
+        await interaction.response.edit_message(
+            content=(
+                f"### Viatura {int(report['vehicle_number']):02d} • relatório em rascunho\n"
+                "Registre ocorrências e evidências antes de finalizar."
+            ),
+            view=PatrolReportActionsView(int(report["id"]), int(report["version"])),
+        )
+
+
+class DraftPatrolReportView(ErrorView):
+    def __init__(self, rows: list) -> None:
+        super().__init__(timeout=300)
+        self.add_item(DraftPatrolReportSelect(rows))
+
+
 class CommanderOverrideModal(ErrorModal, title="Confirmar comandante da patrulha"):
     reason = discord.ui.TextInput(
         label="Motivo operacional",
@@ -1079,13 +1451,13 @@ class CommanderOverrideModal(ErrorModal, title="Confirmar comandante da patrulha
         if not isinstance(channel, discord.VoiceChannel):
             raise NotFoundError("A call desta patrulha não está disponível.")
         present = [member.id for member in channel.members if not member.bot]
-        result = await get_bot(interaction).services.operations.override_patrol_commander(
+        result = await get_bot(interaction).services.duty_patrols.admin_override_commander(
             actor.guild.id,
             self.patrol_id,
             self.commander_discord_id,
             actor.id,
-            str(self.reason),
-            present,
+            reason=str(self.reason),
+            present_discord_ids=present,
         )
         cog = get_bot(interaction).get_cog("OperationsCommands")
         if cog:
@@ -1396,6 +1768,456 @@ class CommanderHistoryPatrolView(ErrorView):
         self.add_item(CommanderHistoryPatrolSelect(rows))
 
 
+class PatrolMemberAdjustmentModal(ErrorModal, title="Confirmar correção de integrante"):
+    reason = discord.ui.TextInput(
+        label="Motivo obrigatório", style=discord.TextStyle.paragraph, min_length=3, max_length=500
+    )
+
+    def __init__(
+        self,
+        patrol_id: int,
+        voice_channel_id: int,
+        target_discord_id: int,
+        action: str,
+    ) -> None:
+        super().__init__()
+        self.patrol_id = patrol_id
+        self.voice_channel_id = voice_channel_id
+        self.target_discord_id = target_discord_id
+        self.action = action
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        actor = await require_admin(interaction, "patrol.manage")
+        channel = actor.guild.get_channel(self.voice_channel_id)
+        if not isinstance(channel, discord.VoiceChannel):
+            raise NotFoundError("A call desta viatura não está disponível.")
+        present = [member.id for member in channel.members if not member.bot]
+        duty = get_bot(interaction).services.duty_patrols
+        if self.action == "ASSIGN":
+            result = await duty.admin_assign_member(
+                actor.guild.id,
+                self.patrol_id,
+                self.target_discord_id,
+                actor.id,
+                reason=str(self.reason),
+                present_discord_ids=present,
+            )
+        else:
+            result = await duty.admin_remove_member(
+                actor.guild.id,
+                self.patrol_id,
+                self.target_discord_id,
+                actor.id,
+                reason=str(self.reason),
+                present_discord_ids=present,
+            )
+        cog = get_bot(interaction).get_cog("OperationsCommands")
+        if cog:
+            await cog.refresh_panels(actor.guild)
+        label = "vinculado" if result["action"] == "MEMBER_ASSIGNED" else "removido"
+        await interaction.response.send_message(
+            f"✅ Militar {label} da viatura com correção auditada.", ephemeral=True
+        )
+
+
+class PatrolAdjustmentMemberSelect(discord.ui.UserSelect):
+    def __init__(self, patrol_id: int, voice_channel_id: int, action: str) -> None:
+        super().__init__(placeholder="Militar alvo da correção", min_values=1, max_values=1)
+        self.patrol_id = patrol_id
+        self.voice_channel_id = voice_channel_id
+        self.action = action
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await require_admin(interaction, "patrol.manage")
+        await interaction.response.send_modal(
+            PatrolMemberAdjustmentModal(
+                self.patrol_id,
+                self.voice_channel_id,
+                self.values[0].id,
+                self.action,
+            )
+        )
+
+
+class PatrolAdjustmentMemberView(ErrorView):
+    def __init__(self, patrol_id: int, voice_channel_id: int, action: str) -> None:
+        super().__init__(timeout=300)
+        self.add_item(PatrolAdjustmentMemberSelect(patrol_id, voice_channel_id, action))
+
+
+class PatrolAdjustmentActionView(ErrorView):
+    def __init__(self, patrol_id: int, voice_channel_id: int) -> None:
+        super().__init__(timeout=300)
+        self.patrol_id = patrol_id
+        self.voice_channel_id = voice_channel_id
+
+    @discord.ui.button(label="Vincular presente", emoji="➕", style=discord.ButtonStyle.success)
+    async def assign(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await require_admin(interaction, "patrol.manage")
+        await interaction.response.edit_message(
+            content="Selecione alguém que esteja presente na call e tenha ponto ativo:",
+            view=PatrolAdjustmentMemberView(
+                self.patrol_id, self.voice_channel_id, "ASSIGN"
+            ),
+        )
+
+    @discord.ui.button(label="Remover ausente", emoji="➖", style=discord.ButtonStyle.danger)
+    async def remove(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await require_admin(interaction, "patrol.manage")
+        await interaction.response.edit_message(
+            content="Selecione alguém que já não esteja presente na call:",
+            view=PatrolAdjustmentMemberView(
+                self.patrol_id, self.voice_channel_id, "REMOVE"
+            ),
+        )
+
+
+class PatrolAdjustmentSelect(discord.ui.Select):
+    def __init__(self, rows: list) -> None:
+        self.rows = {int(row["id"]): row for row in rows}
+        super().__init__(
+            placeholder="Viatura ativa para corrigir",
+            options=[
+                discord.SelectOption(
+                    label=f"Viatura {int(row['sequence_number']):02d}",
+                    value=str(row["id"]),
+                    description=f"Call {row['voice_channel_id']} • {row['member_count']} integrantes"[
+                        :100
+                    ],
+                )
+                for row in rows[:25]
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await require_admin(interaction, "patrol.manage")
+        patrol = self.rows[int(self.values[0])]
+        await interaction.response.edit_message(
+            content=(
+                f"### Viatura {int(patrol['sequence_number']):02d} • corrigir composição\n"
+                "A presença real na call será conferida novamente no servidor."
+            ),
+            view=PatrolAdjustmentActionView(
+                int(patrol["id"]), int(patrol["voice_channel_id"])
+            ),
+        )
+
+
+class PatrolAdjustmentSelectView(ErrorView):
+    def __init__(self, rows: list) -> None:
+        super().__init__(timeout=300)
+        self.add_item(PatrolAdjustmentSelect(rows))
+
+
+class PatrolChannelConfigModal(ErrorModal, title="Configurar call de patrulha"):
+    logical_key = discord.ui.TextInput(
+        label="Identificação lógica", placeholder="patrol.alfa", max_length=100
+    )
+    capacity = discord.ui.TextInput(
+        label="Capacidade (0 = sem limite)", max_length=2
+    )
+    automatic_clock = discord.ui.TextInput(
+        label="Ponto automático? SIM ou NÃO", max_length=10
+    )
+    allowed_roles = discord.ui.TextInput(
+        label="IDs de cargos permitidos (opcional)",
+        placeholder="123, 456",
+        required=False,
+        max_length=1000,
+    )
+
+    def __init__(self, channel: discord.VoiceChannel, row: dict[str, object] | None) -> None:
+        super().__init__()
+        self.channel_id = channel.id
+        self.channel_name = channel.name
+        self.logical_key.default = str(
+            (row or {}).get("logical_key") or f"patrol.{channel.id}"
+        )
+        self.capacity.default = str((row or {}).get("capacity") or 0)
+        self.automatic_clock.default = (
+            "SIM" if row is None or bool(row.get("automatic_clock")) else "NÃO"
+        )
+        self.allowed_roles.default = ", ".join(
+            str(value)
+            for value in json.loads(
+                str((row or {}).get("allowed_role_ids_json") or "[]")
+            )
+        )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        actor = await require_admin(interaction, "patrol.manage")
+        try:
+            capacity = int(str(self.capacity).strip())
+        except ValueError as exc:
+            raise ValidationError("A capacidade precisa ser um número inteiro.") from exc
+        role_ids: list[int] = []
+        raw_roles = str(self.allowed_roles).replace(";", ",").replace(" ", ",")
+        for value in raw_roles.split(","):
+            value = value.strip()
+            if not value:
+                continue
+            if not value.isdigit():
+                raise ValidationError("Informe apenas IDs numéricos de cargos.")
+            role_ids.append(int(value))
+        existing = await get_bot(interaction).services.database.fetchone(
+            "SELECT sort_order FROM patrol_channels WHERE guild_id=? AND channel_id=?",
+            (actor.guild.id, self.channel_id),
+        )
+        await get_bot(interaction).services.operations.configure_patrol_channel(
+            actor.guild.id,
+            self.channel_id,
+            "ACTIVE",
+            self.channel_name,
+            int(existing["sort_order"]) if existing else 99,
+            actor.id,
+            logical_key=str(self.logical_key),
+            capacity=capacity,
+            allowed_role_ids=role_ids,
+            automatic_clock=parse_panel_bool(str(self.automatic_clock), "Ponto automático"),
+        )
+        await get_bot(interaction).services.settings.add_voice_channel(
+            actor.guild.id, self.channel_id, self.channel_name, actor.id
+        )
+        await get_bot(interaction).services.settings.set_voice_patrol_classification(
+            actor.guild.id, self.channel_id, True
+        )
+        await interaction.response.send_message(
+            "✅ Call configurada por ID, com capacidade, cargos e ponto automático auditados.",
+            ephemeral=True,
+        )
+
+
+class PatrolChannelConfigSelect(discord.ui.ChannelSelect):
+    def __init__(self) -> None:
+        super().__init__(
+            placeholder="Call de voz para configurar",
+            channel_types=[discord.ChannelType.voice],
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await require_admin(interaction, "patrol.manage")
+        channel = self.values[0]
+        if not isinstance(channel, discord.VoiceChannel):
+            raise ValidationError("Selecione um canal de voz.")
+        row = await get_bot(interaction).services.database.fetchone(
+            "SELECT * FROM patrol_channels WHERE guild_id=? AND channel_id=?",
+            (interaction.guild.id, channel.id),
+        )
+        await interaction.response.send_modal(
+            PatrolChannelConfigModal(channel, dict(row) if row else None)
+        )
+
+
+class PatrolChannelConfigView(ErrorView):
+    def __init__(self) -> None:
+        super().__init__(timeout=300)
+        self.add_item(PatrolChannelConfigSelect())
+
+
+class OccurrenceCategoryConfigModal(ErrorModal, title="Configurar categoria de ocorrência"):
+    code = discord.ui.TextInput(label="Código", placeholder="ABANDONO_PTR", max_length=80)
+    category_title = discord.ui.TextInput(label="Título", max_length=120)
+    description = discord.ui.TextInput(
+        label="Descrição (opcional)",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=800,
+    )
+    active = discord.ui.TextInput(label="Ativa? SIM ou NÃO", default="SIM", max_length=10)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        actor = await require_admin(interaction, "patrol.manage")
+        category_id = (
+            await get_bot(interaction).services.duty_patrols.configure_occurrence_category(
+                actor.guild.id,
+                actor.id,
+                code=str(self.code),
+                title=str(self.category_title),
+                description=str(self.description),
+                active=parse_panel_bool(str(self.active), "Categoria ativa"),
+            )
+        )
+        await interaction.response.send_message(
+            f"✅ Categoria **#{category_id}** salva e auditada.", ephemeral=True
+        )
+
+
+class PatrolArticleConfigModal(ErrorModal, title="Configurar artigo da PTR"):
+    code = discord.ui.TextInput(label="Código", placeholder="ART-01", max_length=80)
+    article_title = discord.ui.TextInput(label="Título", max_length=120)
+    description = discord.ui.TextInput(
+        label="Descrição (opcional)",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=800,
+    )
+    severity = discord.ui.TextInput(
+        label="Gravidade", placeholder="LOW, NORMAL, HIGH ou CRITICAL", max_length=10
+    )
+    category_code = discord.ui.TextInput(
+        label="Código da categoria (opcional)", required=False, max_length=80
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        actor = await require_admin(interaction, "patrol.manage")
+        article_id = await get_bot(interaction).services.duty_patrols.configure_article(
+            actor.guild.id,
+            actor.id,
+            code=str(self.code),
+            title=str(self.article_title),
+            description=str(self.description),
+            severity=str(self.severity),
+            category_code=str(self.category_code),
+        )
+        await interaction.response.send_message(
+            f"✅ Artigo **#{article_id}** salvo e auditado.", ephemeral=True
+        )
+
+
+class PatrolCatalogConfigView(ErrorView):
+    def __init__(self) -> None:
+        super().__init__(timeout=300)
+
+    @discord.ui.button(label="Categoria", emoji="🏷️", style=discord.ButtonStyle.primary)
+    async def category(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await require_admin(interaction, "patrol.manage")
+        await interaction.response.send_modal(OccurrenceCategoryConfigModal())
+
+    @discord.ui.button(label="Artigo", emoji="📚", style=discord.ButtonStyle.secondary)
+    async def article(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await require_admin(interaction, "patrol.manage")
+        await interaction.response.send_modal(PatrolArticleConfigModal())
+
+
+class AdminShiftExceptionModal(ErrorModal, title="Correção excepcional de ponto"):
+    reason = discord.ui.TextInput(
+        label="Motivo obrigatório", style=discord.TextStyle.paragraph, min_length=3, max_length=500
+    )
+    minutes = discord.ui.TextInput(
+        label="Minutos (somente para ajuste)", required=False, max_length=7
+    )
+
+    def __init__(self, target_discord_id: int, action: str) -> None:
+        super().__init__()
+        self.target_discord_id = target_discord_id
+        self.action = action
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        actor = await require_admin(interaction, "shift.adjust")
+        bot = get_bot(interaction)
+        target = actor.guild.get_member(self.target_discord_id)
+        if not target:
+            raise NotFoundError("Militar não encontrado no servidor.")
+        duty = bot.services.duty_patrols
+        reason = str(self.reason)
+        if self.action == "OPEN":
+            if not target.voice or not isinstance(target.voice.channel, discord.VoiceChannel):
+                raise ValidationError("O militar precisa estar em uma call autorizada.")
+            has_role = await bot.services.permissions.has_authorized_service_role(target)
+            result = await duty.admin_open_shift(
+                actor.guild.id,
+                target.id,
+                actor.id,
+                reason=reason,
+                voice_channel_id=target.voice.channel.id,
+                target_has_authorized_role=has_role,
+                role_snapshot=target.top_role.name,
+                role_ids=[role.id for role in target.roles],
+            )
+        elif self.action == "CORRECT":
+            try:
+                minutes = int(str(self.minutes).strip())
+            except ValueError as exc:
+                raise ValidationError("Informe os minutos do ajuste como número inteiro.") from exc
+            latest = await bot.services.database.fetchone(
+                """
+                SELECT s.id FROM shifts s JOIN members m ON m.id=s.member_id
+                WHERE s.guild_id=? AND m.discord_id=? ORDER BY s.id DESC LIMIT 1
+                """,
+                (actor.guild.id, target.id),
+            )
+            if not latest:
+                raise NotFoundError("O militar não possui sessão para ajustar.")
+            result = await duty.admin_correct_shift(
+                actor.guild.id,
+                int(latest["id"]),
+                actor.id,
+                minutes=minutes,
+                reason=reason,
+            )
+        else:
+            result = await duty.admin_close_shift(
+                actor.guild.id,
+                target.id,
+                actor.id,
+                reason=reason,
+                invalidate=self.action == "INVALIDATE",
+            )
+        shift_cog = bot.get_cog("ShiftCommands")
+        if shift_cog:
+            await shift_cog.update_service_panel(actor.guild.id)
+        operations_cog = bot.get_cog("OperationsCommands")
+        if operations_cog:
+            await operations_cog.refresh_panels(actor.guild)
+        message = f"✅ Correção `{result['action']}` registrada com antes/depois e motivo."
+        if result.get("vehicle_error"):
+            message += (
+                "\n⚠️ O ponto ficou em **Efetivo sem viatura**: "
+                f"{result['vehicle_error']}"
+            )
+        await interaction.response.send_message(message, ephemeral=True)
+
+
+class AdminShiftTargetSelect(discord.ui.UserSelect):
+    def __init__(self, action: str) -> None:
+        super().__init__(placeholder="Militar alvo da correção", min_values=1, max_values=1)
+        self.action = action
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await require_admin(interaction, "shift.adjust")
+        await interaction.response.send_modal(
+            AdminShiftExceptionModal(self.values[0].id, self.action)
+        )
+
+
+class AdminShiftTargetView(ErrorView):
+    def __init__(self, action: str) -> None:
+        super().__init__(timeout=300)
+        self.add_item(AdminShiftTargetSelect(action))
+
+
+class AdminShiftExceptionView(ErrorView):
+    def __init__(self) -> None:
+        super().__init__(timeout=300)
+
+    async def choose(self, interaction: discord.Interaction, action: str) -> None:
+        await require_admin(interaction, "shift.adjust")
+        await interaction.response.edit_message(
+            content="Selecione o militar. Toda alteração exigirá motivo:",
+            view=AdminShiftTargetView(action),
+        )
+
+    @discord.ui.button(label="Abrir ponto", emoji="🟢", style=discord.ButtonStyle.success)
+    async def open_shift(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await self.choose(interaction, "OPEN")
+
+    @discord.ui.button(label="Fechar ponto", emoji="🔴", style=discord.ButtonStyle.danger)
+    async def close_shift(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await self.choose(interaction, "CLOSE")
+
+    @discord.ui.button(label="Ajustar tempo", emoji="⏱️", style=discord.ButtonStyle.primary)
+    async def correct_shift(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await self.choose(interaction, "CORRECT")
+
+    @discord.ui.button(label="Invalidar sessão", emoji="⛔", style=discord.ButtonStyle.danger)
+    async def invalidate_shift(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        await self.choose(interaction, "INVALIDATE")
+
+
 class PatrolManagementView(ErrorView):
     def __init__(self) -> None:
         super().__init__(timeout=300)
@@ -1474,6 +2296,104 @@ class PatrolManagementView(ErrorView):
         await interaction.response.edit_message(
             content="Selecione a patrulha para consultar a cadeia de comando:",
             view=CommanderHistoryPatrolView(rows),
+        )
+
+    @discord.ui.button(
+        label="Gerenciar relatórios",
+        emoji="🧾",
+        style=discord.ButtonStyle.primary,
+        row=1,
+    )
+    async def reports(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await require_admin(interaction, "patrol.manage")
+        bot = get_bot(interaction)
+        await bot.services.duty_patrols.ensure_missing_reports(interaction.guild.id)
+        rows = await bot.services.database.fetchall(
+            """
+            SELECT * FROM patrol_reports WHERE guild_id=? AND status='DRAFT'
+            ORDER BY ended_at, id LIMIT 25
+            """,
+            (interaction.guild.id,),
+        )
+        if not rows:
+            await interaction.response.edit_message(
+                content="✅ Nenhum relatório de PTR aguarda finalização.", view=self
+            )
+            return
+        await interaction.response.edit_message(
+            content="Selecione o relatório em rascunho:",
+            view=DraftPatrolReportView(rows),
+        )
+
+    @discord.ui.button(
+        label="Ajustar integrantes",
+        emoji="🧩",
+        style=discord.ButtonStyle.danger,
+        row=1,
+    )
+    async def members(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await require_admin(interaction, "patrol.manage")
+        rows = await get_bot(interaction).services.operations.active_patrols(
+            interaction.guild.id
+        )
+        if not rows:
+            await interaction.response.edit_message(
+                content="Nenhuma viatura ativa para corrigir.", view=self
+            )
+            return
+        await interaction.response.edit_message(
+            content="Selecione a viatura cuja composição precisa de correção:",
+            view=PatrolAdjustmentSelectView(rows),
+        )
+
+    @discord.ui.button(
+        label="Configurar calls",
+        emoji="🔧",
+        style=discord.ButtonStyle.secondary,
+        row=1,
+    )
+    async def channels(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await require_admin(interaction, "patrol.manage")
+        await interaction.response.edit_message(
+            content="Selecione a call de voz. A configuração será salva pelo ID do canal:",
+            view=PatrolChannelConfigView(),
+        )
+
+    @discord.ui.button(
+        label="Categorias/artigos",
+        emoji="📚",
+        style=discord.ButtonStyle.secondary,
+        row=1,
+    )
+    async def catalog(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await require_admin(interaction, "patrol.manage")
+        await get_bot(interaction).services.duty_patrols.ensure_report_catalog(
+            interaction.guild.id, interaction.user.id
+        )
+        await interaction.response.edit_message(
+            content=(
+                "Configure categorias e artigos sem apagar registros históricos. "
+                "Use o mesmo código para atualizar ou desativar."
+            ),
+            view=PatrolCatalogConfigView(),
+        )
+
+    @discord.ui.button(
+        label="Ponto excepcional",
+        emoji="⏱️",
+        style=discord.ButtonStyle.danger,
+        row=1,
+    )
+    async def shift_exception(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        await require_admin(interaction, "shift.adjust")
+        await interaction.response.edit_message(
+            content=(
+                "Use apenas para corrigir situações excepcionais. A presença, o vínculo e "
+                "toda a trilha antes/depois serão validados no servidor."
+            ),
+            view=AdminShiftExceptionView(),
         )
 
 
@@ -1699,6 +2619,7 @@ class OperationsCommands(commands.Cog):
         self.services = self.bot.services
         self._panel_lock = asyncio.Lock()
         self._formation_locks: dict[int, asyncio.Lock] = {}
+        self._panel_refresh = PanelRefreshCoalescer()
         self._ready_guilds: set[int] = set()
         self.bot.add_view(PatrolCentralView())
         self.bot.add_view(PatrolReportView())
@@ -1791,9 +2712,18 @@ class OperationsCommands(commands.Cog):
                 or row["channel_type"] != "WAITING"
                 or not row["enabled"]
                 or row["label"] != waiting_channel.name
+                or row["logical_key"] != "patrol.waiting"
+                or row["automatic_clock"]
             ):
                 await self.services.operations.configure_patrol_channel(
-                    guild.id, waiting_id, "WAITING", waiting_channel.name, 0, actor_id
+                    guild.id,
+                    waiting_id,
+                    "WAITING",
+                    waiting_channel.name,
+                    0,
+                    actor_id,
+                    logical_key="patrol.waiting",
+                    automatic_clock=False,
                 )
             policy = await self.services.settings.voice_channel_policy(guild.id, waiting_id)
             if not policy:
@@ -1807,18 +2737,29 @@ class OperationsCommands(commands.Cog):
             await self.services.settings.set_voice_patrol_classification(
                 guild.id, waiting_id, False
             )
-        for index, (_key, channel_id) in enumerate(sorted(active), start=1):
+        for index, (key, channel_id) in enumerate(sorted(active), start=1):
             voice_channel = guild.get_channel(channel_id)
             assert isinstance(voice_channel, discord.VoiceChannel)
             row = existing.get(channel_id)
+            policy = preserved_patrol_channel_policy(row)
             if (
                 not row
                 or row["channel_type"] != "ACTIVE"
                 or not row["enabled"]
                 or row["label"] != voice_channel.name
+                or row["logical_key"] != key
             ):
                 await self.services.operations.configure_patrol_channel(
-                    guild.id, channel_id, "ACTIVE", voice_channel.name, index, actor_id
+                    guild.id,
+                    channel_id,
+                    "ACTIVE",
+                    voice_channel.name,
+                    index,
+                    actor_id,
+                    logical_key=key,
+                    capacity=int(policy["capacity"]),
+                    allowed_role_ids=policy["allowed_role_ids"],
+                    automatic_clock=bool(policy["automatic_clock"]),
                 )
             policy = await self.services.settings.voice_channel_policy(guild.id, channel_id)
             if not policy:
@@ -1905,6 +2846,15 @@ class OperationsCommands(commands.Cog):
                 MemberOperationsView(await self._member_links(guild)),
             )
 
+    async def refresh_panels_safely(self, guild: discord.Guild) -> None:
+        try:
+            await self.refresh_panels(guild)
+            shift_cog = self.bot.get_cog("ShiftCommands")
+            if shift_cog:
+                await shift_cog.update_service_panel(guild.id)
+        except Exception:
+            LOGGER.exception("Falha no refresh agrupado de Operações da guild %s", guild.id)
+
     async def reconcile_patrol_commanders(
         self, guild: discord.Guild, *, reason: str
     ) -> int:
@@ -1942,6 +2892,35 @@ class OperationsCommands(commands.Cog):
         return await self.services.operations.sync_patrol_voice_presence(
             guild.id, occupants
         )
+
+    async def duty_voice_snapshot(
+        self, guild: discord.Guild
+    ) -> dict[int, list[dict[str, object]]]:
+        rows = await self.services.operations.patrol_channels(guild.id, "ACTIVE")
+        snapshot: dict[int, list[dict[str, object]]] = {}
+        for row in rows:
+            if not row["enabled"]:
+                continue
+            channel = guild.get_channel(int(row["channel_id"]))
+            if not isinstance(channel, discord.VoiceChannel):
+                continue
+            members: list[dict[str, object]] = []
+            for member in channel.members:
+                if member.bot:
+                    continue
+                members.append(
+                    {
+                        "discord_id": member.id,
+                        "display_name": member.display_name,
+                        "role_snapshot": member.top_role.name,
+                        "role_ids": [role.id for role in member.roles],
+                        "authorized": await self.services.permissions.has_authorized_service_role(
+                            member
+                        ),
+                    }
+                )
+            snapshot[channel.id] = members
+        return snapshot
 
     async def reconcile_patrols(self, guild: discord.Guild) -> None:
         lock = self._formation_locks.setdefault(guild.id, asyncio.Lock())
@@ -2006,7 +2985,7 @@ class OperationsCommands(commands.Cog):
                         try:
                             await member.send(
                                 f"🚔 **PTR #{plan['sequence_number']:04d} formada.** "
-                                f"Destino: **{destination.name}**. O ponto permanece manual."
+                                f"Destino: **{destination.name}**. O ponto será vinculado automaticamente."
                             )
                         except discord.Forbidden:
                             pass
@@ -2027,16 +3006,21 @@ class OperationsCommands(commands.Cog):
             return
         waiting_id = await self.services.operations.waiting_channel_id(member.guild.id)
         try:
+            has_role = await self.services.permissions.has_authorized_service_role(member)
+            await self.services.duty_patrols.handle_voice_transition(
+                member.guild.id,
+                member.id,
+                before.channel.id if before.channel else None,
+                after.channel.id if after.channel else None,
+                has_authorized_role=has_role,
+                role_snapshot=member.top_role.name,
+                role_ids=[role.id for role in member.roles],
+            )
             if before.channel and before.channel.id == waiting_id:
                 await self.services.operations.leave_queue(
                     member.guild.id, member.id, reason="LEFT_WAITING_VOICE"
                 )
-            if before.channel:
-                await self.services.operations.mark_patrol_member_left(
-                    member.guild.id, member.id, before.channel.id
-                )
             if after.channel and after.channel.id == waiting_id:
-                has_role = await self.services.permissions.has_authorized_service_role(member)
                 await self.services.operations.join_queue(
                     member.guild.id,
                     member.id,
@@ -2049,7 +3033,9 @@ class OperationsCommands(commands.Cog):
         try:
             await self.sync_live_patrol_presence(member.guild)
             await self.reconcile_patrols(member.guild)
-            await self.refresh_panels(member.guild)
+            self._panel_refresh.request(
+                member.guild.id, lambda: self.refresh_panels_safely(member.guild)
+            )
         except Exception:
             LOGGER.exception("Falha ao reconciliar patrulhas da guild %s", member.guild.id)
 
@@ -2102,7 +3088,11 @@ class OperationsCommands(commands.Cog):
             try:
                 await self.configure_patrol_channels(guild)
                 await self.sync_live_patrol_presence(guild)
+                await self.services.duty_patrols.reconcile_voice_state(
+                    guild.id, await self.duty_voice_snapshot(guild)
+                )
                 await self.reconcile_patrols(guild)
+                await self.services.duty_patrols.ensure_missing_reports(guild.id)
                 await self.refresh_panels(guild)
             except Exception:
                 LOGGER.exception("Falha ao restaurar Operações na guild %s", guild.id)
@@ -2162,6 +3152,7 @@ class OperationsCommands(commands.Cog):
         self.panel_refresh_loop.cancel()
         self.intelligence_loop.cancel()
         self.commander_reconciliation_loop.cancel()
+        await self._panel_refresh.close()
 
 
 async def setup(bot: commands.Bot) -> None:

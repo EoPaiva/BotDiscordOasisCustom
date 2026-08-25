@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 from typing import TYPE_CHECKING, cast
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from choque.embeds import branded_embed
 from choque.errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
@@ -83,8 +84,9 @@ def build_career_landing_embed(bot: ChoqueBot) -> discord.Embed:
         bot.config.branding,
         title="📈 Carreira • CHOQUE - BGR",
         description=(
-            "Consulte sua patente, tempo no posto, horas do mês e histórico funcional. "
-            "Movimentações de carreira são decisões exclusivas do Comando."
+            "Consulte sua patente, horas válidas, próximo objetivo, méritos e histórico. "
+            "A progressão por horas vai somente de Recruta a Cadete; depois disso, "
+            "méritos e movimentações continuam sob decisão humana."
         ),
     )
 
@@ -92,7 +94,8 @@ def build_career_landing_embed(bot: ChoqueBot) -> discord.Embed:
 async def build_career_profile_embed(
     bot: ChoqueBot, guild: discord.Guild, discord_id: int
 ) -> discord.Embed:
-    profile = await bot.services.personnel.career_profile(guild.id, discord_id)
+    summary = await bot.services.career.career_summary(guild.id, discord_id)
+    profile = summary["profile"]
     timezone_name = await bot.services.settings.get(guild.id, "timezone")
     month_start, month_end = period_bounds("month", timezone_name)
     month_ms = await bot.services.shifts.total_for_member(
@@ -112,11 +115,49 @@ async def build_career_profile_embed(
     embed.add_field(name="Horas no mês", value=format_duration(month_ms))
     embed.add_field(name="Advertências ativas", value=str(profile["active_warnings"]))
     embed.add_field(name="Unidade", value=profile["unit"] or "—")
+    progression = summary["next_progression"]
+    if progression:
+        remaining = max(
+            0, int(progression["target_total_ms"]) - int(summary["valid_hours_ms"])
+        )
+        embed.add_field(
+            name="Próximo objetivo automático",
+            value=(
+                f"**{progression['next_rank_name']}** • "
+                f"{format_duration(summary['valid_hours_ms'])}/"
+                f"{format_duration(progression['target_total_ms'])}\n"
+                f"Faltam {format_duration(remaining)} e a permanência mínima da etapa."
+            ),
+            inline=False,
+        )
+    else:
+        embed.add_field(
+            name="Progressão automática",
+            value="Ciclo concluído em Cadete ou carreira sujeita somente à decisão humana.",
+            inline=False,
+        )
+    merit = summary["merit"]
     embed.add_field(
-        name="Decisão humana",
+        name="Méritos após Cadete",
         value=(
-            "Os indicadores são apenas informativos. O sistema nunca promove ou rebaixa "
-            "automaticamente."
+            f"{merit['total']} registro(s) • +{merit['positive_weight']} / "
+            f"-{merit['negative_weight']} pontos de peso"
+        ),
+    )
+    officer = summary["officer_eligibility"]
+    embed.add_field(
+        name="Oficialato",
+        value=(
+            "Elegível para iniciar no site."
+            if officer["eligible"]
+            else "Pendente: " + ", ".join(officer["missing"])
+        ),
+    )
+    embed.add_field(
+        name="Limite da automação",
+        value=(
+            "O sistema nunca ultrapassa Cadete sozinho, nunca transforma mérito em patente "
+            "e nunca decide uma candidatura ao oficialato."
         ),
         inline=False,
     )
@@ -209,6 +250,39 @@ class CareerPanelView(MemberView):
         await interaction.response.send_message(
             embed=await cog.build_embed(member.guild.id), ephemeral=True
         )
+
+    @discord.ui.button(
+        label="Candidatura oficial",
+        emoji="🛡️",
+        style=discord.ButtonStyle.success,
+        custom_id="choque:career:officer:v1",
+    )
+    async def officer(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        member = await require_member(interaction)
+        bot = get_bot(interaction)
+        eligibility = await bot.services.career.officer_eligibility(
+            member.guild.id, member.id
+        )
+        url = str(
+            await bot.services.settings.get(
+                member.guild.id,
+                "officer_public_url",
+                "https://choquebgr.online/candidatura-oficial",
+            )
+        )
+        embed = branded_embed(
+            bot.config.branding,
+            title="🛡️ Candidatura ao Oficialato",
+            description=(
+                "Você atende aos requisitos mínimos. A candidatura completa é feita "
+                "somente no site; o Discord não coleta respostas."
+                if eligibility["eligible"]
+                else "Requisitos pendentes: " + ", ".join(eligibility["missing"])
+            ),
+        )
+        view = discord.ui.View(timeout=180)
+        view.add_item(discord.ui.Button(label="Abrir candidatura no site", url=url))
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 class CareerAdminView(AdminView):
@@ -445,13 +519,6 @@ class CareerConfirmationView(AdminView):
             self.reason,
         )
         warning = await sync_rank_to_discord(bot, actor.guild, target, result, actor.id)
-        try:
-            await target.send(
-                f"Sua carreira foi atualizada: **{result['from_rank_name'] or 'Sem patente'}** → "
-                f"**{result['to_rank_name']}**. Motivo: {self.reason}"
-            )
-        except discord.Forbidden:
-            pass
         suffix = f"\n⚠️ {warning}" if warning else ""
         await interaction.edit_original_response(
             content=(
@@ -528,7 +595,225 @@ class CareerCommands(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = cast("ChoqueBot", bot)
         self._panel_lock = asyncio.Lock()
+        self._initialized_guilds: set[int] = set()
         self.bot.add_view(CareerPanelView())
+        if not self.bot.check_mode:
+            self.progression_loop.start()
+            self.notification_loop.start()
+
+    def cog_unload(self) -> None:
+        self.progression_loop.cancel()
+        self.notification_loop.cancel()
+
+    async def _initialize_guild(self, guild: discord.Guild) -> None:
+        if guild.id in self._initialized_guilds:
+            return
+        await self.bot.services.career.ensure_default_progression(guild.id, actor_id=None)
+        await self.bot.services.career.ensure_officer_questionnaire(guild.id, actor_id=None)
+        await self.bot.services.career.process_all(guild.id, source="RECOVERY")
+        self._initialized_guilds.add(guild.id)
+
+    @tasks.loop(seconds=60)
+    async def progression_loop(self) -> None:
+        for guild in self.bot.guilds:
+            try:
+                await self._initialize_guild(guild)
+                enabled = await self.bot.services.settings.get(
+                    guild.id, "career_progression_enabled", True
+                )
+                if enabled:
+                    await self.bot.services.career.process_all(
+                        guild.id, source="AUTOMATIC_HOURS"
+                    )
+            except Exception:
+                LOGGER.exception("Falha no ciclo durável de progressão de carreira")
+
+    @progression_loop.before_loop
+    async def before_progression_loop(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(seconds=5)
+    async def notification_loop(self) -> None:
+        for _ in range(10):
+            notification = await self._claim_notification()
+            if notification is None:
+                break
+            await self._deliver_notification(notification)
+
+    @notification_loop.before_loop
+    async def before_notification_loop(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def _claim_notification(self) -> dict[str, object] | None:
+        now = self.bot.services.career.clock()
+        async with self.bot.services.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT * FROM career_notifications
+                WHERE attempts<6 AND (
+                    (status IN ('PENDING','FAILED') AND available_at<=?)
+                    OR (status='PROCESSING' AND updated_at<=?)
+                )
+                ORDER BY id LIMIT 1
+                """,
+                (now, now - 120_000),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            update = await connection.execute(
+                """
+                UPDATE career_notifications
+                SET status='PROCESSING', attempts=attempts+1, updated_at=?
+                WHERE id=? AND status=? AND updated_at=?
+                """,
+                (now, row["id"], row["status"], row["updated_at"]),
+            )
+            if update.rowcount != 1:
+                return None
+        return dict(row)
+
+    def _notification_embed(
+        self, notification_type: str, payload: dict[str, object]
+    ) -> discord.Embed:
+        titles = {
+            "PROMOTION": "⬆️ Promoção registrada",
+            "DEMOTION": "⬇️ Rebaixamento registrado",
+            "MERIT": "🏅 Registro de mérito",
+            "OFFICER_SUBMITTED": "🛡️ Nova candidatura ao Oficialato",
+            "OFFICER_DECISION": "🛡️ Decisão da candidatura ao Oficialato",
+        }
+        if notification_type in {"PROMOTION", "DEMOTION"}:
+            actor_id = payload.get("actor_id")
+            responsible = f"<@{actor_id}>" if actor_id else "Comando da CHOQUE"
+            description = (
+                f"<@{payload['discord_id']}> • **{payload.get('from_rank_name') or 'Sem patente'}** "
+                f"→ **{payload.get('to_rank_name') or 'Sem patente'}**\n"
+                f"**Responsável:** {responsible}\n"
+                f"**Motivo:** {payload.get('reason') or 'Progressão automática por critérios válidos.'}"
+            )
+        elif notification_type == "MERIT":
+            description = (
+                f"**{payload.get('merit_type')} • {payload.get('category')}** "
+                f"(peso {payload.get('weight')})\n{payload.get('reason')}"
+            )
+        elif notification_type == "OFFICER_SUBMITTED":
+            description = (
+                f"<@{payload['discord_id']}> enviou a candidatura **OF-"
+                f"{int(payload['application_id']):05d}**.\n"
+                "O relatório local é apenas consultivo; um responsável precisa assumir."
+            )
+        else:
+            description = (
+                f"Candidatura **OF-{int(payload['application_id']):05d}** • "
+                f"**{payload.get('status')}**\n{payload.get('reason')}"
+            )
+            if payload.get("condition"):
+                description += f"\nCondição: {payload['condition']}"
+        embed = branded_embed(
+            self.bot.config.branding,
+            title=titles.get(notification_type, "Atualização de carreira"),
+            description=description,
+        )
+        embed.set_footer(
+            text=f"Entrega idempotente • decisão de oficialato sempre humana • {self.bot.config.branding.footer}"
+        )
+        return embed
+
+    async def _deliver_notification(self, row: dict[str, object]) -> None:
+        now = self.bot.services.career.clock()
+        notification_id = int(row["id"])
+        try:
+            payload = json.loads(str(row["payload_json"]))
+            guild = self.bot.get_guild(int(row["guild_id"]))
+            if guild is None:
+                raise NotFoundError("Servidor da notificação não está disponível.")
+            embed = self._notification_embed(str(row["notification_type"]), payload)
+            channel_message_id = row["channel_message_id"]
+            channel_key = row["channel_setting_key"]
+            if channel_key and channel_message_id is None:
+                channel_id = await self.bot.services.settings.get(
+                    guild.id, str(channel_key)
+                )
+                channel = guild.get_channel(int(channel_id)) if channel_id else None
+                if not isinstance(channel, discord.TextChannel):
+                    raise NotFoundError("Canal configurado para a notificação não foi encontrado.")
+                content = None
+                if row["notification_type"] == "OFFICER_SUBMITTED":
+                    role_id = await self.bot.services.settings.get(
+                        guild.id, "officer_upamento_role_id"
+                    )
+                    content = f"<@&{int(role_id)}>" if role_id else None
+                message = await channel.send(
+                    content=content,
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions(
+                        everyone=False, users=True, roles=True
+                    ),
+                )
+                channel_message_id = message.id
+                await self.bot.services.database.execute(
+                    """
+                    UPDATE career_notifications
+                    SET channel_message_id=?, updated_at=? WHERE id=?
+                    """,
+                    (message.id, now, notification_id),
+                )
+
+            dm_message_id = row["dm_message_id"]
+            dm_error = None
+            target_id = row["target_discord_id"]
+            if target_id is not None and dm_message_id is None:
+                target = guild.get_member(int(target_id)) or self.bot.get_user(int(target_id))
+                if target is None:
+                    try:
+                        target = await self.bot.fetch_user(int(target_id))
+                    except discord.DiscordException:
+                        target = None
+                if target is not None:
+                    try:
+                        dm = await target.send(embed=embed)
+                        dm_message_id = dm.id
+                        await self.bot.services.database.execute(
+                            """
+                            UPDATE career_notifications
+                            SET dm_message_id=?, updated_at=? WHERE id=?
+                            """,
+                            (dm.id, now, notification_id),
+                        )
+                    except (discord.Forbidden, discord.NotFound):
+                        dm_error = "DM indisponível para o destinatário."
+                else:
+                    dm_error = "Destinatário não localizado."
+
+            await self.bot.services.database.execute(
+                """
+                UPDATE career_notifications
+                SET status='DELIVERED', delivered_at=?, last_error=?, updated_at=?
+                WHERE id=? AND status='PROCESSING'
+                """,
+                (now, dm_error, now, notification_id),
+            )
+            if row["notification_type"] == "PROMOTION":
+                await self.bot.services.database.execute(
+                    """
+                    UPDATE career_progression_events SET published_at=?
+                    WHERE personnel_action_id=?
+                    """,
+                    (now, row["subject_id"]),
+                )
+        except Exception as exc:
+            attempts = int(row["attempts"] or 0) + 1
+            delay = min(300_000, 5_000 * 2 ** min(attempts, 6))
+            await self.bot.services.database.execute(
+                """
+                UPDATE career_notifications
+                SET status='FAILED', available_at=?, last_error=?, updated_at=?
+                WHERE id=?
+                """,
+                (now + delay, str(exc)[:1000], now, notification_id),
+            )
+            LOGGER.exception("Falha ao entregar notificação durável de carreira")
 
     async def open_admin(self, interaction: discord.Interaction) -> None:
         await require_career_admin(interaction)
@@ -572,6 +857,10 @@ class CareerCommands(commands.Cog):
         if self.bot.check_mode:
             return
         for guild in self.bot.guilds:
+            try:
+                await self._initialize_guild(guild)
+            except Exception:
+                LOGGER.exception("Falha ao restaurar o núcleo de carreira e oficialato")
             channel_id = await self.bot.services.settings.get(guild.id, "career_panel_channel_id")
             channel = guild.get_channel(int(channel_id)) if channel_id else None
             if not isinstance(channel, discord.TextChannel):

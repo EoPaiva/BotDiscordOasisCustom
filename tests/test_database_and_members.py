@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 
@@ -35,7 +36,7 @@ async def test_migration_copies_legacy_and_creates_pre_migration_backup(tmp_path
         row = await database.fetchone("SELECT value FROM legacy_value")
         version = await database.fetchone("SELECT MAX(version) AS version FROM schema_migrations")
         assert row["value"] == "preserved"
-        assert version["version"] == 27
+        assert version["version"] == database_module.MIGRATIONS[-1][0]
         assert target.with_suffix(".db.migration-backup").exists()
         assert legacy.exists()
     finally:
@@ -87,6 +88,37 @@ async def test_reads_observe_writes_from_second_runtime_connection(tmp_path):
     finally:
         await bot_database.close()
         await api_database.close()
+
+
+@pytest.mark.asyncio
+async def test_database_serializes_child_task_reads_and_composes_nested_transactions(tmp_path):
+    """A callback cannot start a second SQLite transaction on the same connection."""
+    database = Database(tmp_path / "serialized.db")
+    await database.open()
+    try:
+        await database.execute("CREATE TABLE transaction_probe(value TEXT NOT NULL)")
+        entered = asyncio.Event()
+        callback_calls: list[str] = []
+
+        async def reader():
+            await entered.wait()
+            row = await database.fetchone("SELECT COUNT(*) AS total FROM transaction_probe")
+            return int(row["total"])
+
+        async with database.transaction() as connection:
+            await connection.execute("INSERT INTO transaction_probe(value) VALUES ('outer')")
+            database.after_commit(lambda: callback_calls.append("committed"))
+            async with database.transaction() as nested:
+                await nested.execute("INSERT INTO transaction_probe(value) VALUES ('nested')")
+            entered.set()
+            reader_task = asyncio.create_task(reader())
+            await asyncio.sleep(0)
+            assert not reader_task.done()
+
+        assert await reader_task == 2
+        assert callback_calls == ["committed"]
+    finally:
+        await database.close()
 
 
 @pytest.mark.asyncio
@@ -441,7 +473,7 @@ async def test_migration_nine_preserves_existing_tickets_and_allows_other_subjec
             """,
             (1, 3, '{"subject":"Dúvida","details":"Preciso de ajuda"}', 4, 4),
         )
-        assert version["version"] == 27
+        assert version["version"] == database_module.MIGRATIONS[-1][0]
         assert preserved["ticket_type"] == "REPORT"
         assert json.loads(preserved["payload_json"])["details"] == "legado"
         assert new_id > int(preserved["id"])
@@ -544,8 +576,6 @@ async def test_application_approval_creates_active_member(tmp_path):
 async def test_application_decision_is_concurrency_safe_and_result_delivery_is_idempotent(
     service_bundle,
 ):
-    import asyncio
-
     members = service_bundle["members"]
     database = service_bundle["database"]
     application_id = await members.submit_application(
@@ -579,11 +609,18 @@ async def test_application_decision_is_concurrency_safe_and_result_delivery_is_i
     assert sum(isinstance(result, ConflictError) for result in results) == 1
 
     reviewed = await members.get_application(application_id)
+    delivery_claims = await asyncio.gather(
+        members.claim_application_result_delivery(application_id),
+        members.claim_application_result_delivery(application_id),
+    )
+    delivery_claim = next(item for item in delivery_claims if item is not None)
+    assert sum(item is not None for item in delivery_claims) == 1
     await members.mark_application_delivered(
         application_id,
         int(reviewed["reviewed_by"]),
         9301,
         9401,
+        claim_token=delivery_claim,
     )
     await members.mark_application_delivered(
         application_id,
@@ -605,6 +642,30 @@ async def test_application_decision_is_concurrency_safe_and_result_delivery_is_i
     assert delivered["result_channel_id"] == 9301
     assert delivered["result_message_id"] == 9401
     assert audits["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_pending_member_application_is_never_eligible_for_cleanup(service_bundle):
+    """Legacy/stale delivery flags cannot erase a still-pending review card."""
+    members = service_bundle["members"]
+    database = service_bundle["database"]
+    application_id = await members.submit_application(
+        GUILD_ID,
+        8_002,
+        "Pendente Protegido",
+        "802",
+        "BGR",
+        "Recrutador",
+    )
+    await members.record_application_review_message(application_id, 9_102, 9_202)
+    # This represents a stale flag left by an older delivery cycle.  The
+    # cleanup worker must still protect the active PENDING review card.
+    await database.execute(
+        "UPDATE member_applications SET delivery_status='DELIVERED' WHERE id=?",
+        (application_id,),
+    )
+    assert await members.pending_application_cleanup(GUILD_ID) == []
+    assert await members.claim_application_cleanup(application_id) is None
 
 
 def test_timezone_week_starts_on_monday():

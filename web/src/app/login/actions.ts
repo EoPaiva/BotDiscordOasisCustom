@@ -1,9 +1,12 @@
 "use server";
 
 import { signIn, signOut } from "@/auth";
+import { safeLoginReturnTo } from "@/lib/login-return";
 
-export async function loginWithDiscord() {
-  await signIn("discord", { redirectTo: "/dashboard" });
+export async function loginWithDiscord(formData?: FormData) {
+  await signIn("discord", {
+    redirectTo: safeLoginReturnTo(formData?.get("returnTo"), "/dashboard"),
+  });
 }
 
 export async function loginForRecruitment() {

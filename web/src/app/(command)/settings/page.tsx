@@ -66,7 +66,7 @@ export default async function SettingsPage() {
       code="SYS / 01"
       title="Configurações"
       description="Parâmetros por registry de IDs. Nomes visuais nunca são usados como identificadores."
-      actions={<Link className="button button-secondary" href="/discord">Mapeamento Discord</Link>}
+      actions={<Link className="button button-secondary" href="/identity/discord">Mapeamento Discord</Link>}
     />
     <section className="command-section settings-section"><SectionHeader index="01" title="Regras operacionais" meta="Valores padrão e persistidos" />
       <div className="settings-grid">{editableGeneral.map((key) => {

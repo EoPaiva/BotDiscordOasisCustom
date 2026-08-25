@@ -48,7 +48,7 @@ export async function upsertDiscordRoleMapping(formData: FormData) {
       enabled: input.enabled === "true",
     }),
   });
-  revalidatePath("/discord");
+  revalidatePath("/identity/discord");
 }
 
 const memberSyncSchema = z.object({
@@ -58,7 +58,7 @@ const memberSyncSchema = z.object({
 export async function syncDiscordIdentity(formData: FormData) {
   const { discordId } = memberSyncSchema.parse(Object.fromEntries(formData));
   await commandCenterFetch(`/v1/discord/identity/sync/${discordId}`, { method: "POST" });
-  revalidatePath("/discord");
+  revalidatePath("/identity/discord");
   revalidatePath(`/members/${discordId}`);
 }
 
@@ -68,9 +68,9 @@ export async function previewDiscordReconciliation() {
   const result = await commandCenterFetch<JobReference>("/v1/discord/identity/reconciliation/preview", {
     method: "POST",
   });
-  revalidatePath("/discord");
+  revalidatePath("/identity/discord");
   const jobId = Number(result.job_id ?? result.id ?? 0);
-  redirect(jobId > 0 ? `/discord?previewJob=${jobId}` : "/discord");
+  redirect(jobId > 0 ? `/identity/discord?previewJob=${jobId}` : "/identity/discord");
 }
 
 const applySchema = z.object({
@@ -83,9 +83,9 @@ export async function applyDiscordReconciliation(formData: FormData) {
     method: "POST",
     body: JSON.stringify({ preview_job_id: previewJobId }),
   });
-  revalidatePath("/discord");
+  revalidatePath("/identity/discord");
   const jobId = Number(result.job_id ?? result.id ?? 0);
-  redirect(jobId > 0 ? `/discord?job=${jobId}` : "/discord");
+  redirect(jobId > 0 ? `/identity/discord?job=${jobId}` : "/identity/discord");
 }
 
 const permissionRuleSchema = z.object({
@@ -110,9 +110,9 @@ export async function upsertDiscordPermission(formData: FormData) {
       reason: input.reason || null,
     }),
   });
-  revalidatePath("/discord");
+  revalidatePath("/identity/discord");
   const bumped = bumpedVersions(result.authorization_versions_bumped);
-  redirect(`/discord?permissionAction=saved&permissionBumped=${bumped}#permissoes`);
+  redirect(`/identity/discord?permissionAction=saved&permissionBumped=${bumped}#permissoes`);
 }
 
 const permissionRemovalSchema = z.object({
@@ -128,7 +128,7 @@ export async function removeDiscordPermission(formData: FormData) {
     `/v1/discord/permissions/${input.subjectType}/${input.subjectId}/${encodeURIComponent(input.permission)}`,
     { method: "DELETE" },
   );
-  revalidatePath("/discord");
+  revalidatePath("/identity/discord");
   const bumped = bumpedVersions(result.authorization_versions_bumped);
-  redirect(`/discord?permissionAction=removed&permissionBumped=${bumped}#permissoes`);
+  redirect(`/identity/discord?permissionAction=removed&permissionBumped=${bumped}#permissoes`);
 }

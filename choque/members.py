@@ -11,6 +11,8 @@ from .errors import ConflictError, NotFoundError, ValidationError
 from .models import MemberStatus
 from .time_utils import utc_now_ms
 
+RESULT_DELIVERY_CLAIM_TTL_MS = 5 * 60 * 1000
+
 
 class MemberService:
     def __init__(self, database: Database, audit: AuditService):
@@ -225,6 +227,8 @@ class MemberService:
         actor_id: int,
         result_channel_id: int,
         result_message_id: int,
+        *,
+        claim_token: str | None = None,
     ) -> None:
         async with self.database.transaction() as connection:
             cursor = await connection.execute(
@@ -242,6 +246,16 @@ class MemberService:
                 and int(application["result_message_id"] or 0) == result_message_id
             ):
                 return
+            if claim_token is not None:
+                claim = await connection.execute(
+                    """
+                    SELECT 1 FROM member_application_delivery_claims
+                    WHERE application_id=? AND phase='RESULT' AND claim_token=?
+                    """,
+                    (application_id, claim_token),
+                )
+                if await claim.fetchone() is None:
+                    raise ConflictError("A entrega do resultado foi assumida por outra instância.")
             await connection.execute(
                 """
                 UPDATE member_applications
@@ -263,6 +277,14 @@ class MemberService:
                 },
                 connection=connection,
             )
+            if claim_token is not None:
+                await connection.execute(
+                    """
+                    DELETE FROM member_application_delivery_claims
+                    WHERE application_id=? AND phase='RESULT' AND claim_token=?
+                    """,
+                    (application_id, claim_token),
+                )
 
     async def pending_applications(self, guild_id: int, *, limit: int = 100):
         return await self.database.fetchall(
@@ -284,6 +306,102 @@ class MemberService:
             """,
             (guild_id, limit),
         )
+
+    async def pending_application_cleanup(self, guild_id: int, *, limit: int = 100):
+        return await self.database.fetchall(
+            """
+            SELECT * FROM member_applications
+            WHERE guild_id=? AND status IN ('APPROVED','REJECTED')
+              AND reviewed_at IS NOT NULL AND delivery_status='DELIVERED'
+              AND review_channel_id IS NOT NULL AND review_message_id IS NOT NULL
+            ORDER BY reviewed_at, id LIMIT ?
+            """,
+            (guild_id, limit),
+        )
+
+    async def claim_application_result_delivery(self, application_id: int) -> str | None:
+        return await self._claim_delivery_phase(application_id, "RESULT")
+
+    async def claim_application_cleanup(self, application_id: int) -> str | None:
+        return await self._claim_delivery_phase(application_id, "CLEANUP")
+
+    async def _claim_delivery_phase(self, application_id: int, phase: str) -> str | None:
+        now = utc_now_ms()
+        token = str(uuid.uuid4())
+        if phase not in {"RESULT", "CLEANUP"}:
+            raise ValueError("Fase de entrega inválida.")
+        condition = (
+            "delivery_status='PENDING'"
+            if phase == "RESULT"
+            else (
+                "status IN ('APPROVED','REJECTED') AND reviewed_at IS NOT NULL "
+                "AND delivery_status='DELIVERED' AND review_channel_id IS NOT NULL "
+                "AND review_message_id IS NOT NULL"
+            )
+        )
+        async with self.database.transaction() as connection:
+            await connection.execute(
+                """
+                DELETE FROM member_application_delivery_claims
+                WHERE application_id=? AND phase=? AND claimed_at<?
+                """,
+                (application_id, phase, now - RESULT_DELIVERY_CLAIM_TTL_MS),
+            )
+            cursor = await connection.execute(
+                f"""
+                INSERT OR IGNORE INTO member_application_delivery_claims(
+                    application_id, phase, claim_token, claimed_at
+                )
+                SELECT ?, ?, ?, ?
+                WHERE EXISTS (
+                    SELECT 1 FROM member_applications
+                    WHERE id=? AND {condition}
+                )
+                """,
+                (application_id, phase, token, now, application_id),
+            )
+            return token if cursor.rowcount == 1 else None
+
+    async def release_application_delivery_claim(
+        self, application_id: int, phase: str, claim_token: str
+    ) -> None:
+        await self.database.execute(
+            """
+            DELETE FROM member_application_delivery_claims
+            WHERE application_id=? AND phase=? AND claim_token=?
+            """,
+            (application_id, phase, claim_token),
+        )
+
+    async def mark_application_cleanup_completed(
+        self, application_id: int, *, claim_token: str
+    ) -> None:
+        async with self.database.transaction() as connection:
+            claim = await connection.execute(
+                """
+                SELECT 1 FROM member_application_delivery_claims
+                WHERE application_id=? AND phase='CLEANUP' AND claim_token=?
+                """,
+                (application_id, claim_token),
+            )
+            if await claim.fetchone() is None:
+                raise ConflictError("A limpeza da ficha foi assumida por outra instância.")
+            await connection.execute(
+                """
+                UPDATE member_applications
+                SET review_channel_id=NULL, review_message_id=NULL
+                WHERE id=? AND status IN ('APPROVED','REJECTED')
+                  AND reviewed_at IS NOT NULL AND delivery_status='DELIVERED'
+                """,
+                (application_id,),
+            )
+            await connection.execute(
+                """
+                DELETE FROM member_application_delivery_claims
+                WHERE application_id=? AND phase='CLEANUP' AND claim_token=?
+                """,
+                (application_id, claim_token),
+            )
 
     async def review_application(
         self,

@@ -6,9 +6,12 @@ import pytest_asyncio
 
 from choque.activity import ActivityService
 from choque.audit import AuditService
+from choque.career import CareerService
 from choque.config import Branding
 from choque.database import Database
 from choque.discipline import DisciplineService
+from choque.duty_patrols import DutyPatrolService
+from choque.financial_aid import FinancialAidService
 from choque.members import MemberService
 from choque.module_flags import ModuleFlagService
 from choque.operations import OperationsService
@@ -51,6 +54,7 @@ async def service_bundle(tmp_path):
     clock = MutableClock()
     shifts = ShiftService(database, settings, audit, clock=clock)
     personnel = PersonnelService(database, audit, clock=clock)
+    career = CareerService(database, settings, audit, personnel, shifts, clock=clock)
     discipline = DisciplineService(database, audit, clock=clock)
     training = TrainingService(database, audit, clock=clock)
     activity = ActivityService(database, settings, audit, shifts, clock=clock)
@@ -58,7 +62,11 @@ async def service_bundle(tmp_path):
     tickets = TicketService(database, audit, members, clock=clock)
     rank_sync = RankSyncService(database, settings, audit, clock=clock)
     operations = OperationsService(database, settings, audit, shifts, clock=clock)
+    duty_patrols = DutyPatrolService(
+        database, settings, audit, shifts, operations, clock=clock
+    )
     registration_gate = RegistrationGateService(database, settings, audit)
+    financial_aid = FinancialAidService(database, settings, audit, clock=clock)
     await settings.add_voice_channel(GUILD_ID, CALL_A, "Call A", DISCORD_ID)
     await settings.add_voice_channel(GUILD_ID, CALL_B, "Call B", DISCORD_ID)
     await settings.set(GUILD_ID, "grace_period_seconds", 60, DISCORD_ID)
@@ -86,6 +94,7 @@ async def service_bundle(tmp_path):
         "clock": clock,
         "shifts": shifts,
         "personnel": personnel,
+        "career": career,
         "discipline": discipline,
         "training": training,
         "activity": activity,
@@ -93,7 +102,9 @@ async def service_bundle(tmp_path):
         "tickets": tickets,
         "rank_sync": rank_sync,
         "operations": operations,
+        "duty_patrols": duty_patrols,
         "registration_gate": registration_gate,
+        "financial_aid": financial_aid,
     }
     await shifts.close()
     await database.close()

@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -23,7 +24,7 @@ from .time_utils import utc_now_ms
 
 LOGGER = logging.getLogger(__name__)
 
-PROMPT_VERSION = "recruitment-analyst-v1"
+PROMPT_VERSION = "recruitment-analyst-v2-local"
 RECOMMENDATIONS = {"RECOMMENDED", "REVIEW", "NOT_RECOMMENDED"}
 CONFIDENCE_LEVELS = {"LOW", "MEDIUM", "HIGH"}
 TERMINAL_APPLICATION_STATUSES = {"APPROVED", "REJECTED", "WITHDRAWN", "EXPIRED"}
@@ -66,6 +67,49 @@ DEFAULT_CONTEXT = {
     ],
 }
 
+LOCAL_CRITERION_TERMS = {
+    "DISCIPLINE": ("disciplina", "regra", "procedimento", "ordem", "conduta"),
+    "HIERARCHY": ("hierarquia", "superior", "comando", "ordem", "reportar"),
+    "ROLEPLAY": ("roleplay", "rp", "ic", "ooc", "personagem"),
+    "POSTURE": ("postura", "conduta", "respeito", "controle", "conflito"),
+    "DECISION_MAKING": ("decisao", "decidir", "cenario", "situacao", "agiria"),
+    "COMMUNICATION": ("comunicacao", "comunicar", "informar", "reportar", "relatar"),
+    "TEAMWORK": ("equipe", "grupo", "patrulha", "cooperar", "coordenar"),
+    "RESPONSIBILITY": ("responsabilidade", "dever", "erro", "consequencia", "assumir"),
+    "MOTIVATION": ("motivacao", "ingressar", "choque", "contribuir", "aprender"),
+    "COHERENCE": ("coerencia", "experiencia", "historico", "trajetoria", "respostas"),
+}
+
+LOCAL_REASONING_TERMS = {
+    "porque",
+    "portanto",
+    "assim",
+    "depois",
+    "antes",
+    "caso",
+    "entao",
+    "quando",
+    "para",
+}
+
+LOCAL_GENERIC_ANSWERS = {
+    "sim",
+    "nao",
+    "talvez",
+    "nao sei",
+    "sei la",
+    "depende",
+    "concordo",
+    "discordo",
+}
+
+LOCAL_INSTRUCTION_PATTERNS = (
+    re.compile(r"\bignore\b.{0,80}\b(regras?|instrucoes?|prompt)\b", re.IGNORECASE),
+    re.compile(r"\b(system|assistant|developer)\s*:", re.IGNORECASE),
+    re.compile(r"\bexecute\b.{0,80}\b(banco|codigo|comando|consulta|tool)\b", re.IGNORECASE),
+    re.compile(r"\b(me\s+de|atribua)\b.{0,30}\b(nota|pontuacao)\b", re.IGNORECASE),
+)
+
 
 class AnalysisUnavailableError(RuntimeError):
     pass
@@ -89,6 +133,310 @@ class DisabledRecruitmentAnalysisProvider:
     async def analyze(self, payload: Mapping[str, object]) -> Mapping[str, object]:
         del payload
         raise AnalysisUnavailableError("Provider de análise não configurado.")
+
+
+@dataclass(slots=True)
+class LocalDeterministicRecruitmentAnalysisProvider:
+    """Motor local, explicável e sem rede para apoio à leitura das candidaturas."""
+
+    name: str = "local-deterministic"
+    model: str = "transparent-rules-v1"
+
+    async def analyze(self, payload: Mapping[str, object]) -> Mapping[str, object]:
+        rubric = payload.get("rubric")
+        questions = payload.get("questions")
+        if not isinstance(rubric, list) or not rubric:
+            raise AnalysisOutputError("Rubrica local ausente ou inválida.")
+        if not isinstance(questions, list) or not questions:
+            raise AnalysisOutputError("A análise local exige perguntas respondidas.")
+
+        prepared = [self._prepare_question(item) for item in questions]
+        valid_questions = [item for item in prepared if item["question_id"]]
+        if not valid_questions:
+            raise AnalysisOutputError("A análise local não encontrou questões válidas.")
+
+        injection_ids = [
+            str(item["question_id"])
+            for item in valid_questions
+            if bool(item["instruction_like"])
+        ]
+        generic = [item for item in valid_questions if bool(item["generic"])]
+        detailed = [item for item in valid_questions if float(item["quality"]) >= 7.0]
+        contradictions = self._contradictions(valid_questions)
+
+        criteria: list[dict[str, object]] = []
+        criterion_scores: list[tuple[float, int]] = []
+        direct_coverage = 0
+        for raw_criterion in rubric:
+            if not isinstance(raw_criterion, Mapping):
+                raise AnalysisOutputError("Critério local fora do contrato.")
+            code = str(raw_criterion.get("code", "")).upper().strip()
+            if not code:
+                raise AnalysisOutputError("Critério local sem código.")
+            terms = LOCAL_CRITERION_TERMS.get(code, ())
+            relevant = [
+                item
+                for item in valid_questions
+                if terms
+                and any(
+                    term in str(item["searchable"])
+                    for term in terms
+                )
+            ]
+            if relevant:
+                direct_coverage += 1
+                evidence_rows = sorted(
+                    relevant, key=lambda item: (-float(item["quality"]), str(item["question_id"]))
+                )[:3]
+                score = sum(float(item["quality"]) for item in relevant) / len(relevant)
+                reason = (
+                    "As evidências foram associadas ao critério por termos explícitos das "
+                    "perguntas; a nota reflete completude e detalhamento estrutural."
+                )
+            else:
+                evidence_rows = sorted(
+                    valid_questions,
+                    key=lambda item: (-float(item["quality"]), str(item["question_id"])),
+                )[:1]
+                score = min(6.0, float(evidence_rows[0]["quality"]))
+                reason = (
+                    "Não houve pergunta diretamente associada ao critério; a nota considera "
+                    "somente a estrutura da melhor evidência e exige leitura humana."
+                )
+            if any(item["question_id"] in injection_ids for item in evidence_rows):
+                score = min(score, 4.0)
+            maximum = float(raw_criterion.get("maximum_score", 10) or 10)
+            score = round(max(0.0, min(maximum, score)), 2)
+            weight = int(raw_criterion.get("weight", 0) or 0)
+            criterion_scores.append((score / maximum if maximum else 0.0, weight))
+            criteria.append(
+                {
+                    "criterion": code,
+                    "score": score,
+                    "evidenceQuestionIds": [
+                        str(item["question_id"]) for item in evidence_rows
+                    ],
+                    "reason": reason,
+                }
+            )
+
+        weight_total = sum(weight for _, weight in criterion_scores)
+        weighted_score = (
+            sum(ratio * weight for ratio, weight in criterion_scores) / weight_total * 100
+            if weight_total
+            else 0.0
+        )
+        recommendation = (
+            "RECOMMENDED"
+            if weighted_score >= 85
+            else "REVIEW"
+            if weighted_score >= 65
+            else "NOT_RECOMMENDED"
+        )
+        deterministic_checks = payload.get("deterministicChecks")
+        integrity_count = 0
+        if isinstance(deterministic_checks, Mapping):
+            try:
+                integrity_count = int(
+                    deterministic_checks.get("integrityReviewSignalCount", 0) or 0
+                )
+            except (TypeError, ValueError):
+                integrity_count = 0
+        if injection_ids or contradictions or integrity_count > 0:
+            recommendation = "REVIEW"
+
+        confidence = (
+            "MEDIUM"
+            if not injection_ids
+            and not contradictions
+            and len(generic) <= max(1, len(valid_questions) // 4)
+            and direct_coverage >= max(3, len(criteria) // 2)
+            else "LOW"
+        )
+
+        strengths = [
+            {
+                "text": (
+                    "Resposta estruturalmente detalhada, com justificativa ou sequência de ação."
+                ),
+                "evidenceQuestionIds": [str(item["question_id"])],
+            }
+            for item in detailed[:3]
+            if item["question_id"] not in injection_ids
+        ]
+        concerns: list[dict[str, object]] = []
+        for question_id in injection_ids[:3]:
+            concerns.append(
+                {
+                    "text": (
+                        "A resposta contém instruções dirigidas ao analisador; elas foram ignoradas "
+                        "como comando e o conteúdo deve ser revisto por uma pessoa."
+                    ),
+                    "evidenceQuestionIds": [question_id],
+                }
+            )
+        for item in generic:
+            if len(concerns) >= 6:
+                break
+            concerns.append(
+                {
+                    "text": "Resposta curta ou genérica; solicitar exemplo concreto na entrevista.",
+                    "evidenceQuestionIds": [str(item["question_id"])],
+                }
+            )
+
+        interview_questions: list[dict[str, object]] = []
+        for item in generic[:3]:
+            interview_questions.append(
+                {
+                    "questionIds": [str(item["question_id"])],
+                    "question": (
+                        "Pode detalhar essa resposta com uma situação concreta, sua ação e o resultado?"
+                    ),
+                }
+            )
+        for item in contradictions:
+            if len(interview_questions) >= 5:
+                break
+            interview_questions.append(
+                {
+                    "questionIds": list(item["questionIds"]),
+                    "question": (
+                        "Pode esclarecer a diferença entre as duas respostas sobre sua experiência?"
+                    ),
+                }
+            )
+        if not interview_questions:
+            best = max(valid_questions, key=lambda item: float(item["quality"]))
+            interview_questions.append(
+                {
+                    "questionIds": [str(best["question_id"])],
+                    "question": (
+                        "Pode explicar como aplicaria essa resposta em uma situação real de patrulha?"
+                    ),
+                }
+            )
+
+        total = len(valid_questions)
+        summary = (
+            f"Foram analisadas {total} respostas: {len(detailed)} com detalhamento estrutural "
+            f"e {len(generic)} curtas ou genéricas. O motor local organiza evidências, mas a "
+            "interpretação e a decisão permanecem humanas."
+        )
+        return {
+            "recommendation": recommendation,
+            "confidence": confidence,
+            "criteria": criteria,
+            "strengths": strengths,
+            "concerns": concerns,
+            "contradictions": contradictions,
+            "interviewQuestions": interview_questions,
+            "integrityReviewRecommended": bool(integrity_count or injection_ids),
+            "summary": summary,
+        }
+
+    @classmethod
+    def _prepare_question(cls, raw: object) -> dict[str, object]:
+        if not isinstance(raw, Mapping):
+            raise AnalysisOutputError("Questão local fora do contrato.")
+        question_id = str(raw.get("questionId", "")).upper().strip()
+        question = cls._plain_text(raw.get("question"))
+        answer = cls._plain_text(raw.get("answer"))
+        group = cls._plain_text(raw.get("group"))
+        normalized_question = cls._normalize(question)
+        normalized_answer = cls._normalize(answer)
+        words = re.findall(r"[a-z0-9]+", normalized_answer)
+        unique_ratio = len(set(words)) / len(words) if words else 0.0
+        generic = (
+            not words
+            or len(words) < 7
+            or normalized_answer in LOCAL_GENERIC_ANSWERS
+            or unique_ratio < 0.35
+        )
+        quality = cls._answer_quality(words, normalized_answer, generic)
+        instruction_like = any(
+            pattern.search(normalized_answer) for pattern in LOCAL_INSTRUCTION_PATTERNS
+        )
+        if instruction_like:
+            quality = min(quality, 4.0)
+        return {
+            "question_id": question_id,
+            "question": question,
+            "answer": answer,
+            "normalized_answer": normalized_answer,
+            # O candidato não escolhe qual critério a própria resposta pontua.
+            # A associação usa somente a pergunta e o grupo versionados pelo sistema.
+            "searchable": " ".join((normalized_question, cls._normalize(group))),
+            "quality": quality,
+            "generic": generic,
+            "instruction_like": instruction_like,
+        }
+
+    @staticmethod
+    def _answer_quality(words: list[str], normalized: str, generic: bool) -> float:
+        count = len(words)
+        if count == 0:
+            return 0.0
+        if count < 4:
+            score = 2.0
+        elif count < 8:
+            score = 4.0
+        elif count < 15:
+            score = 6.0
+        elif count < 30:
+            score = 7.5
+        else:
+            score = 8.0
+        if LOCAL_REASONING_TERMS.intersection(words):
+            score += 1.0
+        if re.search(r"\b(report|comunic|inform|verific|cumpr|preserv|ajud|coorden)", normalized):
+            score += 0.5
+        return round(min(4.0 if generic else 9.5, score), 2)
+
+    @classmethod
+    def _contradictions(
+        cls, questions: Sequence[Mapping[str, object]]
+    ) -> list[dict[str, object]]:
+        negative: list[str] = []
+        positive: list[str] = []
+        for item in questions:
+            text = str(item["normalized_answer"])
+            question_id = str(item["question_id"])
+            if re.search(r"\b(nunca|nao)\b.{0,40}\b(participei|trabalhei|fui|experiencia)\b", text):
+                negative.append(question_id)
+            if re.search(r"\b(ja|quando|minha)\b.{0,40}\b(participei|trabalhei|fui|experiencia)\b", text):
+                positive.append(question_id)
+        if not negative or not positive:
+            return []
+        pair = [negative[0], positive[0]]
+        if pair[0] == pair[1]:
+            return []
+        return [
+            {
+                "questionIds": pair,
+                "description": (
+                    "As respostas apresentam afirmações potencialmente incompatíveis sobre "
+                    "experiência anterior; confirmar o contexto na entrevista."
+                ),
+            }
+        ]
+
+    @staticmethod
+    def _plain_text(value: object) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        try:
+            return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError):
+            return str(value).strip()
+
+    @staticmethod
+    def _normalize(value: str) -> str:
+        decomposed = unicodedata.normalize("NFKD", value.casefold())
+        plain = "".join(char for char in decomposed if not unicodedata.combining(char))
+        return re.sub(r"\s+", " ", plain).strip()
 
 
 @dataclass(slots=True)
@@ -172,7 +520,9 @@ class OpenAICompatibleRecruitmentAnalysisProvider:
 
 
 def build_recruitment_analysis_provider() -> RecruitmentAnalysisProvider:
-    provider = os.getenv("RECRUITMENT_AI_PROVIDER", "disabled").strip().casefold()
+    provider = os.getenv("RECRUITMENT_AI_PROVIDER", "local-deterministic").strip().casefold()
+    if provider in {"local", "local-deterministic", "rules", "deterministic"}:
+        return LocalDeterministicRecruitmentAnalysisProvider()
     if provider in {"openai-compatible", "nvidia"}:
         api_key = os.getenv("RECRUITMENT_AI_API_KEY", "").strip()
         model = os.getenv("RECRUITMENT_AI_MODEL", "").strip()
@@ -316,7 +666,7 @@ class RecruitmentAnalysisService:
         return {**values, **versions}
 
     async def update_configuration(
-        self, guild_id: int, actor_id: int, values: Mapping[str, bool]
+        self, guild_id: int, actor_id: int | None, values: Mapping[str, bool]
     ) -> dict[str, object]:
         allowed = {
             "enabled": "recruitment_ai_enabled",
@@ -494,6 +844,71 @@ class RecruitmentAnalysisService:
             analysis_type="FINAL_ASSISTED",
             connection=connection,
         )
+
+    async def supersede_legacy_active_jobs(
+        self, guild_id: int, actor_id: int | None = None
+    ) -> dict[str, int]:
+        """Retira jobs de motores antigos e recria apenas os processos ainda abertos."""
+
+        now = self.clock()
+        superseded = 0
+        requeued = 0
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT j.id,j.application_id,j.analysis_type,a.status AS application_status
+                FROM recruitment_analysis_jobs j
+                JOIN recruitment_applications a ON a.id=j.application_id
+                WHERE j.guild_id=? AND j.status IN ('PENDING','FAILED')
+                  AND j.prompt_version<>?
+                ORDER BY j.id
+                """,
+                (guild_id, PROMPT_VERSION),
+            )
+            rows = await cursor.fetchall()
+            for row in rows:
+                updated = await connection.execute(
+                    """
+                    UPDATE recruitment_analysis_jobs
+                    SET status='OUTDATED',updated_at=?,
+                        last_error_code='SUPERSEDED_BY_LOCAL_ENGINE',
+                        last_error_detail='Substituído pelo motor local versionado.'
+                    WHERE id=? AND status IN ('PENDING','FAILED')
+                    """,
+                    (now, row["id"]),
+                )
+                if updated.rowcount != 1:
+                    continue
+                superseded += 1
+                application_status = str(row["application_status"])
+                if application_status in TERMINAL_APPLICATION_STATUSES:
+                    continue
+                if application_status not in ANALYZABLE_APPLICATION_STATUSES:
+                    continue
+                new_job = await self.enqueue(
+                    guild_id,
+                    int(row["application_id"]),
+                    requested_by=actor_id,
+                    request_reason="AUTOMATIC",
+                    analysis_type=str(row["analysis_type"]),
+                    connection=connection,
+                )
+                if new_job:
+                    requeued += 1
+            if superseded:
+                await self.audit.record(
+                    guild_id,
+                    "AI_ANALYSIS_OUTDATED",
+                    actor_id=actor_id,
+                    after={
+                        "reason": "LOCAL_ENGINE_ACTIVATED",
+                        "prompt_version": PROMPT_VERSION,
+                        "superseded": superseded,
+                        "requeued": requeued,
+                    },
+                    connection=connection,
+                )
+        return {"superseded": superseded, "requeued": requeued}
 
     async def process_pending(self, limit: int = 5) -> int:
         rows = await self.database.fetchall(

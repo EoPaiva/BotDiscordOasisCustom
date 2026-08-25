@@ -13,8 +13,9 @@ retornar conteúdo fora do contrato.
 - `RecruitmentAnalysisProvider` recebe somente perguntas, respostas, rubrica, contexto autorizado,
   checks determinísticos e, na análise final, avaliação da entrevista. Não recebe Discord IDs,
   credenciais, cookies, dados de outros candidatos ou ferramentas.
-- O provider é OpenAI-compatible e selecionado por ambiente; `disabled` é o default seguro. NVIDIA
-  NIM pode ser usado pela mesma interface sem acoplar domínio ou UI ao fornecedor.
+- O provider padrão é `local-deterministic`: um motor explicável, sem rede, chave ou serviço
+  externo. A interface OpenAI-compatible permanece somente como compatibilidade opt-in e nunca é
+  necessária para o recrutamento funcionar.
 - Envio da candidatura e decisão humana não dependem do provider. Jobs persistidos possuem retry
   limitado, backoff, cache por hash e histórico imutável.
 - Rubrica, contexto, prompt, provider e modelo são versionados. Publicar nova rubrica/contexto marca
@@ -27,6 +28,7 @@ retornar conteúdo fora do contrato.
 
 ## Consequências
 
-Um provider real exige segredo e autorização de produção. Sem isso, o módulo permanece configurado,
-testável e inativo, sem inventar uma análise. A disponibilidade da IA nunca reduz a disponibilidade
-do recrutamento.
+O motor local pode permanecer ativo sem segredo e sem consumir uma aplicação separada. Ele é
+deliberadamente conservador: organiza evidências e perguntas, não simula compreensão que não possui
+e mantém a decisão humana. Um modelo probabilístico futuro exige spike isolado e pode ser recusado
+sem reduzir a disponibilidade do recrutamento.

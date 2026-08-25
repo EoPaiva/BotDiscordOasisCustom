@@ -87,12 +87,21 @@ class PersonnelService:
         reason: str,
         *,
         enqueue_discord_sync: bool = False,
+        source: str = "MANUAL",
+        evidence_locator: str | None = None,
+        observations: str | None = None,
+        article_code: str | None = None,
+        correlation_id: str | None = None,
     ) -> dict[str, object]:
         movement_reason = reason.strip()
         if not movement_reason:
             raise ValidationError("Informe o motivo da movimentação.")
         if discord_id == actor_id:
             raise PermissionDenied("Você não pode alterar a própria patente.")
+        source = source.strip().upper()
+        if source not in {"MANUAL", "OFFICER_DECISION", "DISCORD_SYNC"}:
+            raise ValidationError("Origem da movimentação inválida.")
+        action_correlation_id = correlation_id or str(uuid.uuid4())
         async with self.database.transaction() as connection:
             cursor = await connection.execute(
                 """
@@ -143,8 +152,9 @@ class PersonnelService:
                 """
                 INSERT INTO personnel_actions(
                     guild_id, member_id, discord_id, action_type, from_rank_id,
-                    to_rank_id, reason, actor_id, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    to_rank_id, reason, actor_id, created_at, source,
+                    evidence_locator, observations, article_code, correlation_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     guild_id,
@@ -156,6 +166,11 @@ class PersonnelService:
                     movement_reason,
                     actor_id,
                     now,
+                    source,
+                    evidence_locator.strip() if evidence_locator else None,
+                    observations.strip() if observations else None,
+                    article_code.strip() if article_code else None,
+                    action_correlation_id,
                 ),
             )
             action_id = int(cursor.lastrowid)
@@ -165,9 +180,58 @@ class PersonnelService:
                 actor_id=actor_id,
                 target_id=discord_id,
                 before={"rank_id": member["rank_id"], "rank_name": member["rank_name"]},
-                after={"rank_id": target["id"], "rank_name": target["name"]},
+                after={
+                    "rank_id": target["id"],
+                    "rank_name": target["name"],
+                    "source": source,
+                    "evidence_locator": evidence_locator,
+                    "observations": observations,
+                    "article_code": article_code,
+                },
                 reason=movement_reason,
+                correlation_id=f"personnel-rank-{action_correlation_id}",
                 connection=connection,
+            )
+            notification_type = (
+                "PROMOTION"
+                if action is PersonnelActionType.PROMOTION
+                else "DEMOTION"
+            )
+            channel_setting_key = (
+                "career_promotion_channel_id"
+                if action is PersonnelActionType.PROMOTION
+                else "career_demotion_channel_id"
+            )
+            await connection.execute(
+                """
+                INSERT OR IGNORE INTO career_notifications(
+                    guild_id, notification_type, subject_id, target_discord_id,
+                    channel_setting_key, payload_json, status, attempts,
+                    available_at, correlation_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', 0, ?, ?, ?, ?)
+                """,
+                (
+                    guild_id,
+                    notification_type,
+                    action_id,
+                    discord_id,
+                    channel_setting_key,
+                    json.dumps(
+                        {
+                            "discord_id": discord_id,
+                            "from_rank_name": member["rank_name"],
+                            "to_rank_name": target["name"],
+                            "reason": movement_reason,
+                            "source": source,
+                            "actor_id": actor_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    now,
+                    f"personnel-notification-{action_correlation_id}",
+                    now,
+                    now,
+                ),
             )
             sync_correlation_id = None
             if enqueue_discord_sync:
@@ -210,6 +274,7 @@ class PersonnelService:
             "to_prefix": target["prefix"],
             "to_role_id": target["discord_role_id"],
             "sync_correlation_id": sync_correlation_id,
+            "correlation_id": action_correlation_id,
         }
 
     async def career_profile(self, guild_id: int, discord_id: int):
@@ -256,7 +321,8 @@ class PersonnelService:
             SELECT * FROM (
                 SELECT 'P-' || pa.id AS id, pa.action_type,
                        pa.from_rank_id, pa.to_rank_id, pa.actor_id, pa.reason,
-                       pa.created_at, 'FORMAL_PANEL' AS source,
+                       pa.created_at, pa.source,
+                       pa.evidence_locator, pa.observations, pa.article_code,
                        fr.name AS from_rank_name, tr.name AS to_rank_name
                 FROM personnel_actions pa
                 LEFT JOIN ranks fr ON fr.id=pa.from_rank_id
@@ -267,6 +333,8 @@ class PersonnelService:
                        rse.from_rank_id, rse.to_rank_id, rse.actor_id,
                        'Sincronização automática de patente' AS reason,
                        rse.created_at, rse.source,
+                       NULL AS evidence_locator, NULL AS observations,
+                       NULL AS article_code,
                        fr.name AS from_rank_name, tr.name AS to_rank_name
                 FROM rank_sync_events rse
                 LEFT JOIN ranks fr ON fr.id=rse.from_rank_id

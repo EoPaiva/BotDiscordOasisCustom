@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 import choque.audit as audit_module
-from choque.audit import AuditService
+from choque.audit import AuditService, should_deliver_to_audit_channel
 from choque.config import Branding
+from choque.database import Database
+from choque.settings import SettingsService
 from cogs.shift_commands import ShiftCommands
 
 from .conftest import DISCORD_ID, GUILD_ID
@@ -13,12 +17,14 @@ from .conftest import DISCORD_ID, GUILD_ID
 class FakeChannel:
     def __init__(self, *, fail: bool = False) -> None:
         self.sent = 0
+        self.payloads: list[dict] = []
         self.fail = fail
 
     async def send(self, **kwargs):
         if self.fail:
             raise audit_module.discord.DiscordException("temporary delivery failure")
         self.sent += 1
+        self.payloads.append(kwargs)
 
 
 class FakeBot:
@@ -127,6 +133,111 @@ async def test_audit_outbox_waits_for_channel_configuration(service_bundle):
 
 
 @pytest.mark.asyncio
+async def test_audit_delivery_is_claimed_once_across_two_runtime_connections(tmp_path, monkeypatch):
+    """Bot callbacks and the retry loop cannot publish the same audit twice."""
+    path = tmp_path / "shared-audit.db"
+    first_database = Database(path)
+    second_database = Database(path)
+    await first_database.open()
+    await second_database.open()
+    try:
+        first_settings = SettingsService(first_database)
+        second_settings = SettingsService(second_database)
+        channel = FakeChannel()
+        monkeypatch.setattr(audit_module.discord, "TextChannel", FakeChannel)
+        first_audit = AuditService(first_database, first_settings, Branding(), bot=FakeBot(channel))
+        second_audit = AuditService(second_database, second_settings, Branding(), bot=FakeBot(channel))
+        await first_settings.set(GUILD_ID, "audit_channel_id", 777, DISCORD_ID)
+        audit_id = await first_audit.record(GUILD_ID, "CONCURRENT_AUDIT")
+
+        delivered = await asyncio.gather(
+            first_audit.deliver_pending(), second_audit.deliver_pending()
+        )
+
+        row = await first_database.fetchone("SELECT * FROM audit_logs WHERE id=?", (audit_id,))
+        assert sum(delivered) == 1
+        assert channel.sent == 1
+        assert row["delivery_status"] == "DELIVERED"
+        assert row["delivery_attempts"] == 1
+    finally:
+        await second_database.close()
+        await first_database.close()
+
+
+@pytest.mark.asyncio
+async def test_audit_coalesces_only_historical_repeated_access_grants(service_bundle, monkeypatch):
+    database = service_bundle["database"]
+    settings = service_bundle["settings"]
+    channel = FakeChannel()
+    monkeypatch.setattr(audit_module.discord, "TextChannel", FakeChannel)
+    audit = AuditService(database, settings, Branding(), bot=FakeBot(channel))
+    await settings.set(GUILD_ID, "audit_channel_id", 777, DISCORD_ID)
+    await database.execute("UPDATE audit_logs SET delivery_status='DELIVERED'")
+    for _ in range(3):
+        await audit.record(GUILD_ID, "REGISTRATION_ACCESS_GRANTED", target_id=8001)
+    await audit.record(GUILD_ID, "REGISTRATION_ACCESS_GRANTED", target_id=8002)
+
+    # The historical duplicate compaction remains useful, but routine access
+    # grants must no longer repopulate the human channel after a restart.
+    assert await audit.deliver_pending(limit=20) == 0
+    rows = await database.fetchall(
+        """
+        SELECT target_id, delivery_status, last_error FROM audit_logs
+        WHERE action='REGISTRATION_ACCESS_GRANTED' ORDER BY id
+        """
+    )
+    assert channel.sent == 0
+    assert [str(row["delivery_status"]) for row in rows] == [
+        "DELIVERED",
+        "DELIVERED",
+        "DELIVERED",
+        "DELIVERED",
+    ]
+    assert "Coalescida" in str(rows[0]["last_error"])
+    assert "Coalescida" in str(rows[1]["last_error"])
+    assert "Suprimida" in str(rows[2]["last_error"])
+    assert "Suprimida" in str(rows[3]["last_error"])
+
+
+@pytest.mark.asyncio
+async def test_audit_keeps_essential_alerts_and_suppresses_routine_successes(
+    service_bundle, monkeypatch
+):
+    """The Discord channel is concise while the durable audit trail stays complete."""
+    database = service_bundle["database"]
+    settings = service_bundle["settings"]
+    channel = FakeChannel()
+    monkeypatch.setattr(audit_module.discord, "TextChannel", FakeChannel)
+    audit = AuditService(database, settings, Branding(), bot=FakeBot(channel))
+    await settings.set(GUILD_ID, "audit_channel_id", 777, DISCORD_ID)
+    await database.execute("UPDATE audit_logs SET delivery_status='DELIVERED'")
+
+    routine_id = await audit.record(GUILD_ID, "REGISTRATION_ACCESS_GRANTED", target_id=8001)
+    critical_id = await audit.record(
+        GUILD_ID,
+        "PUNISHMENT_APPLIED",
+        actor_id=DISCORD_ID,
+        target_id=8001,
+        reason="teste de política",
+    )
+
+    assert should_deliver_to_audit_channel("REGISTRATION_ACCESS_GRANTED") is False
+    assert should_deliver_to_audit_channel("PUNISHMENT_APPLIED") is True
+    assert should_deliver_to_audit_channel("DISCORD_SYNC_FAILED") is True
+    assert await audit.deliver_pending(limit=20) == 1
+
+    routine = await database.fetchone("SELECT * FROM audit_logs WHERE id=?", (routine_id,))
+    critical = await database.fetchone("SELECT * FROM audit_logs WHERE id=?", (critical_id,))
+    assert routine["delivery_status"] == "DELIVERED"
+    assert routine["delivery_attempts"] == 0
+    assert "Suprimida" in str(routine["last_error"])
+    assert critical["delivery_status"] == "DELIVERED"
+    assert critical["delivery_attempts"] == 1
+    assert critical["last_error"] is None
+    assert channel.sent == 1
+
+
+@pytest.mark.asyncio
 async def test_panel_upsert_reuses_single_identity(service_bundle):
     settings = service_bundle["settings"]
     database = service_bundle["database"]
@@ -149,7 +260,11 @@ async def test_service_panel_edits_stored_message_instead_of_sending_new(service
     cog.services = type(
         "FakeServices",
         (),
-        {"settings": settings, "shifts": service_bundle["shifts"]},
+        {
+            "settings": settings,
+            "shifts": service_bundle["shifts"],
+            "duty_patrols": service_bundle["duty_patrols"],
+        },
     )()
     cog.branding = Branding()
     await cog.update_service_panel(GUILD_ID)
