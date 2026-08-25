@@ -2164,11 +2164,17 @@ class TicketCommands(commands.Cog):
         if self.bot.check_mode:
             return
         targets = {
-            "RECRUITMENT": "recruitment_panel_channel_id",
-            "TICKET": "ticket_panel_channel_id",
-            "RECRUITMENT_ADMIN": "recruitment_queue_channel_id",
+            "RECRUITMENT": ("recruitment_panel_channel_id", "RECRUITMENT"),
+            "TICKET": ("ticket_panel_channel_id", "TICKETS"),
+            "RECRUITMENT_ADMIN": ("recruitment_queue_channel_id", "RECRUITMENT"),
         }
         for guild in self.bot.guilds:
+            recruitment_enabled = await self.services.modules.is_enabled(
+                guild.id, "RECRUITMENT"
+            )
+            tickets_enabled = await self.services.modules.is_enabled(guild.id, "TICKETS")
+            if not recruitment_enabled and not tickets_enabled:
+                continue
             if guild.me is not None:
                 await self.services.settings.set(
                     guild.id,
@@ -2176,7 +2182,13 @@ class TicketCommands(commands.Cog):
                     guild.me.top_role.id,
                     self.bot.user.id if self.bot.user else None,
                 )
-            for panel_type, setting_key in targets.items():
+            module_states = {
+                "RECRUITMENT": recruitment_enabled,
+                "TICKETS": tickets_enabled,
+            }
+            for panel_type, (setting_key, module_key) in targets.items():
+                if not module_states[module_key]:
+                    continue
                 channel_id = await self.services.settings.get(guild.id, setting_key)
                 channel = guild.get_channel(int(channel_id)) if channel_id else None
                 if isinstance(channel, discord.TextChannel):
@@ -2186,12 +2198,13 @@ class TicketCommands(commands.Cog):
                         LOGGER.exception(
                             "Falha ao restaurar painel %s da guild %s", panel_type, guild.id
                         )
-            try:
-                await self.publish_partnership_panels(guild)
-            except Exception:
-                LOGGER.exception(
-                    "Falha ao restaurar Transferências e Parcerias da guild %s", guild.id
-                )
+            if tickets_enabled:
+                try:
+                    await self.publish_partnership_panels(guild)
+                except Exception:
+                    LOGGER.exception(
+                        "Falha ao restaurar Transferências e Parcerias da guild %s", guild.id
+                    )
             for ticket in await self.services.tickets.tickets_requiring_rooms(guild.id):
                 try:
                     await self.ensure_ticket_room(guild, int(ticket["id"]))

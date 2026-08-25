@@ -548,6 +548,8 @@ class MemberCommands(commands.Cog):
         if self.bot.check_mode:
             return
         for guild in self.bot.guilds:
+            if not await self.services.modules.is_enabled(guild.id, "REGISTRATION"):
+                continue
             panel_channel_id = await self.services.settings.get(
                 guild.id,
                 "registration_panel_channel_id",

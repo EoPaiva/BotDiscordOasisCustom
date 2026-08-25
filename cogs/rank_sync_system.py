@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 import discord
 from discord.ext import commands
 
+from choque.models import MemberStatus
 from choque.rank_sync import ReconciliationSummary
 
 LOGGER = logging.getLogger(__name__)
@@ -223,6 +224,75 @@ class RankSyncSystem(commands.Cog):
         )
         self._pending[key] = task
 
+    async def _mirror_source_identity(self, member: discord.Member) -> bool:
+        """Bootstrap a member in a module-only guild from the canonical guild.
+
+        The bridge is opt-in through guild settings and mirrors only roles listed
+        in the audited role map.  It never copies Discord permissions wholesale.
+        """
+        source_guild_id = await self.services.settings.get(
+            member.guild.id, "identity_source_guild_id"
+        )
+        role_map = await self.services.settings.get(
+            member.guild.id, "identity_source_role_map", {}
+        )
+        if not source_guild_id or not isinstance(role_map, dict):
+            return False
+        source_guild = self.bot.get_guild(int(source_guild_id))
+        if source_guild is None:
+            return False
+        source_member = source_guild.get_member(member.id)
+        if source_member is None:
+            try:
+                source_member = await source_guild.fetch_member(member.id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+        source_record = await self.services.members.get(source_guild.id, member.id)
+        if not source_record:
+            return False
+        target_rank_id = None
+        if source_record["rank_level"] is not None:
+            target_rank = await self.services.database.fetchone(
+                "SELECT id FROM ranks WHERE guild_id=? AND level=? AND active=1",
+                (member.guild.id, int(source_record["rank_level"])),
+            )
+            target_rank_id = int(target_rank["id"]) if target_rank else None
+        status = MemberStatus(str(source_record["status"]))
+        await self.services.members.create_or_update(
+            member.guild.id,
+            member.id,
+            discord_nick=member.display_name,
+            mta_nick=str(source_record["mta_nick"]),
+            character_id=source_record["character_id"],
+            unit=source_record["unit"],
+            rank_id=target_rank_id,
+            actor_id=self.bot.user.id if self.bot.user else member.id,
+            status=status,
+        )
+        await self.services.database.execute(
+            "UPDATE members SET joined_at=? WHERE guild_id=? AND discord_id=?",
+            (int(source_record["joined_at"]), member.guild.id, member.id),
+        )
+        source_roles = {str(role.id) for role in source_member.roles}
+        mirrored: list[discord.Role] = []
+        bot_member = member.guild.me
+        if bot_member is None:
+            return True
+        for source_role_id in source_roles:
+            target_role_id = role_map.get(source_role_id)
+            if target_role_id is None or not str(target_role_id).isdigit():
+                continue
+            role = member.guild.get_role(int(target_role_id))
+            if role is not None and not role.managed and role < bot_member.top_role:
+                mirrored.append(role)
+        missing = [role for role in mirrored if role not in member.roles]
+        if missing:
+            await member.add_roles(
+                *missing,
+                reason="CHOQUE - BGR • espelho autorizado de identidade entre servidores",
+            )
+        return True
+
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
         if after.bot:
@@ -273,6 +343,14 @@ class RankSyncSystem(commands.Cog):
     async def on_member_join(self, member: discord.Member) -> None:
         if member.bot:
             return
+        try:
+            await self._mirror_source_identity(member)
+        except Exception:
+            LOGGER.exception(
+                "Falha ao espelhar identidade do membro %s na guild %s",
+                member.id,
+                member.guild.id,
+            )
         registered = await self.services.database.fetchone(
             "SELECT 1 FROM members WHERE guild_id=? AND discord_id=?",
             (member.guild.id, member.id),
@@ -397,6 +475,9 @@ class RankSyncSystem(commands.Cog):
                 if guild.id in self._reconciled_guilds:
                     continue
                 try:
+                    for member in guild.members:
+                        if not member.bot:
+                            await self._mirror_source_identity(member)
                     await self._recover_recent_member_audits(guild)
                     summary = await self.services.rank_sync.reconcile_guild(
                         guild,

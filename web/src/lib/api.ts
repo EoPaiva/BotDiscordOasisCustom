@@ -4,6 +4,7 @@ import { createHash, createHmac, randomUUID } from "node:crypto";
 
 import { normalizeAccessContext, type AccessContext } from "@/lib/access";
 import { getDiscordSessionIdentity, getRecruitmentCandidateIdentity } from "@/lib/identity";
+import { getRecruitmentGuildId } from "@/lib/recruitment-guild";
 import { normalizeCommandCenterPath } from "@/lib/request-target";
 export type { AccessContext } from "@/lib/access";
 export { normalizeCommandCenterPath } from "@/lib/request-target";
@@ -158,6 +159,11 @@ function integrationConfiguration() {
   return { apiUrl: apiUrl.replace(/\/$/, ""), internalSecret, guildId };
 }
 
+async function recruitmentIntegrationConfiguration() {
+  const configuration = integrationConfiguration();
+  return { ...configuration, guildId: await getRecruitmentGuildId() };
+}
+
 async function decodeResponse<T>(response: Response, correlationId: string): Promise<T> {
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -174,7 +180,7 @@ export async function recruitmentPublicFetch<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const { apiUrl, internalSecret, guildId } = integrationConfiguration();
+  const { apiUrl, internalSecret, guildId } = await recruitmentIntegrationConfiguration();
   const correlationId = randomUUID();
   const target = normalizeCommandCenterPath(path);
   const response = await fetch(`${apiUrl}${target}`, {
@@ -194,7 +200,7 @@ export async function recruitmentCandidateFetch<T>(
   if (!identity) {
     throw new CommandCenterApiError("Identificação da candidatura necessária.", 401, "auth");
   }
-  const { apiUrl, internalSecret, guildId } = integrationConfiguration();
+  const { apiUrl, internalSecret, guildId } = await recruitmentIntegrationConfiguration();
   const correlationId = randomUUID();
   const target = normalizeCommandCenterPath(path);
   const response = await fetch(`${apiUrl}${target}`, {

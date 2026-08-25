@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 
 import aiosqlite
 
@@ -9,6 +9,7 @@ from .audit import AuditService
 from .database import Database
 from .errors import ConflictError, NotFoundError, ValidationError
 from .models import MemberStatus
+from .settings import SettingsService
 from .time_utils import utc_now_ms
 
 DAY_MS = 86_400_000
@@ -22,11 +23,33 @@ class TrainingService:
         database: Database,
         audit: AuditService,
         *,
+        settings: SettingsService | None = None,
         clock: Callable[[], int] = utc_now_ms,
     ) -> None:
         self.database = database
         self.audit = audit
+        self.settings = settings
         self.clock = clock
+
+    async def _canonical_member_context(
+        self,
+        guild_id: int,
+        discord_id: int,
+        local_member: Mapping[str, object],
+    ) -> tuple[int, Mapping[str, object]]:
+        """Resolve read-only service history for a module-only satellite guild."""
+        if self.settings is None:
+            return guild_id, local_member
+        source_guild_id = await self.settings.get(guild_id, "identity_source_guild_id")
+        if not source_guild_id or int(source_guild_id) == guild_id:
+            return guild_id, local_member
+        source_member = await self.database.fetchone(
+            "SELECT * FROM members WHERE guild_id=? AND discord_id=?",
+            (int(source_guild_id), discord_id),
+        )
+        if source_member is None:
+            return guild_id, local_member
+        return int(source_guild_id), source_member
 
     @staticmethod
     def _required(value: str, label: str) -> str:
@@ -853,6 +876,9 @@ class TrainingService:
             minimum_rank = course["minimum_rank_level"]
             if minimum_rank is not None and int(member["rank_level"]) < int(minimum_rank):
                 reasons.append(f"patente mínima de nível {minimum_rank} não atendida")
+            history_guild_id, history_member = await self._canonical_member_context(
+                guild_id, discord_id, member
+            )
             cursor = await connection.execute(
                 """
                 SELECT COALESCE(SUM(
@@ -864,12 +890,12 @@ class TrainingService:
                 WHERE s.guild_id=? AND s.member_id=? AND s.status='CLOSED'
                   AND s.validation_status='VALID'
                 """,
-                (guild_id, member["id"]),
+                (history_guild_id, history_member["id"]),
             )
             total_ms = max(0, int((await cursor.fetchone())["total_ms"]))
             if total_ms < int(course["minimum_valid_hours_ms"]):
                 reasons.append("tempo mínimo de serviço válido não atendido")
-            tenure_ms = max(0, self.clock() - int(member["joined_at"]))
+            tenure_ms = max(0, self.clock() - int(history_member["joined_at"]))
             if tenure_ms < int(course["minimum_tenure_days"]) * DAY_MS:
                 reasons.append("tempo mínimo de corporação não atendido")
             if bool(course["require_no_active_suspension"]):
@@ -879,7 +905,12 @@ class TrainingService:
                       AND punishment_type='SUSPENSION' AND status IN ('SCHEDULED','ACTIVE')
                       AND starts_at<=? AND (ends_at IS NULL OR ends_at>?) LIMIT 1
                     """,
-                    (guild_id, member["id"], self.clock(), self.clock()),
+                    (
+                        history_guild_id,
+                        history_member["id"],
+                        self.clock(),
+                        self.clock(),
+                    ),
                 )
                 if await cursor.fetchone():
                     reasons.append("suspensão ativa impede a solicitação")

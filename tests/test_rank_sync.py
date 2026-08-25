@@ -20,13 +20,19 @@ from .conftest import DISCORD_ID, GUILD_ID
 class FakeRole:
     id: int
     name: str
+    position: int = 1
+    managed: bool = False
+
+    def __lt__(self, other) -> bool:
+        return self.position < other.position
 
 
 class FakeGuild:
-    def __init__(self, roles: list[FakeRole]) -> None:
-        self.id = GUILD_ID
+    def __init__(self, roles: list[FakeRole], *, guild_id: int = GUILD_ID) -> None:
+        self.id = guild_id
         self._roles = {role.id: role for role in roles}
         self._members: dict[int, FakeMember] = {}
+        self.me = SimpleNamespace(top_role=FakeRole(999_999, "Bot", position=100))
 
     def get_role(self, role_id: int):
         return self._roles.get(role_id)
@@ -62,6 +68,10 @@ class FakeMember:
         self.nickname_edits = 0
         guild._members[discord_id] = self
 
+    @property
+    def display_name(self) -> str:
+        return self.nick or f"Membro {self.id}"
+
     async def add_roles(self, *roles: FakeRole, reason: str) -> None:
         existing = {role.id for role in self.roles}
         self.roles.extend(role for role in roles if role.id not in existing)
@@ -88,9 +98,13 @@ class FakeBot:
         self.services = services
         self.check_mode = False
         self.guilds: list[FakeGuild] = []
+        self.user = SimpleNamespace(id=999_999)
 
     def get_cog(self, name: str):
         return None
+
+    def get_guild(self, guild_id: int):
+        return next((guild for guild in self.guilds if guild.id == guild_id), None)
 
 
 async def seed_ranks(service_bundle, *, current_level: int = 1):
@@ -598,3 +612,44 @@ async def test_registration_initial_rank_prefers_existing_discord_rank(service_b
         GUILD_ID, {ranks[2].id, ranks[3].id}
     )
     assert selected == rank_ids[3]
+
+
+@pytest.mark.asyncio
+async def test_satellite_guild_mirrors_canonical_identity_and_allowlisted_roles(
+    service_bundle,
+):
+    source_roles, _ = await seed_ranks(service_bundle, current_level=1)
+    target_guild_id = GUILD_ID + 1
+    target_role = FakeRole(19_001, "Recruta REC", position=2)
+    await service_bundle["database"].execute(
+        """
+        INSERT INTO ranks(guild_id,name,prefix,level,discord_role_id,created_at)
+        VALUES(?,?,?,?,?,1)
+        """,
+        (target_guild_id, "Recruta", "[REC]", 1, target_role.id),
+    )
+    await service_bundle["settings"].set(
+        target_guild_id, "identity_source_guild_id", GUILD_ID, DISCORD_ID
+    )
+    await service_bundle["settings"].set(
+        target_guild_id,
+        "identity_source_role_map",
+        {str(source_roles[1].id): target_role.id},
+        DISCORD_ID,
+    )
+
+    source_guild = FakeGuild(list(source_roles.values()))
+    FakeMember(source_guild, DISCORD_ID, [source_roles[1]], nick="Fonte")
+    target_guild = FakeGuild([target_role], guild_id=target_guild_id)
+    target_member = FakeMember(target_guild, DISCORD_ID, [], nick="Destino")
+    bot = FakeBot(SimpleNamespace(**service_bundle))
+    bot.guilds = [source_guild, target_guild]
+    cog = RankSyncSystem(bot)
+
+    assert await cog._mirror_source_identity(target_member)
+
+    mirrored = await service_bundle["members"].get(target_guild_id, DISCORD_ID)
+    assert mirrored["mta_nick"] == "Choque_User"
+    assert mirrored["character_id"] == "77"
+    assert mirrored["rank_level"] == 1
+    assert [role.id for role in target_member.roles] == [target_role.id]

@@ -196,6 +196,83 @@ async def test_course_application_checks_roles_and_pending_duplicate(service_bun
 
 
 @pytest.mark.asyncio
+async def test_satellite_course_uses_canonical_service_history(service_bundle):
+    source_guild_id = GUILD_ID
+    target_guild_id = GUILD_ID + 1
+    training = service_bundle["training"]
+    database = service_bundle["database"]
+    settings = service_bundle["settings"]
+    training.settings = settings
+
+    source_member = await database.fetchone(
+        "SELECT * FROM members WHERE guild_id=? AND discord_id=?",
+        (source_guild_id, DISCORD_ID),
+    )
+    await service_bundle["members"].create_or_update(
+        target_guild_id,
+        DISCORD_ID,
+        discord_nick="Membro REC",
+        mta_nick=str(source_member["mta_nick"]),
+        character_id=source_member["character_id"],
+        unit="BGR",
+        rank_id=None,
+        actor_id=900,
+    )
+    now = service_bundle["clock"].value
+    await database.execute(
+        """
+        INSERT INTO shifts(
+            guild_id,member_id,status,started_at,ended_at,closed_at,end_reason,
+            created_by,created_at,patrol_duration_ms,gross_duration_ms,
+            validation_status,automatic_validation_status,validation_source
+        ) VALUES(?,?,'CLOSED',?,?,?,?,?,?,?,?,'VALID','VALID','LEGACY')
+        """,
+        (
+            source_guild_id,
+            int(source_member["id"]),
+            now - 18_000_000,
+            now,
+            now,
+            "TEST_CANONICAL_HISTORY",
+            900,
+            now,
+            18_000_000,
+            18_000_000,
+        ),
+    )
+    await settings.set(
+        target_guild_id, "identity_source_guild_id", source_guild_id, actor_id=900
+    )
+    imported = await training.import_catalog_course(
+        target_guild_id,
+        actor_id=900,
+        internal_code="curso_rec",
+        name="Curso REC",
+        description="Curso com histórico canônico",
+        course_role_id=333,
+        course_role_name="Curso REC",
+        passing_score=90,
+        cooldown_days=14,
+        enrollment_status="OPEN",
+        notes=None,
+        source_channel_id=400,
+        source_message_id=401,
+        source_content_sha256="b" * 64,
+        requirements=[(444, "Membro REC")],
+    )
+    await database.execute(
+        "UPDATE course_catalog SET minimum_valid_hours_ms=? WHERE id=?",
+        (14_400_000, int(imported["course_id"])),
+    )
+
+    applied = await training.apply_to_course(
+        target_guild_id, DISCORD_ID, "curso_rec", [444]
+    )
+
+    assert applied["status"] == "PENDING"
+
+
+@pytest.mark.asyncio
 async def test_course_application_rejects_closed_and_already_qualified(service_bundle):
     training = service_bundle["training"]
     await import_course(service_bundle, status="CLOSED")

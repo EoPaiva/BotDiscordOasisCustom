@@ -97,7 +97,7 @@ class ChoqueBot(commands.Bot):
         personnel = PersonnelService(database, audit)
         career = CareerService(database, settings, audit, personnel, shifts)
         discipline = DisciplineService(database, audit)
-        training = TrainingService(database, audit)
+        training = TrainingService(database, audit, settings=settings)
         activity = ActivityService(database, settings, audit, shifts)
         requests = RequestService(database, audit, clock=utc_now_ms)
         tickets = TicketService(database, audit, members)
