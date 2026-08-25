@@ -48,9 +48,27 @@ CHANNELS = (
     ChannelSpec("recruitment.requirements", "recruitment", "Requisitos", "📋"),
     ChannelSpec("recruitment.panel", "recruitment", "Recrutamento", "📝"),
     ChannelSpec("recruitment.public_status", "recruitment", "Candidaturas Recebidas", "📨"),
-    ChannelSpec("recruitment.review", "recruitment", "Mesa de Análise", "🛡️", private=True),
-    ChannelSpec("recruitment.approved", "recruitment", "Aprovados", "✅"),
-    ChannelSpec("recruitment.rejected", "recruitment", "Reprovados", "❌"),
+    ChannelSpec(
+        "recruitment.review",
+        "recruitment_admin",
+        "Mesa de Análise",
+        "🛡️",
+        private=True,
+    ),
+    ChannelSpec(
+        "recruitment.approved",
+        "recruitment_admin",
+        "Aprovados",
+        "✅",
+        private=True,
+    ),
+    ChannelSpec(
+        "recruitment.rejected",
+        "recruitment_admin",
+        "Reprovados",
+        "❌",
+        private=True,
+    ),
     ChannelSpec(
         "recruitment.main_server",
         "recruitment",
@@ -717,11 +735,23 @@ async def run(args: argparse.Namespace) -> int:
             "recruitment": await _ensure_category(
                 api, target_guild_id, target_channels, format_category_name(1, "Recrutamento")
             ),
+            "recruitment_admin": await _ensure_category(
+                api,
+                target_guild_id,
+                target_channels,
+                format_category_name(2, "Administração do Recrutamento"),
+                _permission_overwrites(
+                    target_guild_id,
+                    staff_role_ids=staff_role_ids,
+                    private=True,
+                    writable=True,
+                ),
+            ),
             "courses": await _ensure_category(
                 api,
                 target_guild_id,
                 target_channels,
-                format_category_name(2, "Cursos"),
+                format_category_name(3, "Cursos"),
                 _permission_overwrites(
                     target_guild_id,
                     staff_role_ids=staff_role_ids,

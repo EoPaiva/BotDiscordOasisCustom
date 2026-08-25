@@ -67,7 +67,7 @@ def build_course_access_plan(
         int(_find_unique(roles, name=name)["id"]) for name in STAFF_ROLES
     ]
     category = _find_unique(
-        channels, name=format_category_name(2, "Cursos"), item_type=4
+        channels, name=format_category_name(3, "Cursos"), item_type=4
     )
     member_role_id = int(member_role["id"])
     category_id = int(category["id"])

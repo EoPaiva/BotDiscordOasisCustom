@@ -31,7 +31,7 @@ def test_course_plan_limits_public_channels_to_members_and_staff() -> None:
         _role(204, "Instrutor de Cursos"),
     ]
     category_id = 300
-    channels = [_channel(category_id, format_category_name(2, "Cursos"), 4)]
+    channels = [_channel(category_id, format_category_name(3, "Cursos"), 4)]
     for index, spec in enumerate((item for item in CHANNELS if item.category == "courses"), 1):
         channels.append(
             _channel(
