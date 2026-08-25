@@ -27,7 +27,7 @@ jobs:
       - run: python main.py --check
         env:
           DATABASE_PATH: data/ci-check.db
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
