@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { recruitmentCandidateFetch } from "@/lib/api";
+import { CommandCenterApiError, recruitmentCandidateFetch } from "@/lib/api";
 import { setRecruitmentGuestIdentity } from "@/lib/identity";
 
 const startSchema = z.object({
@@ -21,16 +21,25 @@ const startSchema = z.object({
 export async function startRecruitmentApplication(formData: FormData) {
   const input = startSchema.parse(Object.fromEntries(formData));
   await setRecruitmentGuestIdentity(input.discordId, input.discordUsername);
-  await recruitmentCandidateFetch("/v1/recruitment/applications/start", {
-    method: "POST",
-    body: JSON.stringify({
-      candidate_nick: input.candidateNick,
-      bgr_id: input.bgrId,
-      age: input.age,
-      consent_accepted: true,
-      idempotency_key: randomUUID(),
-    }),
-  });
+  try {
+    await recruitmentCandidateFetch("/v1/recruitment/applications/start", {
+      method: "POST",
+      body: JSON.stringify({
+        candidate_nick: input.candidateNick,
+        bgr_id: input.bgrId,
+        age: input.age,
+        consent_accepted: true,
+        idempotency_key: randomUUID(),
+      }),
+    });
+  } catch (error) {
+    if (error instanceof CommandCenterApiError && error.status === 409) {
+      // A identidade já foi persistida. A página consegue mostrar a restrição
+      // canônica (candidatura ativa, cooldown ou bloqueio) sem derrubar o React.
+      redirect("/recrutamento");
+    }
+    throw error;
+  }
   redirect("/recrutamento/avaliacao");
 }
 

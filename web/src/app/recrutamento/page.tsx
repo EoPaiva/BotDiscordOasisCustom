@@ -174,7 +174,7 @@ export default async function RecruitmentLandingPage() {
                 <div><h3>Candidatura em andamento</h3><p>Protocolo <strong>{activeApplication.protocol}</strong> • {activeApplication.status}</p></div>
                 <Link className="button button-primary" href={primaryHref}>Continuar <ArrowRight size={16} /></Link>
               </div>
-            ) : open ? (
+            ) : open && (!identity || eligibility?.eligible === true) ? (
               <form action={startRecruitmentApplication} className="candidate-start-form">
                 <label className="wide-field">ID do Discord<input autoComplete="off" inputMode="numeric" name="discordId" pattern="[0-9]{15,22}" required placeholder="Ex.: 123456789012345678" /></label>
                 <label>Usuário no Discord<input autoComplete="username" name="discordUsername" placeholder="usuario" required minLength={2} maxLength={100} /></label>
@@ -185,7 +185,7 @@ export default async function RecruitmentLandingPage() {
                 <button className="enlistment-primary-action" type="submit">Avançar para as 10 questões <ArrowRight size={17} /></button>
               </form>
             ) : (
-              <div className="candidate-blocked"><strong>Candidatura indisponível</strong>{eligibility?.reasons.map((reason) => <p key={reason}>{reasonLabels[reason] ?? reason}</p>)}{eligibility?.cooldown_until && <p>Nova tentativa a partir de <time>{new Date(eligibility.cooldown_until).toLocaleDateString("pt-BR")}</time>.</p>}</div>
+              <div className="candidate-blocked"><strong>{open ? "Candidatura não pode ser iniciada" : "Candidatura indisponível"}</strong>{eligibility?.reasons.map((reason) => <p key={reason}>{reasonLabels[reason] ?? reason}</p>)}{eligibility?.cooldown_until && <p>Nova tentativa a partir de <time>{new Date(eligibility.cooldown_until).toLocaleString("pt-BR")}</time>.</p>}</div>
             )}
           </div>
         </div>
