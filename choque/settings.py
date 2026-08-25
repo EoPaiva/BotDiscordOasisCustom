@@ -123,6 +123,7 @@ class SettingsService:
         "recruitment_approved_channel_id": None,
         "recruitment_rejected_channel_id": None,
         "recruitment_tag_setup_channel_id": None,
+        "recruitment_main_server_channel_id": None,
         "service_role_id": None,
         "member_role_id": None,
         "away_role_id": None,

@@ -1232,6 +1232,42 @@ class WebActionWorker:
                     application["candidate_message"] or "Consulte seu protocolo no portal."
                 )
                 if approved:
+                    main_server_channel_id = await self.audit.settings.get(
+                        int(row["guild_id"]), "recruitment_main_server_channel_id"
+                    )
+                    main_server_channel = (
+                        guild.get_channel(int(main_server_channel_id))
+                        if main_server_channel_id
+                        else None
+                    )
+                    if not isinstance(main_server_channel, discord.TextChannel):
+                        main_server_channel = next(
+                            (
+                                channel
+                                for channel in guild.text_channels
+                                if channel.topic
+                                == "CHOQUE-BGR rec-migration:recruitment.main_server"
+                            ),
+                            None,
+                        )
+                    if isinstance(main_server_channel, discord.TextChannel):
+                        try:
+                            await main_server_channel.set_permissions(
+                                member,
+                                view_channel=True,
+                                send_messages=False,
+                                read_message_history=True,
+                                reason="Candidatura aprovada • acesso ao servidor principal",
+                            )
+                            description += (
+                                "\n\n**Ingresso:** acesse "
+                                f"<#{main_server_channel.id}> para entrar no servidor principal."
+                            )
+                        except discord.DiscordException:
+                            LOGGER.exception(
+                                "Falha ao liberar acesso ao servidor principal para %s",
+                                member.id,
+                            )
                     tag_channel_id = await self.audit.settings.get(
                         int(row["guild_id"]), "recruitment_tag_setup_channel_id"
                     )

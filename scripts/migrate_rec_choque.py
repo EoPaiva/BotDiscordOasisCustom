@@ -30,6 +30,7 @@ API_BASE = "https://discord.com/api/v10"
 DEFAULT_SOURCE_GUILD_ID = 1146622062895579186
 DEFAULT_TARGET_GUILD_ID = 1541908574463070311
 RECRUITMENT_URL = "https://choquebgr.online/recrutamento/servidor?guild=rec"
+MAIN_SERVER_URL = "https://choquebgr.online/discord"
 REASON = "CHOQUE - BGR • migração controlada de Recrutamento e Cursos para REC CHOQUE"
 
 
@@ -50,6 +51,13 @@ CHANNELS = (
     ChannelSpec("recruitment.review", "recruitment", "Mesa de Análise", "🛡️", private=True),
     ChannelSpec("recruitment.approved", "recruitment", "Aprovados", "✅"),
     ChannelSpec("recruitment.rejected", "recruitment", "Reprovados", "❌"),
+    ChannelSpec(
+        "recruitment.main_server",
+        "recruitment",
+        "Entrar no Servidor Principal",
+        "🚪",
+        private=True,
+    ),
     ChannelSpec("recruitment.waiting", "recruitment", "Aguardando Recrutamento", "⏳", voice=True),
     ChannelSpec("recruitment.interview", "recruitment", "Entrevista", "🎙️", private=True, voice=True),
     ChannelSpec("courses.catalog", "courses", "Cursos", "📖"),
@@ -610,6 +618,7 @@ async def _copy_data(
         "recruitment_queue_channel_id": channel_map["recruitment.review"],
         "recruitment_approved_channel_id": channel_map["recruitment.approved"],
         "recruitment_rejected_channel_id": channel_map["recruitment.rejected"],
+        "recruitment_main_server_channel_id": channel_map["recruitment.main_server"],
         "training_panel_channel_id": channel_map["courses.training"],
         "course_catalog_channel_id": channel_map["courses.catalog"],
     }.items():
@@ -839,6 +848,30 @@ async def run(args: argparse.Namespace) -> int:
                     _button("Candidaturas", "📝", custom_id="choque:recruitment:admin:candidacies:v1", style=1),
                     _button("Transferências", "🔄", custom_id="choque:recruitment:admin:transfers:v1"),
                     _button("Atualizar", "🔄", custom_id="choque:recruitment:admin:refresh:v1", style=3),
+                ]}],
+                "allowed_mentions": {"parse": []},
+            },
+        )
+        await _upsert_panel(
+            api,
+            settings,
+            target_guild_id,
+            "RECRUITMENT_MAIN_SERVER",
+            channel_map["recruitment.main_server"],
+            {
+                "embeds": [_embed(
+                    "✅ Candidatura aprovada",
+                    "Parabéns pela aprovação. Use o botão abaixo para entrar no servidor principal da CHOQUE - BGR e continuar seu ingresso.",
+                    [
+                        {
+                            "name": "Próxima etapa",
+                            "value": "Entre no servidor principal e siga as orientações da Portaria.",
+                            "inline": False,
+                        }
+                    ],
+                )],
+                "components": [{"type": 1, "components": [
+                    _button("Entrar no servidor principal", "🚪", url=MAIN_SERVER_URL),
                 ]}],
                 "allowed_mentions": {"parse": []},
             },
