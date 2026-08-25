@@ -154,7 +154,10 @@ async def run(args: argparse.Namespace) -> int:
             api.request("GET", f"/guilds/{target_guild_id}/roles"),
             api.request("GET", f"/guilds/{target_guild_id}/members/{bot['id']}"),
         )
-        if str(target_guild["name"]).casefold() != "rec choque":
+        if (
+            target_guild_id != DEFAULT_TARGET_GUILD_ID
+            and str(target_guild["name"]).casefold() != "rec choque"
+        ):
             raise RuntimeError("O servidor de destino não corresponde ao REC CHOQUE.")
 
         bot_role_ids = {int(role_id) for role_id in bot_member.get("roles", [])}

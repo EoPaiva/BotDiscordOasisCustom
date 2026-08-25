@@ -117,6 +117,7 @@ def _permission_overwrites(
     viewer_role_ids: list[int] | None = None,
     private: bool,
     writable: bool,
+    viewer_writable: bool = False,
 ) -> list[dict[str, str | int]]:
     view = 1 << 10
     send = 1 << 11
@@ -147,12 +148,13 @@ def _permission_overwrites(
                 "deny": "0",
             }
         )
+    viewer_allowed = view | history | connect | speak | (send if viewer_writable else 0)
     for role_id in viewer_role_ids or []:
         result.append(
             {
                 "id": str(role_id),
                 "type": 0,
-                "allow": str(view | history | connect | speak),
+                "allow": str(viewer_allowed),
                 "deny": "0",
             }
         )
@@ -192,6 +194,7 @@ async def _ensure_category(
     guild_id: int,
     channels: list[dict[str, Any]],
     name: str,
+    permission_overwrites: list[dict[str, str | int]] | None = None,
 ) -> dict[str, Any]:
     matches = [
         channel
@@ -201,9 +204,18 @@ async def _ensure_category(
     if len(matches) > 1:
         raise RuntimeError(f"Categoria duplicada no REC CHOQUE: {name}")
     if matches:
-        return matches[0]
+        if permission_overwrites is None:
+            return matches[0]
+        return await api.request(
+            "PATCH",
+            f"/channels/{matches[0]['id']}",
+            payload={"permission_overwrites": permission_overwrites},
+        )
+    payload: dict[str, Any] = {"name": name, "type": 4}
+    if permission_overwrites is not None:
+        payload["permission_overwrites"] = permission_overwrites
     category = await api.request(
-        "POST", f"/guilds/{guild_id}/channels", payload={"name": name, "type": 4}
+        "POST", f"/guilds/{guild_id}/channels", payload=payload
     )
     channels.append(category)
     return category
@@ -217,6 +229,8 @@ async def _ensure_channel(
     category_id: int,
     staff_role_ids: list[int],
     viewer_role_ids: list[int] | None = None,
+    restrict_to_viewers: bool = False,
+    viewer_writable: bool = False,
 ) -> dict[str, Any]:
     name = format_channel_name(spec.label, spec.emoji)
     channel_type = 2 if spec.voice else 0
@@ -233,8 +247,9 @@ async def _ensure_channel(
         guild_id,
         staff_role_ids=staff_role_ids,
         viewer_role_ids=viewer_role_ids,
-        private=spec.private,
+        private=spec.private or restrict_to_viewers,
         writable=spec.key in {"courses.chat", "courses.instructors"} or spec.voice,
+        viewer_writable=viewer_writable,
     )
     if matches:
         channel = matches[0]
@@ -620,7 +635,10 @@ async def run(args: argparse.Namespace) -> int:
             api.request("GET", f"/guilds/{target_guild_id}/roles"),
             api.request("GET", f"/guilds/{target_guild_id}/channels"),
         )
-        if str(target_guild["name"]).casefold() != "rec choque":
+        if (
+            target_guild_id != DEFAULT_TARGET_GUILD_ID
+            and str(target_guild["name"]).casefold() != "rec choque"
+        ):
             raise RuntimeError("O servidor de destino não corresponde ao REC CHOQUE.")
         source_by_id = {int(role["id"]): role for role in source_roles}
         source_course_roles = await database.fetchall(
@@ -691,16 +709,28 @@ async def run(args: argparse.Namespace) -> int:
                 api, target_guild_id, target_channels, format_category_name(1, "Recrutamento")
             ),
             "courses": await _ensure_category(
-                api, target_guild_id, target_channels, format_category_name(2, "Cursos")
+                api,
+                target_guild_id,
+                target_channels,
+                format_category_name(2, "Cursos"),
+                _permission_overwrites(
+                    target_guild_id,
+                    staff_role_ids=staff_role_ids,
+                    viewer_role_ids=[role_map[source_named_ids["Membro Choque"]]],
+                    private=True,
+                    writable=False,
+                ),
             ),
         }
         channel_map: dict[str, int] = {}
         for spec in CHANNELS:
-            viewer_role_ids = (
-                [role_map[source_named_ids["Candidato"]]]
-                if spec.key == "recruitment.interview"
-                else []
-            )
+            member_course_channel = spec.category == "courses" and not spec.private
+            if spec.key == "recruitment.interview":
+                viewer_role_ids = [role_map[source_named_ids["Candidato"]]]
+            elif member_course_channel:
+                viewer_role_ids = [role_map[source_named_ids["Membro Choque"]]]
+            else:
+                viewer_role_ids = []
             channel = await _ensure_channel(
                 api,
                 target_guild_id,
@@ -709,6 +739,9 @@ async def run(args: argparse.Namespace) -> int:
                 int(categories[spec.category]["id"]),
                 staff_role_ids,
                 viewer_role_ids,
+                restrict_to_viewers=member_course_channel,
+                viewer_writable=member_course_channel
+                and (spec.key == "courses.chat" or spec.voice),
             )
             channel_map[spec.key] = int(channel["id"])
 

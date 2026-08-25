@@ -30,6 +30,26 @@ def test_private_interview_grants_candidate_access_without_moderation() -> None:
     assert not int(candidate["allow"]) & manage_messages
 
 
+def test_member_only_course_channel_denies_everyone_and_allows_member_chat() -> None:
+    overwrites = _permission_overwrites(
+        100,
+        staff_role_ids=[200],
+        viewer_role_ids=[300],
+        private=True,
+        writable=True,
+        viewer_writable=True,
+    )
+
+    everyone = next(item for item in overwrites if item["id"] == "100")
+    member = next(item for item in overwrites if item["id"] == "300")
+    view_channel = 1 << 10
+    send_messages = 1 << 11
+
+    assert int(everyone["deny"]) & view_channel
+    assert int(member["allow"]) & view_channel
+    assert int(member["allow"]) & send_messages
+
+
 def test_satellite_identity_uses_a_rank_sync_state_accepted_by_the_schema() -> None:
     migration_source = inspect.getsource(_copy_data)
 
