@@ -30,6 +30,7 @@ MODULE_DEFINITIONS: tuple[tuple[str, str, str], ...] = (
 )
 MODULE_DEFAULTS = {key: True for key, _, _ in MODULE_DEFINITIONS}
 
+
 class SettingsService:
     DEFAULTS: dict[str, Any] = {
         "timezone": "America/Sao_Paulo",
@@ -73,6 +74,7 @@ class SettingsService:
         "hierarchy_channel_id": None,
         "config_panel_channel_id": None,
         "personnel_admin_channel_id": None,
+        "dismissal_log_channel_id": None,
         "absence_panel_channel_id": None,
         "requests_panel_channel_id": None,
         "career_panel_channel_id": None,
@@ -633,6 +635,7 @@ class SettingsService:
                 actor_id,
             ),
         )
+
     async def role_profiles(self, guild_id: int, role_ids: set[int]) -> set[str]:
         if not role_ids:
             return set()

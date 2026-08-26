@@ -7,6 +7,7 @@ import aiosqlite
 
 from .audit import AuditService
 from .database import Database
+from .dismissals import enqueue_dismissal_notification
 from .errors import ConflictError, NotFoundError, ValidationError
 from .models import MemberStatus
 from .time_utils import utc_now_ms
@@ -105,10 +106,11 @@ class MemberService:
     ) -> None:
         if not reason.strip():
             raise ValidationError("Informe o motivo da alteração.")
+        action_correlation_id = str(uuid.uuid4())
 
         async def apply(conn: aiosqlite.Connection) -> None:
             cursor = await conn.execute(
-                "SELECT status FROM members WHERE guild_id = ? AND discord_id = ?",
+                "SELECT id, status FROM members WHERE guild_id = ? AND discord_id = ?",
                 (guild_id, discord_id),
             )
             row = await cursor.fetchone()
@@ -116,9 +118,10 @@ class MemberService:
                 raise NotFoundError("Membro não cadastrado.")
             if row["status"] == status.value:
                 raise ConflictError("O membro já possui esse status.")
+            now = utc_now_ms()
             await conn.execute(
                 "UPDATE members SET status=?, updated_at=? WHERE guild_id=? AND discord_id=?",
-                (status.value, utc_now_ms(), guild_id, discord_id),
+                (status.value, now, guild_id, discord_id),
             )
             await self.audit.record(
                 guild_id,
@@ -130,6 +133,17 @@ class MemberService:
                 reason=reason,
                 connection=conn,
             )
+            if status is MemberStatus.DISMISSED:
+                await enqueue_dismissal_notification(
+                    conn,
+                    guild_id=guild_id,
+                    subject_id=int(row["id"]),
+                    discord_id=discord_id,
+                    actor_id=actor_id,
+                    occurred_at=now,
+                    source="DIRECT_STATUS_CHANGE",
+                    correlation_id=f"dismissal-notification-status-{action_correlation_id}",
+                )
 
         if connection:
             await apply(connection)

@@ -8,6 +8,7 @@ import aiosqlite
 
 from .audit import AuditService
 from .database import Database
+from .dismissals import enqueue_dismissal_notification
 from .errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
 from .models import AbsenceStatus, MemberStatus, PersonnelActionType, PunishmentType
 from .shift_validation import closed_validation_values, countable_shift_clause
@@ -193,9 +194,7 @@ class PersonnelService:
                 connection=connection,
             )
             notification_type = (
-                "PROMOTION"
-                if action is PersonnelActionType.PROMOTION
-                else "DEMOTION"
+                "PROMOTION" if action is PersonnelActionType.PROMOTION else "DEMOTION"
             )
             channel_setting_key = (
                 "career_promotion_channel_id"
@@ -448,6 +447,17 @@ class PersonnelService:
                 reason=reason.strip(),
                 connection=connection,
             )
+            if punishment_type is PunishmentType.DISMISSAL:
+                await enqueue_dismissal_notification(
+                    connection,
+                    guild_id=guild_id,
+                    subject_id=punishment_id,
+                    discord_id=discord_id,
+                    actor_id=actor_id,
+                    occurred_at=now,
+                    source="PUNISHMENT",
+                    correlation_id=f"dismissal-notification-punishment-{punishment_id}",
+                )
         return {
             "punishment_id": punishment_id,
             "type": punishment_type.value,

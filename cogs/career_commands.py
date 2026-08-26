@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 import discord
 from discord.ext import commands, tasks
 
+from choque.dismissals import dismissal_public_reason
 from choque.embeds import branded_embed
 from choque.errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
 from choque.models import PersonnelActionType
@@ -117,9 +118,7 @@ async def build_career_profile_embed(
     embed.add_field(name="Unidade", value=profile["unit"] or "—")
     progression = summary["next_progression"]
     if progression:
-        remaining = max(
-            0, int(progression["target_total_ms"]) - int(summary["valid_hours_ms"])
-        )
+        remaining = max(0, int(progression["target_total_ms"]) - int(summary["valid_hours_ms"]))
         embed.add_field(
             name="Próximo objetivo automático",
             value=(
@@ -260,9 +259,7 @@ class CareerPanelView(MemberView):
     async def officer(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         member = await require_member(interaction)
         bot = get_bot(interaction)
-        eligibility = await bot.services.career.officer_eligibility(
-            member.guild.id, member.id
-        )
+        eligibility = await bot.services.career.officer_eligibility(member.guild.id, member.id)
         url = str(
             await bot.services.settings.get(
                 member.guild.id,
@@ -622,9 +619,7 @@ class CareerCommands(commands.Cog):
                     guild.id, "career_progression_enabled", True
                 )
                 if enabled:
-                    await self.bot.services.career.process_all(
-                        guild.id, source="AUTOMATIC_HOURS"
-                    )
+                    await self.bot.services.career.process_all(guild.id, source="AUTOMATIC_HOURS")
             except Exception:
                 LOGGER.exception("Falha no ciclo durável de progressão de carreira")
 
@@ -676,6 +671,33 @@ class CareerCommands(commands.Cog):
     def _notification_embed(
         self, notification_type: str, payload: dict[str, object]
     ) -> discord.Embed:
+        if notification_type == "DISMISSAL":
+            embed = branded_embed(
+                self.bot.config.branding,
+                title="⚔️ DESLIGAMENTO DE EFETIVO",
+            )
+            embed.add_field(name="Militar", value=f"<@{int(payload['discord_id'])}>", inline=False)
+            embed.add_field(
+                name="Responsável",
+                value=f"<@{int(payload['actor_id'])}>",
+                inline=False,
+            )
+            embed.add_field(name="Situação", value="Desligado da Corporação", inline=False)
+            embed.add_field(
+                name="Data",
+                value=discord_timestamp(int(payload["occurred_at"]), "F"),
+                inline=False,
+            )
+            embed.add_field(
+                name="Motivo",
+                value=dismissal_public_reason(payload.get("actor_has_high_command") is True),
+                inline=False,
+            )
+            embed.set_footer(
+                text="Registro efetuado para controle, disciplina e organização do efetivo."
+            )
+            return embed
+
         titles = {
             "PROMOTION": "⬆️ Promoção registrada",
             "DEMOTION": "⬇️ Rebaixamento registrado",
@@ -732,9 +754,7 @@ class CareerCommands(commands.Cog):
             channel_message_id = row["channel_message_id"]
             channel_key = row["channel_setting_key"]
             if channel_key and channel_message_id is None:
-                channel_id = await self.bot.services.settings.get(
-                    guild.id, str(channel_key)
-                )
+                channel_id = await self.bot.services.settings.get(guild.id, str(channel_key))
                 channel = guild.get_channel(int(channel_id)) if channel_id else None
                 if not isinstance(channel, discord.TextChannel):
                     raise NotFoundError("Canal configurado para a notificação não foi encontrado.")

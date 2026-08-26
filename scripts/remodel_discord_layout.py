@@ -86,6 +86,7 @@ CHANNEL_SPECS = (
     ChannelSpec("superiors.notices", "superiors", "📢", "Avisos do comando"),
     ChannelSpec("superiors.chat", "superiors", "💬", "Chat superiores"),
     ChannelSpec("superiors.records", "superiors", "📜", "Registros superiores"),
+    ChannelSpec("superiors.dismissals", "superiors", "⚔️", "Desligamentos"),
     # 04 Administracao
     ChannelSpec(
         "admin.central",
@@ -102,23 +103,15 @@ CHANNEL_SPECS = (
         "Central do membro",
         known_id=1540546961114013706,
     ),
-    ChannelSpec(
-        "member.requests", "member", "📥", "Solicitacoes", known_id=1540540585289715722
-    ),
+    ChannelSpec("member.requests", "member", "📥", "Solicitacoes", known_id=1540540585289715722),
     ChannelSpec("member.career", "member", "📈", "Carreira", known_id=1540560219359412264),
-    ChannelSpec(
-        "member.discipline", "member", "⚖️", "Disciplina", known_id=1540565258404626552
-    ),
+    ChannelSpec("member.discipline", "member", "⚖️", "Disciplina", known_id=1540565258404626552),
     ChannelSpec(
         "member.activity", "member", "📊", "Atividade semanal", known_id=1540578026071396372
     ),
-    ChannelSpec(
-        "member.ranking", "member", "🏆", "Ranking de horas", known_id=1540540587307040810
-    ),
+    ChannelSpec("member.ranking", "member", "🏆", "Ranking de horas", known_id=1540540587307040810),
     # Cadastro público permanece na Recepção; a categoria Registro é interna/legada.
-    ChannelSpec(
-        "registration.panel", "reception", "📝", "Cadastro", known_id=1540546963454304326
-    ),
+    ChannelSpec("registration.panel", "reception", "📝", "Cadastro", known_id=1540546963454304326),
     # 07 Informacoes
     ChannelSpec("info.notices", "info", "📢", "Avisos", known_id=1161742911105421393),
     ChannelSpec("info.bgr", "info", "📣", "Anuncios bgr", known_id=1176911554629861396),
@@ -135,19 +128,19 @@ CHANNEL_SPECS = (
     ChannelSpec("info.binds", "info", "⌨️", "Binds operacionais", known_id=1146622065110171667),
     ChannelSpec("info.codes", "info", "📻", "Codigos q", known_id=1161810176718930071),
     ChannelSpec("info.hierarchy", "info", "📈", "Hierarquia", known_id=1146622065110171666),
-    ChannelSpec(
-        "info.decorations", "info", "🎖️", "Condecoracoes", known_id=1165939530474475530
-    ),
+    ChannelSpec("info.decorations", "info", "🎖️", "Condecoracoes", known_id=1165939530474475530),
     # 08 Membros choque
     ChannelSpec("community.general", "community", "💬", "Chat geral", known_id=1201450207917899786),
     ChannelSpec("community.member", "community", "💬", "Chat choque", known_id=1161830033858515035),
-    ChannelSpec("community.suggestions", "community", "💡", "Sugestoes", known_id=1153774907088441354),
-    ChannelSpec("community.media", "community", "📷", "Midia e instagram", known_id=1161829510627459172),
+    ChannelSpec(
+        "community.suggestions", "community", "💡", "Sugestoes", known_id=1153774907088441354
+    ),
+    ChannelSpec(
+        "community.media", "community", "📷", "Midia e instagram", known_id=1161829510627459172
+    ),
     # Bate-ponto opera junto das patrulhas; a categoria historica foi removida.
     ChannelSpec("point.panel", "patrol", "⏱️", "Bate ponto", known_id=1540546965362974731),
-    ChannelSpec(
-        "point.active", "patrol", "👥", "Efetivo em servico", known_id=1540546967938011186
-    ),
+    ChannelSpec("point.active", "patrol", "👥", "Efetivo em servico", known_id=1540546967938011186),
     # 10 Patrulhas
     ChannelSpec(
         "patrol.availability",
@@ -167,9 +160,7 @@ CHANNEL_SPECS = (
     ),
     ChannelSpec("patrol.alpha", "patrol", "🚔", "Patrulha alfa", "voice", 1146622065647046780),
     ChannelSpec("patrol.bravo", "patrol", "🚔", "Patrulha bravo", "voice", 1146622065647046781),
-    ChannelSpec(
-        "patrol.charlie", "patrol", "🚔", "Patrulha charlie", "voice", 1146622065647046782
-    ),
+    ChannelSpec("patrol.charlie", "patrol", "🚔", "Patrulha charlie", "voice", 1146622065647046782),
     ChannelSpec("patrol.delta", "patrol", "🚔", "Patrulha delta", "voice", 1146622065647046784),
     ChannelSpec("patrol.convoy", "patrol", "🚙", "Comboio", "voice", 1164957395370385519),
     ChannelSpec("patrol.rocam.1", "patrol", "🏍️", "Rocam 1", "voice", 1161833828793450566),
@@ -244,11 +235,19 @@ CHANNEL_SPECS = (
     ChannelSpec("courses.panel", "courses", "🎯", "Treinamentos", known_id=1540546969649291376),
     ChannelSpec("courses.list", "courses", "📖", "Cursos", known_id=1162114694581059584),
     ChannelSpec("courses.chat", "courses", "💬", "Chat de formacao", known_id=1168335359990566912),
-    ChannelSpec("courses.instructors", "courses", "🧑‍🏫", "Instrutores", known_id=1166622479196901438),
-    ChannelSpec("courses.approved", "courses", "✅", "Aprovados em cursos", known_id=1165345443786543144),
-    ChannelSpec("courses.rejected", "courses", "❌", "Reprovados em cursos", known_id=1165348711895932948),
+    ChannelSpec(
+        "courses.instructors", "courses", "🧑‍🏫", "Instrutores", known_id=1166622479196901438
+    ),
+    ChannelSpec(
+        "courses.approved", "courses", "✅", "Aprovados em cursos", known_id=1165345443786543144
+    ),
+    ChannelSpec(
+        "courses.rejected", "courses", "❌", "Reprovados em cursos", known_id=1165348711895932948
+    ),
     ChannelSpec("courses.graduates", "courses", "🎒", "Formados", known_id=1164983916902490182),
-    ChannelSpec("courses.waiting", "courses", "🎓", "Aguardando formacao", "voice", 1162240695629795348),
+    ChannelSpec(
+        "courses.waiting", "courses", "🎓", "Aguardando formacao", "voice", 1162240695629795348
+    ),
     ChannelSpec("courses.room.1", "courses", "📚", "Sala de curso 1", "voice", 1162240256913965086),
     ChannelSpec("courses.room.2", "courses", "📚", "Sala de curso 2", "voice", 1162934172554367097),
     # 14 Auditoria
@@ -261,7 +260,9 @@ CHANNEL_SPECS = (
         known_id=1146622066817253459,
     ),
     # O unico historico preservado do antigo arquivo fica junto da Auditoria.
-    ChannelSpec("archive.members", "audit", "📜", "Historico de membros", known_id=1147292121234161783),
+    ChannelSpec(
+        "archive.members", "audit", "📜", "Historico de membros", known_id=1147292121234161783
+    ),
 )
 
 
@@ -334,10 +335,7 @@ class RemodelClient(ProvisionClient):
             await self.publish_layout_messages(guild)
             await self.validate_layout(guild)
             self.exit_code = 0
-            print(
-                f"REMODEL_OK categories={len(CATEGORY_SPECS)} "
-                f"channels={len(CHANNEL_SPECS)}"
-            )
+            print(f"REMODEL_OK categories={len(CATEGORY_SPECS)} channels={len(CHANNEL_SPECS)}")
         except Exception:
             traceback.print_exc()
         finally:
@@ -428,7 +426,9 @@ class RemodelClient(ProvisionClient):
             if channel is not None and not isinstance(channel, expected_type):
                 raise RuntimeError(f"ID de canal aponta para outro tipo: {spec.key}")
             if channel is None and spec.known_id:
-                raise RuntimeError(f"Canal conhecido nao foi encontrado: {spec.key}:{spec.known_id}")
+                raise RuntimeError(
+                    f"Canal conhecido nao foi encontrado: {spec.key}:{spec.known_id}"
+                )
             if channel is None:
                 category = self.categories[spec.category]
                 channel = discord.utils.get(category.channels, name=spec.visual_name)
@@ -472,6 +472,16 @@ class RemodelClient(ProvisionClient):
             raise RuntimeError(f"Canal de texto obrigatorio nao encontrado: {key}")
         return channel
 
+    async def configure_database(self, guild: discord.Guild) -> None:
+        await super().configure_database(guild)
+        actor_id = self.user.id if self.user else None
+        await self.settings.set(
+            guild.id,
+            "dismissal_log_channel_id",
+            self.text_channel("superiors.dismissals").id,
+            actor_id,
+        )
+
     async def persist_registry(self, guild_id: int) -> None:
         actor_id = self.user.id if self.user else None
         await self.settings.set(guild_id, REGISTRY_SETTING, self.registry, actor_id)
@@ -493,7 +503,10 @@ class RemodelClient(ProvisionClient):
         fresh_channels = {channel.id: channel for channel in await guild.fetch_channels()}
         for spec in CATEGORY_SPECS:
             category = fresh_channels.get(self.registry["categories"][spec.key])
-            if not isinstance(category, discord.CategoryChannel) or category.name != spec.visual_name:
+            if (
+                not isinstance(category, discord.CategoryChannel)
+                or category.name != spec.visual_name
+            ):
                 failures.append(f"category:{spec.key}")
         for spec in CHANNEL_SPECS:
             channel = fresh_channels.get(self.registry["channels"][spec.key])

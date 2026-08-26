@@ -4462,6 +4462,56 @@ SELECT
 FROM transfer_cases AS transfer;
 """
 
+MIGRATION_052 = """
+-- Amplia o outbox durável existente sem perder notificações de carreira já
+-- pendentes ou entregues. SQLite exige reconstrução para alterar o CHECK.
+CREATE TABLE career_notifications_v52 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    notification_type TEXT NOT NULL CHECK (
+        notification_type IN (
+            'PROMOTION','DEMOTION','MERIT','OFFICER_SUBMITTED','OFFICER_DECISION',
+            'DISMISSAL'
+        )
+    ),
+    subject_id INTEGER NOT NULL,
+    target_discord_id INTEGER,
+    channel_setting_key TEXT,
+    payload_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','PROCESSING','DELIVERED','FAILED')
+    ),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts>=0),
+    available_at INTEGER NOT NULL,
+    delivered_at INTEGER,
+    channel_message_id INTEGER,
+    dm_message_id INTEGER,
+    last_error TEXT,
+    correlation_id TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+INSERT INTO career_notifications_v52(
+    id, guild_id, notification_type, subject_id, target_discord_id,
+    channel_setting_key, payload_json, status, attempts, available_at,
+    delivered_at, channel_message_id, dm_message_id, last_error,
+    correlation_id, created_at, updated_at
+)
+SELECT
+    id, guild_id, notification_type, subject_id, target_discord_id,
+    channel_setting_key, payload_json, status, attempts, available_at,
+    delivered_at, channel_message_id, dm_message_id, last_error,
+    correlation_id, created_at, updated_at
+FROM career_notifications;
+
+DROP TABLE career_notifications;
+ALTER TABLE career_notifications_v52 RENAME TO career_notifications;
+
+CREATE INDEX ix_career_notifications_delivery
+ON career_notifications(status, available_at, id);
+"""
+
 MIGRATIONS = (
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -4514,6 +4564,7 @@ MIGRATIONS = (
     (49, MIGRATION_049),
     (50, MIGRATION_050),
     (51, MIGRATION_051),
+    (52, MIGRATION_052),
 )
 
 
@@ -4640,7 +4691,9 @@ class Database:
                 else:
                     if state.rollback_only:
                         await self.connection.rollback()
-                        raise RuntimeError("Transação marcada para rollback por uma operação aninhada.")
+                        raise RuntimeError(
+                            "Transação marcada para rollback por uma operação aninhada."
+                        )
                     await self.connection.commit()
             except Exception:
                 raise
@@ -4687,6 +4740,7 @@ class Database:
         separate processes. Operational dashboards must not depend on the read
         snapshot held by either process' long-lived connection.
         """
+
         def read_snapshot() -> list[sqlite3.Row]:
             # Do not reuse aiosqlite's worker/connection state here. The bot
             # and FastAPI run in separate processes and SQLite WAL visibility

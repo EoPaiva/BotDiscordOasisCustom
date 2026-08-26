@@ -8,6 +8,7 @@ import aiosqlite
 
 from .audit import AuditService
 from .database import Database
+from .dismissals import enqueue_dismissal_notification
 from .errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
 from .models import AdministrativeRequestStatus, AdministrativeRequestType, MemberStatus
 from .shift_validation import closed_validation_values
@@ -391,6 +392,16 @@ class RequestService:
             await self._set_member_status(connection, member_id, MemberStatus.DISMISSED.value, now)
             closed = await self._close_active_shift(
                 connection, guild_id, member_id, discord_id, now, "DISMISSAL_APPROVED", actor_id
+            )
+            await enqueue_dismissal_notification(
+                connection,
+                guild_id=guild_id,
+                subject_id=int(request["id"]),
+                discord_id=discord_id,
+                actor_id=actor_id,
+                occurred_at=now,
+                source="ADMINISTRATIVE_REQUEST",
+                correlation_id=f"dismissal-notification-request-{int(request['id'])}",
             )
             result.update({"member_status": MemberStatus.DISMISSED.value, "shift_closed": closed})
         return result

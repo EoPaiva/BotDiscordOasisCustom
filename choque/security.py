@@ -302,6 +302,7 @@ class SecurityService:
             "registration_approval_channel_id",
             "registration_history_channel_id",
             "personnel_admin_channel_id",
+            "dismissal_log_channel_id",
             "recruitment_queue_channel_id",
             "recruitment_notification_channel_id",
         )

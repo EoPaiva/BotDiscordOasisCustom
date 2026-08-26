@@ -9,6 +9,7 @@ import aiosqlite
 
 from .audit import AuditService
 from .database import Database
+from .dismissals import enqueue_dismissal_notification
 from .errors import ConflictError, NotFoundError, ValidationError
 from .models import MemberStatus, PunishmentType
 from .settings import SettingsService
@@ -360,9 +361,7 @@ class ActivityService:
         activity naturally starts a new cycle without deleting history.
         """
         now = self.clock()
-        identity_source_guild_id = await self.settings.get(
-            guild_id, "identity_source_guild_id"
-        )
+        identity_source_guild_id = await self.settings.get(guild_id, "identity_source_guild_id")
         if identity_source_guild_id and int(identity_source_guild_id) != guild_id:
             # Linked recruitment/training guilds mirror identities, but they are
             # not an independent personnel authority.  Suppress any alert that
@@ -744,6 +743,16 @@ class ActivityService:
                 },
                 reason=normalized_reason,
                 connection=connection,
+            )
+            await enqueue_dismissal_notification(
+                connection,
+                guild_id=source_guild_id,
+                subject_id=punishment_id,
+                discord_id=int(alert["discord_id"]),
+                actor_id=actor_id,
+                occurred_at=now,
+                source="INACTIVITY_ALERT",
+                correlation_id=f"dismissal-notification-inactivity-{punishment_id}",
             )
 
         await self.shifts.finalize_role_loss(
