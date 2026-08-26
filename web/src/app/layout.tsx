@@ -22,8 +22,24 @@ const monoFont = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Centro de Comando | CHOQUE - BGR",
-  description: "Sistema interno de comando e gestão da CHOQUE - BGR.",
+  metadataBase: new URL("https://choquebgr.online"),
+  title: {
+    default: "CHOQUE - BGR | Centro de Comando",
+    template: "%s | CHOQUE - BGR",
+  },
+  description: "Portal oficial de recrutamento, formação e gestão operacional da CHOQUE - BGR.",
+  icons: {
+    icon: "/choque-emblem.png",
+    apple: "/choque-emblem.png",
+  },
+  openGraph: {
+    type: "website",
+    locale: "pt_BR",
+    siteName: "CHOQUE - BGR",
+    title: "CHOQUE - BGR | Centro de Comando",
+    description: "Portal oficial de recrutamento, formação e gestão operacional.",
+    images: [{ url: "/choque-emblem.png", width: 768, height: 768, alt: "Brasão oficial CHOQUE BGR" }],
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

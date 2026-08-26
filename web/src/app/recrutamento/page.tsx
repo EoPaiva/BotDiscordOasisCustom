@@ -8,12 +8,20 @@ import {
   Search,
   ShieldCheck,
 } from "lucide-react";
+import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 
 import { CommandCenterApiError, recruitmentCandidateFetch, recruitmentPublicFetch } from "@/lib/api";
 import { getRecruitmentCandidateIdentity } from "@/lib/identity";
 
 import { startRecruitmentApplication } from "./actions";
+
+export const metadata: Metadata = {
+  title: "Recrutamento",
+  description: "Inicie e acompanhe sua candidatura oficial para a CHOQUE - BGR.",
+  alternates: { canonical: "/recrutamento" },
+};
 
 type Campaign = {
   id: number;
@@ -87,7 +95,9 @@ export default async function RecruitmentLandingPage() {
     <main className="recruitment-shell recruitment-redesign">
       <header className="recruitment-masthead">
         <Link className="recruitment-brand" href="/recrutamento">
-          <span>CB</span>
+          <span className="recruitment-brand-mark">
+            <Image alt="" aria-hidden="true" height={38} priority src="/choque-emblem.png" width={38} />
+          </span>
           <div><strong>CHOQUE BGR</strong><small>POSTO DIGITAL DE ALISTAMENTO</small></div>
         </Link>
         <nav aria-label="Navegação do recrutamento">
@@ -120,7 +130,9 @@ export default async function RecruitmentLandingPage() {
         </div>
         <aside className="enlistment-brief">
           <span className="enlistment-serial">DIRETRIZ / 01</span>
-          <ShieldCheck aria-hidden="true" size={38} />
+          <div className="enlistment-emblem" aria-hidden="true">
+            <Image alt="" fill priority sizes="(max-width: 980px) 132px, 168px" src="/choque-emblem.png" />
+          </div>
           <h2>O que você precisa</h2>
           <ul>
             <li><Check size={15} /> Conta ativa no Discord</li>

@@ -1,9 +1,16 @@
+import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { CandidateQuestion, type ReadyQuestion } from "@/components/candidate-question";
 import { recruitmentCandidateFetch } from "@/lib/api";
 import { getRecruitmentCandidateIdentity } from "@/lib/identity";
+
+export const metadata: Metadata = {
+  title: "Avaliação de alistamento",
+  robots: { index: false, follow: false },
+};
 
 type Application = { id: number; protocol: string; status: string };
 
@@ -20,7 +27,7 @@ export default async function RecruitmentAssessmentPage() {
   );
   return (
     <main className="assessment-shell">
-      <header className="assessment-header"><Link href="/recrutamento"><span>CB</span><div><strong>AVALIAÇÃO DE ALISTAMENTO</strong><small>CHOQUE BGR • AMBIENTE CONTROLADO</small></div></Link><Link href="/minha-candidatura">Consultar protocolo</Link></header>
+      <header className="assessment-header"><Link href="/recrutamento"><span className="recruitment-brand-mark"><Image alt="" aria-hidden="true" height={38} src="/choque-emblem.png" width={38} /></span><div><strong>AVALIAÇÃO DE ALISTAMENTO</strong><small>CHOQUE BGR • AMBIENTE CONTROLADO</small></div></Link><Link href="/minha-candidatura">Consultar protocolo</Link></header>
       <span aria-hidden="true" className="assessment-watermark">{current.application.protocol} • {identity.discordId.slice(-6)}</span>
       <div className="assessment-stage">
         <CandidateQuestion

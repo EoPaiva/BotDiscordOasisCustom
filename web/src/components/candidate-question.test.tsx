@@ -118,6 +118,24 @@ describe("candidate controlled question", () => {
     expect(screen.queryByText("Confirmar resposta?")).not.toBeInTheDocument();
   });
 
+  it("presents a single-choice question as keyboard-accessible option cards", async () => {
+    const singleChoice: ReadyQuestion = {
+      ...active,
+      question: {
+        ...active.question!,
+        type: "SINGLE_SELECT",
+        options: ["Manter comunicação", "Encerrar a abordagem"],
+      },
+    };
+    render(<CandidateQuestion applicationId={5} protocol="AL-00005" ready={singleChoice} />);
+    fireEvent.click(screen.getByRole("radio", { name: /Manter comunicação/ }));
+    expect(screen.getByRole("radio", { name: /Manter comunicação/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Salvar e próxima questão" }));
+    await waitFor(() => expect(saveRecruitmentAnswer).toHaveBeenCalledWith(
+      expect.objectContaining({ answer: "Manter comunicação", submit: true }),
+    ));
+  });
+
   it("replaces the submitted question when the server returns the next one", async () => {
     const { rerender } = render(
       <CandidateQuestion applicationId={5} protocol="AL-00005" ready={active} />,

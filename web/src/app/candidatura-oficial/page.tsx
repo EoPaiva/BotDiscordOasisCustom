@@ -1,4 +1,5 @@
 import { ArrowRight, CheckCircle2, Clock3, ShieldCheck } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -102,7 +103,7 @@ export default async function OfficerApplicationPage() {
 
   return <main className="recruitment-shell officer-application-shell">
     <header className="recruitment-masthead">
-      <Link className="recruitment-brand" href="/"><span>CB</span><div><strong>CHOQUE BGR</strong><small>CARREIRA E OFICIALATO</small></div></Link>
+      <Link className="recruitment-brand" href="/"><span className="recruitment-brand-mark"><Image alt="" aria-hidden="true" height={38} src="/choque-emblem.png" width={38} /></span><div><strong>CHOQUE BGR</strong><small>CARREIRA E OFICIALATO</small></div></Link>
       <nav><Link href="/profile">Minha identidade</Link></nav>
     </header>
     <section className="enlistment-hero officer-application-hero">

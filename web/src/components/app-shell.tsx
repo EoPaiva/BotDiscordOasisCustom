@@ -28,6 +28,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -117,7 +118,7 @@ function Sidebar({ context, close }: { context: AccessContext; close?: () => voi
   return (
     <>
       <div className="sidebar-brand">
-        <div className="brand-mark small" aria-hidden="true">CB</div>
+        <div className="brand-mark small brand-emblem" aria-hidden="true"><Image alt="" height={43} src="/choque-emblem.png" width={43} /></div>
         <div><strong>CHOQUE BGR</strong><span>CENTRO DE COMANDO</span></div>
       </div>
       <nav className="sidebar-nav" aria-label="Navegação principal">

@@ -1,4 +1,5 @@
 import { ArrowRight, LockKeyhole, RadioTower } from "lucide-react";
+import Image from "next/image";
 import { redirect } from "next/navigation";
 
 import { authConfigurationReady, getDiscordIdentity } from "@/lib/identity";
@@ -18,7 +19,7 @@ export default async function LoginPage({
   return (
     <main className="login-shell">
       <section className="login-signature" aria-label="Identidade CHOQUE - BGR">
-        <div className="brand-mark" aria-hidden="true">CB</div>
+        <div className="brand-mark brand-emblem" aria-hidden="true"><Image alt="" height={60} priority src="/choque-emblem.png" width={60} /></div>
         <div>
           <span className="eyebrow">SISTEMA INTERNO / ACESSO RESTRITO</span>
           <h1>CHOQUE <strong>BGR</strong></h1>

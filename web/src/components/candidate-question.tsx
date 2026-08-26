@@ -304,31 +304,52 @@ export function CandidateQuestion({
         <h2 className={clsx(question.security_level === "STRICT" && "no-select")}>{question.title}</h2>
         {question.description && <p>{question.description}</p>}
         {question.alternative_format && <p className="accessibility-adaptation"><strong>Adaptação ativa:</strong> {question.alternative_format}</p>}
-        <label className="candidate-answer">
-          <span>SUA RESPOSTA</span>
-          {question.type === "BOOLEAN" ? (
-            <select {...common} value={String(answer)} onChange={(event) => setAnswer(event.target.value === "true")}>
-              <option value="">Selecione</option><option value="true">Sim</option><option value="false">Não</option>
-            </select>
-          ) : question.type === "SINGLE_SELECT" ? (
-            <select {...common} value={String(answer)} onChange={(event) => setAnswer(event.target.value)}>
-              <option value="">Selecione</option>{question.options.map((option) => <option key={option}>{option}</option>)}
-            </select>
-          ) : question.type === "MULTI_SELECT" ? (
-            <div className="candidate-options">{question.options.map((option) => <label key={option}><input disabled={common.disabled} checked={Array.isArray(answer) && answer.includes(option)} type="checkbox" onChange={(event) => setAnswer((current) => {
+        {question.type === "BOOLEAN" ? (
+          <fieldset className="candidate-answer candidate-choice-field" disabled={common.disabled}>
+            <legend>SUA RESPOSTA</legend>
+            <div className="candidate-options candidate-options-single">
+              {[["true", "Sim"], ["false", "Não"]].map(([value, label], index) => (
+                <label className={clsx(answer === (value === "true") && "selected")} key={value}>
+                  <input checked={answer === (value === "true")} name={`question-${question.id}`} onChange={() => setAnswer(value === "true")} type="radio" value={value} />
+                  <span className="candidate-option-index">{String.fromCharCode(65 + index)}</span><span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : question.type === "SINGLE_SELECT" ? (
+          <fieldset className="candidate-answer candidate-choice-field" disabled={common.disabled}>
+            <legend>SUA RESPOSTA</legend>
+            <div className="candidate-options candidate-options-single">
+              {question.options.map((option, index) => (
+                <label className={clsx(answer === option && "selected")} key={option}>
+                  <input checked={answer === option} name={`question-${question.id}`} onChange={() => setAnswer(option)} type="radio" value={option} />
+                  <span className="candidate-option-index">{String.fromCharCode(65 + index)}</span><span>{option}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : question.type === "MULTI_SELECT" ? (
+          <fieldset className="candidate-answer candidate-choice-field" disabled={common.disabled}>
+            <legend>SUA RESPOSTA</legend>
+            <div className="candidate-options">{question.options.map((option, index) => <label className={clsx(Array.isArray(answer) && answer.includes(option) && "selected")} key={option}><input checked={Array.isArray(answer) && answer.includes(option)} type="checkbox" onChange={(event) => setAnswer((current) => {
               const list = Array.isArray(current) ? current : [];
               return event.target.checked ? [...list, option] : list.filter((item) => item !== option);
-            })} />{option}</label>)}</div>
-          ) : question.type === "NUMBER" ? (
-            <input {...common} inputMode="numeric" type="number" value={String(answer)} onChange={(event) => setAnswer(event.target.value)} />
-          ) : question.type === "DATE" ? (
-            <input {...common} type="date" value={String(answer)} onChange={(event) => setAnswer(event.target.value)} />
-          ) : question.type === "SHORT_TEXT" ? (
-            <input {...common} maxLength={question.max_length ?? undefined} type="text" value={String(answer)} onChange={(event) => setAnswer(event.target.value)} />
-          ) : (
-            <textarea {...common} maxLength={question.max_length ?? undefined} rows={9} value={String(answer)} onChange={(event) => setAnswer(event.target.value)} />
-          )}
-        </label>
+            })} /><span className="candidate-option-index">{String.fromCharCode(65 + index)}</span><span>{option}</span></label>)}</div>
+          </fieldset>
+        ) : (
+          <label className="candidate-answer">
+            <span>SUA RESPOSTA</span>
+            {question.type === "NUMBER" ? (
+              <input {...common} inputMode="numeric" type="number" value={String(answer)} onChange={(event) => setAnswer(event.target.value)} />
+            ) : question.type === "DATE" ? (
+              <input {...common} type="date" value={String(answer)} onChange={(event) => setAnswer(event.target.value)} />
+            ) : question.type === "SHORT_TEXT" ? (
+              <input {...common} maxLength={question.max_length ?? undefined} type="text" value={String(answer)} onChange={(event) => setAnswer(event.target.value)} />
+            ) : (
+              <textarea {...common} maxLength={question.max_length ?? undefined} rows={9} value={String(answer)} onChange={(event) => setAnswer(event.target.value)} />
+            )}
+          </label>
+        )}
         <div className="answer-meta">
           {question.max_length && <span>{textLength} / {question.max_length} caracteres</span>}
           {question.min_length && <span>Mínimo: {question.min_length}</span>}
