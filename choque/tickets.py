@@ -827,6 +827,50 @@ class TicketService:
             )
             if cursor.rowcount != 1:
                 raise ConflictError("Este atendimento foi encerrado por outra pessoa.")
+            if ticket["ticket_type"] == "TRANSFER":
+                transfer_cursor = await connection.execute(
+                    """
+                    SELECT * FROM transfer_cases
+                    WHERE guild_id=? AND ticket_id=?
+                    """,
+                    (guild_id, ticket_id),
+                )
+                transfer = await transfer_cursor.fetchone()
+                if not transfer:
+                    raise NotFoundError("Protocolo de transferência não encontrado.")
+                transfer_cursor = await connection.execute(
+                    """
+                    UPDATE transfer_cases
+                    SET status='CANCELLED', updated_at=?, version=version+1
+                    WHERE id=? AND status='PENDING'
+                    """,
+                    (now, transfer["id"]),
+                )
+                if transfer_cursor.rowcount != 1:
+                    raise ConflictError("O protocolo de transferência não está pendente.")
+                await self._transfer_event(
+                    connection,
+                    guild_id,
+                    int(transfer["id"]),
+                    "CANCELLED",
+                    actor_id=actor_id,
+                    metadata={"reason": normalized_reason, "ticket_id": ticket_id},
+                    created_at=now,
+                )
+                await self.audit.record(
+                    guild_id,
+                    "TRANSFER_CANCELLED",
+                    actor_id=actor_id,
+                    target_id=int(ticket["discord_id"]),
+                    before={"status": transfer["status"]},
+                    after={
+                        "status": "CANCELLED",
+                        "protocol": str(transfer["protocol"]),
+                        "ticket_id": ticket_id,
+                    },
+                    reason=normalized_reason,
+                    connection=connection,
+                )
             await connection.execute(
                 """
                 UPDATE ticket_rooms
@@ -952,6 +996,22 @@ class TicketService:
                 raise NotFoundError("Sala do atendimento não encontrada.")
             if room["status"] == "OPEN":
                 return ticket
+            transfer = None
+            if ticket["ticket_type"] == "TRANSFER":
+                transfer_cursor = await connection.execute(
+                    """
+                    SELECT * FROM transfer_cases
+                    WHERE guild_id=? AND ticket_id=?
+                    """,
+                    (guild_id, ticket_id),
+                )
+                transfer = await transfer_cursor.fetchone()
+                if not transfer:
+                    raise NotFoundError("Protocolo de transferência não encontrado.")
+                if transfer["status"] not in {"CANCELLED", "REJECTED"}:
+                    raise ConflictError(
+                        "Somente transferências canceladas ou rejeitadas podem ser reabertas."
+                    )
             cursor = await connection.execute(
                 """
                 UPDATE service_tickets
@@ -974,6 +1034,49 @@ class TicketService:
             )
             if cursor.rowcount != 1:
                 raise ConflictError("A sala já foi reaberta por outra ação.")
+            if transfer:
+                transfer_cursor = await connection.execute(
+                    """
+                    UPDATE transfer_cases
+                    SET status='PENDING', approved_rank_id=NULL,
+                        max_rank_level_snapshot=NULL, member_application_id=NULL,
+                        decided_by=NULL, decided_at=NULL, decision_reason=NULL,
+                        applied_by=NULL, applied_at=NULL, updated_at=?, version=version+1
+                    WHERE id=? AND status=?
+                    """,
+                    (now, transfer["id"], transfer["status"]),
+                )
+                if transfer_cursor.rowcount != 1:
+                    raise ConflictError(
+                        "O protocolo de transferência foi reaberto por outra pessoa."
+                    )
+                await self._transfer_event(
+                    connection,
+                    guild_id,
+                    int(transfer["id"]),
+                    "REOPENED",
+                    actor_id=actor_id,
+                    metadata={
+                        "previous_status": str(transfer["status"]),
+                        "reason": normalized_reason,
+                        "ticket_id": ticket_id,
+                    },
+                    created_at=now,
+                )
+                await self.audit.record(
+                    guild_id,
+                    "TRANSFER_REOPENED",
+                    actor_id=actor_id,
+                    target_id=int(ticket["discord_id"]),
+                    before={"status": transfer["status"]},
+                    after={
+                        "status": "PENDING",
+                        "protocol": str(transfer["protocol"]),
+                        "ticket_id": ticket_id,
+                    },
+                    reason=normalized_reason,
+                    connection=connection,
+                )
             await self._event(
                 connection,
                 guild_id,
