@@ -51,9 +51,14 @@ export function StatusLabel({
 
 export function MetricStrip({ items }: { items: { label: string; value: React.ReactNode; tone?: string }[] }) {
   return (
-    <div className="metric-strip">
-      {items.map((item) => <div className={clsx("metric", item.tone)} key={item.label}><span>{item.label}</span><strong>{item.value}</strong></div>)}
-    </div>
+    <dl className="metric-strip">
+      {items.map((item) => (
+        <div className={clsx("metric", item.tone)} key={item.label}>
+          <dt><span>{item.label}</span></dt>
+          <dd><strong>{item.value}</strong></dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
