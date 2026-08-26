@@ -1406,3 +1406,12 @@ Fora do escopo atual: eventos, API e integração MTA.
   online, mas esse provisionamento precisa de decisão específica do proprietário.
 - Smokes humanos de ADV, Cursos, Transferências, Desligamentos e `AGUARDANDO SET` permanecem
   pendentes; publicação técnica não substitui aceite humano desses fluxos.
+
+# Atualizações do Bot — resumo de 26/08/2026 publicado
+
+- A mensagem fixada existente foi editada de forma idempotente no canal oficial, sem criar outra
+  postagem e sem menções. Canal, categoria, pin e permissões foram validados após a publicação.
+- O resumo público agora inclui ADV, Cursos, Transferências, Registro de Desligamentos e o controle
+  de `AGUARDANDO SET`, preservando explicitamente a decisão humana nos fluxos aplicáveis.
+- O informativo da Central de Tags declara o estado real: a fila segura está preparada, mas o envio
+  geral continua desligado e nenhum lote coletivo foi iniciado.

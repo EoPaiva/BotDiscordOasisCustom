@@ -884,3 +884,9 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     Cursos, Transferências, Desligamentos e `AGUARDANDO SET` permanecem pendentes. O startup também
     revelou um alerta independente: `COMANDO • ROCAM` possui permissões globais indevidas e impede
     apenas o provisionamento automático de Unidades Especiais; o fonte é idêntico ao pré-deploy.
+
+63. ✅ **Resumo oficial de 26/08/2026 — publicado em Atualizações do Bot.**
+    A mensagem fixada existente foi editada sem menções ou duplicação e passou validação ao vivo de
+    conteúdo, categoria, pin e permissões. O texto público registra ADV, Cursos, Transferências,
+    Desligamentos e `AGUARDANDO SET`; o informativo da Central de Tags deixa explícito que o envio
+    geral continua desligado e que nenhum lote coletivo foi iniciado.

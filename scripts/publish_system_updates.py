@@ -118,11 +118,64 @@ def build_update_embed(branding: Branding) -> dict[str, Any]:
             ),
             "inline": False,
         },
+        {
+            "name": "✅ ADV e disciplina",
+            "value": (
+                "ADVs agora registram gravidade e prazo, mantêm histórico completo e podem expirar "
+                "com segurança. O painel global mostra somente casos ativos e nenhuma punição é "
+                "decidida automaticamente."
+            ),
+            "inline": False,
+        },
+        {
+            "name": "✅ Cursos por canal",
+            "value": (
+                "Cada curso possui painel próprio com requisitos de patente, cargos, horas, tempo "
+                "de corporação, curso anterior, suspensão e ADV. Após aprovação humana, a "
+                "qualificação e o cargo são sincronizados sem duplicidade."
+            ),
+            "inline": False,
+        },
+        {
+            "name": "✅ Transferências auditáveis",
+            "value": (
+                "O atendimento gera protocolo e histórico estáveis. A patente respeita o teto "
+                "configurado e o vínculo só é aplicado depois de duas decisões humanas, sem "
+                "concessão retroativa a pedidos antigos."
+            ),
+            "inline": False,
+        },
+        {
+            "name": "✅ Registro de desligamentos",
+            "value": (
+                "Desligamentos oficiais agora geram um boletim durável e recuperável, sem apagar "
+                "o histórico. Motivos internos permanecem privados e nenhuma saída é decidida "
+                "automaticamente pelo sistema."
+            ),
+            "inline": False,
+        },
+        {
+            "name": "✅ Aguardando configuração da tag",
+            "value": (
+                "O bot identifica quem ainda precisa configurar a tag, envia a confirmação "
+                "privada uma única vez e encaminha impedimentos para atendimento humano. A "
+                "conclusão mantém banco, cargos e painel sincronizados."
+            ),
+            "inline": False,
+        },
+        {
+            "name": "🛡️ Informativo da Central de Tags",
+            "value": (
+                "A mensagem privada informativa e sua fila segura estão preparadas. O envio geral "
+                "continua desligado até autorização específica; nenhum lote coletivo foi iniciado."
+            ),
+            "inline": False,
+        },
     ]
     embed: dict[str, Any] = {
         "title": MESSAGE_TITLE,
         "description": (
-            "Resumo das melhorias publicadas até **25/08/2026**. "
+            "Resumo das melhorias publicadas até **26/08/2026**. "
             "As próximas entregas oficiais também serão registradas neste canal."
         ),
         "color": branding.embed_color,
@@ -294,8 +347,9 @@ async def publish(*, apply: bool) -> int:
             ),
             None,
         )
+        expected_embed = build_update_embed(config.branding)
         message_payload = {
-            "embeds": [build_update_embed(config.branding)],
+            "embeds": [expected_embed],
             "allowed_mentions": {"parse": []},
         }
         if summary is None:
@@ -318,6 +372,13 @@ async def publish(*, apply: bool) -> int:
         fresh_channel = await api.request("GET", f"/channels/{channel['id']}")
         pinned = await api.request("GET", f"/channels/{channel['id']}/pins")
         valid_message = any(item.get("id") == summary.get("id") for item in pinned)
+        valid_content = any(
+            embed.get("title") == MESSAGE_TITLE
+            and embed.get("description") == expected_embed["description"]
+            and embed.get("footer", {}).get("text") == MESSAGE_FOOTER
+            and len(embed.get("fields", [])) == len(expected_embed["fields"])
+            for embed in summary.get("embeds", [])
+        )
         synced = _normalized_overwrites(
             fresh_channel.get("permission_overwrites", [])
         ) == _normalized_overwrites(
@@ -327,17 +388,18 @@ async def publish(*, apply: bool) -> int:
             fresh_channel.get("name") != CHANNEL_NAME
             or fresh_channel.get("parent_id") != str(INFORMATION_CATEGORY_ID)
             or not valid_message
+            or not valid_content
             or not synced
         ):
             raise RuntimeError(
                 "A validação final do canal de atualizações falhou: "
                 f"name={fresh_channel.get('name') == CHANNEL_NAME} "
                 f"category={fresh_channel.get('parent_id') == str(INFORMATION_CATEGORY_ID)} "
-                f"pinned={valid_message} permissions={synced}."
+                f"pinned={valid_message} content={valid_content} permissions={synced}."
             )
         print(
             "UPDATES_PUBLISH_OK "
-            f"created={str(created).lower()} pinned=true permissions_synced=true "
+            f"created={str(created).lower()} pinned=true content=true permissions_synced=true "
             f"channel_id={channel['id']} message_id={summary['id']} snapshot={snapshot}"
         )
         return 0

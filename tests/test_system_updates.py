@@ -21,7 +21,7 @@ def test_update_summary_is_complete_and_keeps_decisions_human() -> None:
 
     assert embed["title"] == MESSAGE_TITLE
     assert embed["footer"]["text"] == MESSAGE_FOOTER
-    assert len(embed["fields"]) == 10
+    assert len(embed["fields"]) == 16
     fields = {str(field["name"]): str(field["value"]) for field in embed["fields"]}
     text = " ".join(fields.values())
     assert "✅ Portaria e cadastro" in fields
@@ -40,6 +40,21 @@ def test_update_summary_is_complete_and_keeps_decisions_human() -> None:
     assert "Comandante-Geral é exclusivo do proprietário" in text
     assert "Central de Upamentos" in text
     assert "redirecionamentos externos" in text
+    assert "✅ ADV e disciplina" in fields
+    assert "nenhuma punição é decidida automaticamente" in fields["✅ ADV e disciplina"]
+    assert "✅ Cursos por canal" in fields
+    assert "Após aprovação humana" in fields["✅ Cursos por canal"]
+    assert "✅ Transferências auditáveis" in fields
+    assert "duas decisões humanas" in fields["✅ Transferências auditáveis"]
+    assert "✅ Registro de desligamentos" in fields
+    assert "Motivos internos permanecem privados" in fields["✅ Registro de desligamentos"]
+    assert "✅ Aguardando configuração da tag" in fields
+    assert "atendimento humano" in fields["✅ Aguardando configuração da tag"]
+    assert "🛡️ Informativo da Central de Tags" in fields
+    assert "envio geral continua desligado" in fields["🛡️ Informativo da Central de Tags"]
+    assert "nenhum lote coletivo foi iniciado" in fields["🛡️ Informativo da Central de Tags"]
+    assert "26/08/2026" in str(embed["description"])
+    assert sum(len(str(field["name"])) + len(str(field["value"])) for field in embed["fields"]) < 5_500
 
 
 def test_permission_comparison_is_order_independent() -> None:
