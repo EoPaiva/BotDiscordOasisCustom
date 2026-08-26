@@ -19,11 +19,16 @@ describe("administrative inbox workspace", () => {
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
     expect(buttons).toHaveLength(2);
     expect(buttons[0]).toHaveAttribute("aria-current", "true");
+    const panel = screen.getByRole("article", { name: "TRANSFER" });
+    expect(panel).toHaveAttribute("id");
+    expect(buttons[0]).toHaveAttribute("aria-controls", panel.id);
+    expect(buttons[1]).toHaveAttribute("aria-controls", panel.id);
 
     fireEvent.click(buttons[1]);
 
     expect(buttons[0]).not.toHaveAttribute("aria-current");
     expect(buttons[1]).toHaveAttribute("aria-current", "true");
     expect(screen.getByRole("heading", { name: "SHIFT REVIEW" })).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "SHIFT REVIEW" })).toBe(panel);
   });
 });
