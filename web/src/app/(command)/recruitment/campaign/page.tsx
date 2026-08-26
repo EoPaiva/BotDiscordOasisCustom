@@ -1,5 +1,5 @@
 import { PageHeader, SectionHeader, StatusLabel } from "@/components/ui";
-import { commandCenterFetch } from "@/lib/api";
+import { recruitmentAdminFetch } from "@/lib/api";
 
 import { updateRecruitmentCampaign } from "../actions";
 
@@ -7,8 +7,8 @@ type Row = Record<string, unknown>;
 
 export default async function RecruitmentCampaignPage() {
   const [campaign, resources] = await Promise.all([
-    commandCenterFetch<Row>("/v1/admin/recruitment/campaign"),
-    commandCenterFetch<{ ranks: Row[]; roles: Row[]; voice_channels: Row[] }>("/v1/admin/recruitment/resources"),
+    recruitmentAdminFetch<Row>("/v1/admin/recruitment/campaign"),
+    recruitmentAdminFetch<{ ranks: Row[]; roles: Row[]; voice_channels: Row[] }>("/v1/admin/recruitment/resources"),
   ]);
   const local = (value: unknown) => value ? new Date(Number(value)).toISOString().slice(0,16) : "";
   return <>

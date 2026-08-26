@@ -94,26 +94,16 @@ function signedRequestHeaders(
   return headers;
 }
 
-export async function commandCenterFetch<T>(
+async function authenticatedCommandCenterFetch<T>(
   path: string,
-  init: RequestInit = {},
+  init: RequestInit,
+  configuration: { apiUrl: string; internalSecret: string; guildId: string },
 ): Promise<T> {
   const identity = await getDiscordSessionIdentity();
   if (!identity) throw new CommandCenterApiError("Sessão Discord necessária.", 401, "auth");
-  const apiUrl = process.env.COMMAND_CENTER_API_URL;
-  const internalSecret = process.env.COMMAND_CENTER_INTERNAL_SECRET;
-  const guildId = process.env.DEFAULT_GUILD_ID;
-  if (!apiUrl || !internalSecret || !guildId) {
-    throw new CommandCenterApiError(
-      "A integração segura com a API ainda não foi configurada.",
-      503,
-      "configuration",
-    );
-  }
   const correlationId = randomUUID();
-  const configuration = { internalSecret, guildId };
   const target = normalizeCommandCenterPath(path);
-  const response = await fetch(`${apiUrl.replace(/\/$/, "")}${target}`, {
+  const response = await fetch(`${configuration.apiUrl}${target}`, {
     ...init,
     cache: "no-store",
     signal: init.signal ?? AbortSignal.timeout(15_000),
@@ -128,6 +118,24 @@ export async function commandCenterFetch<T>(
     );
   }
   return (await response.json()) as T;
+}
+
+export async function commandCenterFetch<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  return authenticatedCommandCenterFetch<T>(path, init, integrationConfiguration());
+}
+
+export async function recruitmentAdminFetch<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  return authenticatedCommandCenterFetch<T>(
+    path,
+    init,
+    await recruitmentIntegrationConfiguration(),
+  );
 }
 
 /** Usa o novo DTO de identidade e mantém compatibilidade durante o rollout da API. */

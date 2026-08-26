@@ -2,7 +2,7 @@ import { Ban, Bot, FileCog, Flag, ListChecks } from "lucide-react";
 import Link from "next/link";
 
 import { MetricStrip, PageHeader, SectionHeader, StatusLabel } from "@/components/ui";
-import { commandCenterFetch } from "@/lib/api";
+import { recruitmentAdminFetch } from "@/lib/api";
 import { label } from "@/lib/format";
 
 type Application = Record<string, unknown>;
@@ -18,7 +18,7 @@ export default async function RecruitmentAdminPage({ searchParams }: PageProps<"
   if (search) params.set("search", search);
   if (/^[1-9]\d*$/.test(assignedTo)) params.set("assigned_to", assignedTo);
   const queryString = params.toString();
-  const data = await commandCenterFetch<{ applications: Application[]; statistics: Statistics }>(
+  const data = await recruitmentAdminFetch<{ applications: Application[]; statistics: Statistics }>(
     `/v1/admin/recruitment/applications${queryString ? `?${queryString}` : ""}`,
   );
   const counts = data.statistics.by_status;

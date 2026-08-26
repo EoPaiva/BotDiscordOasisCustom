@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { CommandCenterApiError, commandCenterFetch as requestCommandCenter } from "@/lib/api";
+import { CommandCenterApiError, recruitmentAdminFetch as requestCommandCenter } from "@/lib/api";
 
 function returnPathFor(path: string): string {
   const application = path.match(/^\/v1\/admin\/recruitment\/applications\/(\d+)/);

@@ -1,7 +1,7 @@
 import { BarChart3, Bot, FileCheck2, FlaskConical, ShieldCheck } from "lucide-react";
 
 import { MetricStrip, PageHeader, SectionHeader, StatusLabel } from "@/components/ui";
-import { commandCenterFetch } from "@/lib/api";
+import { recruitmentAdminFetch } from "@/lib/api";
 
 import {
   createRecruitmentAiRubricDraft,
@@ -59,10 +59,10 @@ type Quality = {
 
 export default async function RecruitmentAiPage() {
   const [config, rubric, evaluationContext, quality] = await Promise.all([
-    commandCenterFetch<Configuration>("/v1/admin/recruitment/ai/config"),
-    commandCenterFetch<Rubric>("/v1/admin/recruitment/ai/rubric"),
-    commandCenterFetch<EvaluationContext>("/v1/admin/recruitment/ai/context"),
-    commandCenterFetch<Quality>("/v1/admin/recruitment/ai/quality"),
+    recruitmentAdminFetch<Configuration>("/v1/admin/recruitment/ai/config"),
+    recruitmentAdminFetch<Rubric>("/v1/admin/recruitment/ai/rubric"),
+    recruitmentAdminFetch<EvaluationContext>("/v1/admin/recruitment/ai/context"),
+    recruitmentAdminFetch<Quality>("/v1/admin/recruitment/ai/quality"),
   ]);
   const draft = rubric.selected.status === "DRAFT";
   const contextDraft = evaluationContext.selected.status === "DRAFT";

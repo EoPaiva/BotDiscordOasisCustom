@@ -1,7 +1,7 @@
 import { Bot, ClipboardSignature, MessageSquareText, RefreshCw, ShieldAlert } from "lucide-react";
 
 import { MetricStrip, PageHeader, SectionHeader, StatusLabel } from "@/components/ui";
-import { commandCenterFetch } from "@/lib/api";
+import { recruitmentAdminFetch } from "@/lib/api";
 import { label } from "@/lib/format";
 
 import { addRecruitmentAdaptation, addRecruitmentNote, assignRecruitmentApplication, decideRecruitmentApplication, evaluateRecruitmentInterview, reanalyzeRecruitmentApplication, recordRecruitmentAnalysisFeedback, scheduleRecruitmentInterview } from "../actions";
@@ -50,7 +50,7 @@ const ratings = ["EXCELLENT", "GOOD", "REGULAR", "INSUFFICIENT"];
 
 export default async function RecruitmentDossierPage({ params }: PageProps<"/recruitment/[id]">) {
   const { id } = await params;
-  const data = await commandCenterFetch<Dossier>(`/v1/admin/recruitment/applications/${id}`);
+  const data = await recruitmentAdminFetch<Dossier>(`/v1/admin/recruitment/applications/${id}`);
   const application = data.application;
   const open = !["APPROVED", "REJECTED", "WITHDRAWN", "EXPIRED"].includes(String(application.status));
   const interview = data.interviews.find((item) => item.status === "SCHEDULED");

@@ -24,7 +24,7 @@ vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@/lib/api", () => ({
   CommandCenterApiError: mocks.ApiError,
-  commandCenterFetch: mocks.requestCommandCenter,
+  recruitmentAdminFetch: mocks.requestCommandCenter,
 }));
 
 import { assignRecruitmentApplication, decideRecruitmentApplication } from "./actions";

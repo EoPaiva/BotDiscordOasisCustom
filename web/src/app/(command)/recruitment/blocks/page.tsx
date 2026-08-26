@@ -1,14 +1,14 @@
 import { Ban, ShieldOff } from "lucide-react";
 
 import { PageHeader, SectionHeader, StatusLabel } from "@/components/ui";
-import { commandCenterFetch } from "@/lib/api";
+import { recruitmentAdminFetch } from "@/lib/api";
 
 import { createRecruitmentBlock, revokeRecruitmentBlock } from "../actions";
 
 type Block = Record<string, unknown>;
 
 export default async function RecruitmentBlocksPage() {
-  const blocks = await commandCenterFetch<Block[]>("/v1/admin/recruitment/blocks");
+  const blocks = await recruitmentAdminFetch<Block[]>("/v1/admin/recruitment/blocks");
   return <>
     <PageHeader code="REC / 04" title="Bloqueios administrativos" description="Impedimentos explícitos, justificados e integralmente auditados." />
     <section className="command-section"><SectionHeader index="01" title="Registrar bloqueio" meta="Discord ID ou ID BGR" /><form action={createRecruitmentBlock} className="campaign-form"><label>Discord ID<input inputMode="numeric" name="discordId" /></label><label>ID BGR<input name="bgrId" /></label><label className="wide">Justificativa<textarea name="reason" required rows={3} /></label><button className="button button-danger" type="submit"><Ban size={14} /> Bloquear candidatura</button></form></section>

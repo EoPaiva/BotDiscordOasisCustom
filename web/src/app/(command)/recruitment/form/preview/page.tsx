@@ -2,12 +2,12 @@ import { ArrowLeft, Eye } from "lucide-react";
 import Link from "next/link";
 
 import { PageHeader, SectionHeader, StatusLabel } from "@/components/ui";
-import { commandCenterFetch } from "@/lib/api";
+import { recruitmentAdminFetch } from "@/lib/api";
 
 type Question = Record<string, unknown>;
 
 export default async function RecruitmentFormPreviewPage() {
-  const questions = await commandCenterFetch<Question[]>("/v1/admin/recruitment/questions");
+  const questions = await recruitmentAdminFetch<Question[]>("/v1/admin/recruitment/questions");
   const enabled = questions.filter((question) => Boolean(question.enabled));
   return <>
     <PageHeader code="REC / PREVIEW" title="Prévia administrativa" description="Simulação visual do banco atual. Esta rota nunca é exposta ao candidato." />

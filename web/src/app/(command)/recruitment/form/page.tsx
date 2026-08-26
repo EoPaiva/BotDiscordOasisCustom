@@ -2,7 +2,7 @@ import { Eye, FilePlus2, Layers3, Plus } from "lucide-react";
 import Link from "next/link";
 
 import { MetricStrip, PageHeader, SectionHeader, StatusLabel } from "@/components/ui";
-import { commandCenterFetch } from "@/lib/api";
+import { recruitmentAdminFetch } from "@/lib/api";
 
 import {
   createRecruitmentQuestion,
@@ -65,8 +65,8 @@ function QuestionFields({ question, groups }: { question?: Question; groups: Gro
 
 export default async function RecruitmentFormPage() {
   const [questions, groups] = await Promise.all([
-    commandCenterFetch<Question[]>("/v1/admin/recruitment/questions"),
-    commandCenterFetch<Group[]>("/v1/admin/recruitment/question-groups"),
+    recruitmentAdminFetch<Question[]>("/v1/admin/recruitment/questions"),
+    recruitmentAdminFetch<Group[]>("/v1/admin/recruitment/question-groups"),
   ]);
   return <>
     <PageHeader code="REC / 03" title="Formulário de alistamento" description="Banco versionado; alterações só alcançam novas candidaturas após publicação." />
