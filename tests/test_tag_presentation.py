@@ -37,6 +37,7 @@ async def test_tag_admin_panel_exposes_the_operational_views_and_configuration()
     assert [item.label for item in view.children] == [
         "Todos",
         "Faltam setar",
+        "Atualizar Lista",
         "Em atendimento",
         "Aguardando confirmação",
         "Pendências",

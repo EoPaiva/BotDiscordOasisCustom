@@ -1463,6 +1463,18 @@ class PersonnelAdminView(AdminView):
         )
 
     @discord.ui.button(
+        label="Tags",
+        emoji="🏷️",
+        style=discord.ButtonStyle.primary,
+        custom_id="choque:personnel:tags:v1",
+    )
+    async def tags(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        cog = get_bot(interaction).get_cog("TagCommands")
+        if cog is None or not hasattr(cog, "open_admin"):
+            raise NotFoundError("A Central de Tags não está disponível.")
+        await cog.open_admin(interaction)
+
+    @discord.ui.button(
         label="Atualizar resumo",
         emoji="🔄",
         style=discord.ButtonStyle.success,

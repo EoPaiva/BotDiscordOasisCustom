@@ -4512,6 +4512,28 @@ CREATE INDEX ix_career_notifications_delivery
 ON career_notifications(status, available_at, id);
 """
 
+MIGRATION_053 = """
+-- Acompanhamento proativo de quem já possui o cargo AGUARDANDO SET. A
+-- solicitação continua sendo o agregado canônico; a origem distingue o fluxo
+-- iniciado pelo membro do fluxo detectado no Discord. A notificação de quem
+-- assumiu também precisa sobreviver a reinícios e falhas temporárias de DM.
+ALTER TABLE tag_requests ADD COLUMN intake_source TEXT NOT NULL
+    DEFAULT 'MEMBER_REQUEST' CHECK (intake_source IN (
+        'MEMBER_REQUEST','WAITING_ROLE_SCAN'
+    ));
+ALTER TABLE tag_requests ADD COLUMN assignment_delivery_status TEXT NOT NULL
+    DEFAULT 'NOT_REQUESTED' CHECK (assignment_delivery_status IN (
+        'NOT_REQUESTED','PENDING','PROCESSING','DELIVERED','FAILED'
+    ));
+ALTER TABLE tag_requests ADD COLUMN assignment_delivery_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tag_requests ADD COLUMN assignment_delivery_claimed_at INTEGER;
+ALTER TABLE tag_requests ADD COLUMN assignment_delivery_message_id INTEGER;
+ALTER TABLE tag_requests ADD COLUMN assignment_delivery_error TEXT;
+
+CREATE INDEX ix_tag_requests_assignment_delivery
+ON tag_requests(guild_id, status, assignment_delivery_status, claimed_at, id);
+"""
+
 MIGRATIONS = (
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -4565,6 +4587,7 @@ MIGRATIONS = (
     (50, MIGRATION_050),
     (51, MIGRATION_051),
     (52, MIGRATION_052),
+    (53, MIGRATION_053),
 )
 
 

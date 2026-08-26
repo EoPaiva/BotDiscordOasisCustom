@@ -323,6 +323,312 @@ class TagService:
             )
             return await self._queue_projection(connection, created)
 
+    async def request_tag_from_waiting_role(
+        self, guild_id: int, discord_id: int
+    ) -> dict[str, object]:
+        """Open one recoverable private check after observing AGUARDANDO SET.
+
+        The Discord listener supplies the role observation, while this method
+        owns deduplication and persistence. Existing active requests always win
+        so a role event cannot create a parallel queue entry.
+        """
+        now = self.clock()
+        active_statuses = tuple(sorted(self.ACTIVE_STATUSES))
+        placeholders = ",".join("?" for _ in active_statuses)
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT id, mta_nick, character_id, status
+                FROM members WHERE guild_id=? AND discord_id=?
+                """,
+                (guild_id, discord_id),
+            )
+            member = await cursor.fetchone()
+            if not member:
+                raise NotFoundError("O membro com AGUARDANDO SET não possui cadastro aprovado.")
+            if str(member["status"]) != "ACTIVE":
+                raise ValidationError("Somente membros ativos podem entrar na Central de Tags.")
+
+            cursor = await connection.execute(
+                f"""
+                SELECT * FROM tag_requests
+                WHERE guild_id=? AND member_id=? AND status IN ({placeholders})
+                ORDER BY requested_at DESC, id DESC LIMIT 1
+                """,
+                (guild_id, int(member["id"]), *active_statuses),
+            )
+            existing = await cursor.fetchone()
+            if existing:
+                return await self._queue_projection(connection, existing)
+
+            character_id = str(member["character_id"] or "SEM_ID_REGISTRADO").strip()
+            cursor = await connection.execute(
+                """
+                INSERT OR IGNORE INTO tag_requests(
+                    guild_id, member_id, discord_id, mta_nick_snapshot,
+                    character_id_snapshot, status, request_origin, intake_source,
+                    responsible_notification_status, confirmation_requested_at,
+                    confirmation_delivery_status, set_by, set_at,
+                    set_character_id, requested_at, requested_by, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 'AGUARDANDO_CONFIRMACAO', 'SET_REQUEST',
+                          'WAITING_ROLE_SCAN', 'NOT_REQUESTED', ?, 'PENDING', ?, ?, ?,
+                          ?, 0, ?, ?)
+                """,
+                (
+                    guild_id,
+                    int(member["id"]),
+                    discord_id,
+                    str(member["mta_nick"]),
+                    character_id,
+                    now,
+                    discord_id,
+                    now,
+                    character_id,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            if cursor.rowcount == 0:
+                cursor = await connection.execute(
+                    f"""
+                    SELECT * FROM tag_requests
+                    WHERE guild_id=? AND member_id=? AND status IN ({placeholders})
+                    ORDER BY requested_at DESC, id DESC LIMIT 1
+                    """,
+                    (guild_id, int(member["id"]), *active_statuses),
+                )
+                existing = await cursor.fetchone()
+                if existing:
+                    return await self._queue_projection(connection, existing)
+                raise RuntimeError("A verificação automática de tag não pôde ser criada.")
+
+            request_id = int(cursor.lastrowid)
+            correlation_id = str(uuid.uuid4())
+            await connection.execute(
+                """
+                INSERT INTO tag_request_events(
+                    tag_request_id, guild_id, event_type, previous_status,
+                    next_status, actor_id, metadata_json, correlation_id, occurred_at
+                ) VALUES (?, ?, 'TAG_WAITING_ROLE_DETECTED', NULL,
+                          'AGUARDANDO_CONFIRMACAO', NULL, ?, ?, ?)
+                """,
+                (
+                    request_id,
+                    guild_id,
+                    json.dumps(
+                        {"source": "DISCORD_ROLE", "role_state": "AGUARDANDO_SET"},
+                        sort_keys=True,
+                    ),
+                    correlation_id,
+                    now,
+                ),
+            )
+            await connection.execute(
+                """
+                INSERT INTO tag_role_sync_state(tag_request_id, requested_version, updated_at)
+                VALUES (?, 1, ?)
+                """,
+                (request_id, now),
+            )
+            await connection.execute(
+                """
+                UPDATE members SET tag_status='AGUARDANDO_CONFIRMACAO', updated_at=?
+                WHERE id=?
+                """,
+                (now, int(member["id"])),
+            )
+            await self.audit.record(
+                guild_id,
+                "TAG_WAITING_ROLE_DETECTED",
+                target_id=discord_id,
+                after={
+                    "tag_request_id": request_id,
+                    "status": "AGUARDANDO_CONFIRMACAO",
+                    "source": "DISCORD_ROLE",
+                },
+                connection=connection,
+                correlation_id=correlation_id,
+            )
+            cursor = await connection.execute(
+                "SELECT * FROM tag_requests WHERE id=?", (request_id,)
+            )
+            created = await cursor.fetchone()
+            assert created is not None
+            await self._enqueue_role_sync(connection, created, requested_by=0, now=now)
+            return self._row(created)
+
+    async def report_waiting_role_missing(
+        self,
+        request_id: int,
+        *,
+        discord_id: int,
+        expected_version: int,
+    ) -> dict[str, object]:
+        """Move a role-detected private check into the command queue once."""
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                "SELECT * FROM tag_requests WHERE id=?", (request_id,)
+            )
+            request = await cursor.fetchone()
+            if not request:
+                raise NotFoundError("Solicitação de tag não encontrada.")
+            if int(request["discord_id"]) != discord_id:
+                raise PermissionDenied("Somente o titular pode responder sobre a própria tag.")
+            if str(request["intake_source"]) != "WAITING_ROLE_SCAN":
+                raise ConflictError("Esta solicitação não veio da verificação de AGUARDANDO SET.")
+            if str(request["status"]) == "AGUARDANDO_SET":
+                return await self._queue_projection(connection, request)
+            if str(request["status"]) != "AGUARDANDO_CONFIRMACAO":
+                raise ConflictError("Esta solicitação já foi alterada.")
+            cursor = await connection.execute(
+                """
+                UPDATE tag_requests
+                SET status='AGUARDANDO_SET', responsible_notification_status='PENDING',
+                    responsible_notification_attempts=0,
+                    responsible_notification_claimed_at=NULL,
+                    responsible_notification_message_id=NULL,
+                    responsible_notification_error=NULL,
+                    version=version+1, updated_at=?
+                WHERE id=? AND status='AGUARDANDO_CONFIRMACAO'
+                  AND discord_id=? AND version=? AND intake_source='WAITING_ROLE_SCAN'
+                """,
+                (now, request_id, discord_id, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise ConflictError("Esta solicitação já foi alterada. Atualize o painel.")
+            cursor = await connection.execute(
+                "SELECT * FROM tag_requests WHERE id=?", (request_id,)
+            )
+            updated = await cursor.fetchone()
+            assert updated is not None
+            correlation_id = str(uuid.uuid4())
+            await connection.execute(
+                """
+                INSERT INTO tag_request_events(
+                    tag_request_id, guild_id, event_type, previous_status,
+                    next_status, actor_id, metadata_json, correlation_id, occurred_at
+                ) VALUES (?, ?, 'TAG_WAITING_ROLE_REQUIRES_SET',
+                          'AGUARDANDO_CONFIRMACAO', 'AGUARDANDO_SET', ?, '{}', ?, ?)
+                """,
+                (request_id, int(request["guild_id"]), discord_id, correlation_id, now),
+            )
+            await connection.execute(
+                """
+                UPDATE tag_role_sync_state SET requested_version=?, updated_at=?
+                WHERE tag_request_id=?
+                """,
+                (int(updated["version"]), now, request_id),
+            )
+            await connection.execute(
+                "UPDATE members SET tag_status='AGUARDANDO_SET', updated_at=? WHERE id=?",
+                (now, int(request["member_id"])),
+            )
+            await self.audit.record(
+                int(request["guild_id"]),
+                "TAG_WAITING_ROLE_REQUIRES_SET",
+                actor_id=discord_id,
+                target_id=discord_id,
+                before={"status": "AGUARDANDO_CONFIRMACAO"},
+                after={"tag_request_id": request_id, "status": "AGUARDANDO_SET"},
+                connection=connection,
+                correlation_id=correlation_id,
+            )
+            await self._enqueue_role_sync(
+                connection, updated, requested_by=discord_id, now=now
+            )
+            return await self._queue_projection(connection, updated)
+
+    async def escalate_waiting_role_dm_failure(
+        self, request_id: int, *, error: str
+    ) -> dict[str, object]:
+        """Expose a blocked proactive DM in the Central for manual contact."""
+        normalized_error = error.strip()[:500] or "Mensagem privada indisponível"
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                "SELECT * FROM tag_requests WHERE id=?", (request_id,)
+            )
+            request = await cursor.fetchone()
+            if not request:
+                raise NotFoundError("Solicitação de tag não encontrada.")
+            if str(request["intake_source"]) != "WAITING_ROLE_SCAN":
+                raise ConflictError("Esta notificação não pertence à varredura de cargos.")
+            if str(request["status"]) == "AGUARDANDO_SET":
+                return await self._queue_projection(connection, request)
+            cursor = await connection.execute(
+                """
+                UPDATE tag_requests
+                SET status='AGUARDANDO_SET',
+                    confirmation_delivery_status='FAILED',
+                    confirmation_delivery_claimed_at=NULL,
+                    confirmation_delivery_error=?,
+                    responsible_notification_status='PENDING',
+                    responsible_notification_attempts=0,
+                    responsible_notification_claimed_at=NULL,
+                    responsible_notification_message_id=NULL,
+                    responsible_notification_error=NULL,
+                    version=version+1, updated_at=?
+                WHERE id=? AND status='AGUARDANDO_CONFIRMACAO'
+                  AND intake_source='WAITING_ROLE_SCAN'
+                  AND confirmation_delivery_status='PROCESSING'
+                """,
+                (normalized_error, now, request_id),
+            )
+            if cursor.rowcount != 1:
+                raise ConflictError("A entrega privada já foi alterada.")
+            cursor = await connection.execute(
+                "SELECT * FROM tag_requests WHERE id=?", (request_id,)
+            )
+            updated = await cursor.fetchone()
+            assert updated is not None
+            correlation_id = str(uuid.uuid4())
+            await connection.execute(
+                """
+                INSERT INTO tag_request_events(
+                    tag_request_id, guild_id, event_type, previous_status,
+                    next_status, actor_id, reason, metadata_json,
+                    correlation_id, occurred_at
+                ) VALUES (?, ?, 'TAG_WAITING_ROLE_DM_UNAVAILABLE',
+                          'AGUARDANDO_CONFIRMACAO', 'AGUARDANDO_SET', NULL, ?, '{}', ?, ?)
+                """,
+                (
+                    request_id,
+                    int(request["guild_id"]),
+                    normalized_error,
+                    correlation_id,
+                    now,
+                ),
+            )
+            await connection.execute(
+                """
+                UPDATE tag_role_sync_state SET requested_version=?, updated_at=?
+                WHERE tag_request_id=?
+                """,
+                (int(updated["version"]), now, request_id),
+            )
+            await connection.execute(
+                "UPDATE members SET tag_status='AGUARDANDO_SET', updated_at=? WHERE id=?",
+                (now, int(request["member_id"])),
+            )
+            await self.audit.record(
+                int(request["guild_id"]),
+                "TAG_WAITING_ROLE_DM_UNAVAILABLE",
+                target_id=int(request["discord_id"]),
+                before={"status": "AGUARDANDO_CONFIRMACAO"},
+                after={
+                    "tag_request_id": request_id,
+                    "status": "AGUARDANDO_SET",
+                    "manual_contact_required": True,
+                },
+                reason=normalized_error,
+                connection=connection,
+                correlation_id=correlation_id,
+            )
+            await self._enqueue_role_sync(connection, updated, requested_by=0, now=now)
+            return await self._queue_projection(connection, updated)
+
     async def waiting_queue(self, guild_id: int, *, limit: int = 100) -> list[dict[str, object]]:
         """Return the operational queue oldest first, with no assigned cards."""
         safe_limit = max(1, min(int(limit), 100))
@@ -626,6 +932,11 @@ class TagService:
                 """
                 UPDATE tag_requests
                 SET status='ATENDIMENTO_ASSUMIDO', claimed_by=?, claimed_at=?,
+                    assignment_delivery_status='PENDING',
+                    assignment_delivery_attempts=0,
+                    assignment_delivery_claimed_at=NULL,
+                    assignment_delivery_message_id=NULL,
+                    assignment_delivery_error=NULL,
                     version=version+1, updated_at=?
                 WHERE id=? AND status IN ('AGUARDANDO_SET', 'PENDENCIA') AND version=?
                 """,
@@ -776,6 +1087,103 @@ class TagService:
             assert updated is not None
             return self._row(updated)
 
+    async def complete_waiting_role_set(
+        self,
+        request_id: int,
+        *,
+        responsible_id: int,
+        expected_version: int,
+    ) -> dict[str, object]:
+        """Finish a role-detected request directly by its assigned responsible."""
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                "SELECT * FROM tag_requests WHERE id=?", (request_id,)
+            )
+            request = await cursor.fetchone()
+            if not request:
+                raise NotFoundError("Solicitação de tag não encontrada.")
+            if str(request["intake_source"]) != "WAITING_ROLE_SCAN":
+                raise ConflictError("Use o fluxo normal de confirmação para esta solicitação.")
+            if str(request["status"]) == "CONCLUIDO":
+                return self._row(request)
+            if str(request["status"]) != "ATENDIMENTO_ASSUMIDO":
+                raise ConflictError("Esta solicitação não está em atendimento.")
+            if int(request["claimed_by"] or 0) != responsible_id:
+                raise ConflictError("Somente o responsável que assumiu pode finalizar o set.")
+            cursor = await connection.execute(
+                """
+                UPDATE tag_requests
+                SET status='CONCLUIDO', set_by=?, set_at=?,
+                    set_character_id=character_id_snapshot,
+                    confirmed_by=?, confirmed_at=?, version=version+1, updated_at=?
+                WHERE id=? AND status='ATENDIMENTO_ASSUMIDO' AND claimed_by=?
+                  AND version=? AND intake_source='WAITING_ROLE_SCAN'
+                """,
+                (
+                    responsible_id,
+                    now,
+                    responsible_id,
+                    now,
+                    now,
+                    request_id,
+                    responsible_id,
+                    expected_version,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ConflictError("Esta solicitação já foi alterada. Atualize o painel.")
+            cursor = await connection.execute(
+                "SELECT * FROM tag_requests WHERE id=?", (request_id,)
+            )
+            completed = await cursor.fetchone()
+            assert completed is not None
+            correlation_id = str(uuid.uuid4())
+            await connection.execute(
+                """
+                INSERT INTO tag_request_events(
+                    tag_request_id, guild_id, event_type, previous_status,
+                    next_status, actor_id, metadata_json, correlation_id, occurred_at
+                ) VALUES (?, ?, 'TAG_WAITING_ROLE_SET_COMPLETED',
+                          'ATENDIMENTO_ASSUMIDO', 'CONCLUIDO', ?, '{}', ?, ?)
+                """,
+                (request_id, int(request["guild_id"]), responsible_id, correlation_id, now),
+            )
+            await connection.execute(
+                """
+                UPDATE tag_role_sync_state SET requested_version=?, updated_at=?
+                WHERE tag_request_id=?
+                """,
+                (int(completed["version"]), now, request_id),
+            )
+            await connection.execute(
+                """
+                UPDATE members
+                SET tag_status='CONCLUIDO', tag_completed_at=?, tag_set_by=?,
+                    tag_last_confirmed_at=?, updated_at=?
+                WHERE id=?
+                """,
+                (now, responsible_id, now, now, int(request["member_id"])),
+            )
+            await self.audit.record(
+                int(request["guild_id"]),
+                "TAG_WAITING_ROLE_SET_COMPLETED",
+                actor_id=responsible_id,
+                target_id=int(request["discord_id"]),
+                before={"status": "ATENDIMENTO_ASSUMIDO"},
+                after={
+                    "tag_request_id": request_id,
+                    "status": "CONCLUIDO",
+                    "set_by": responsible_id,
+                },
+                connection=connection,
+                correlation_id=correlation_id,
+            )
+            await self._enqueue_role_sync(
+                connection, completed, requested_by=responsible_id, now=now
+            )
+            return self._row(completed)
+
     async def pending_confirmation_notifications(
         self, guild_id: int, *, limit: int = 50
     ) -> list[dict[str, object]]:
@@ -807,6 +1215,106 @@ class TagService:
             (guild_id, safe_limit),
         )
         return [self._row(row) for row in rows]
+
+    async def pending_assignment_notifications(
+        self, guild_id: int, *, limit: int = 50
+    ) -> list[dict[str, object]]:
+        """Return durable notices that identify who assumed each request."""
+        safe_limit = max(1, min(int(limit), 100))
+        rows = await self.database.fetchall(
+            """
+            SELECT * FROM tag_requests
+            WHERE guild_id=? AND status='ATENDIMENTO_ASSUMIDO'
+              AND assignment_delivery_status IN ('PENDING', 'FAILED')
+            ORDER BY claimed_at, id LIMIT ?
+            """,
+            (guild_id, safe_limit),
+        )
+        return [self._row(row) for row in rows]
+
+    async def recover_assignment_notification_claims(
+        self, *, stale_after_ms: int = 300_000
+    ) -> int:
+        if stale_after_ms <= 0:
+            raise ValidationError("O tempo de recuperação precisa ser positivo.")
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE tag_requests
+                SET assignment_delivery_status='FAILED',
+                    assignment_delivery_claimed_at=NULL,
+                    assignment_delivery_error='Recuperado após reinício do bot',
+                    updated_at=?
+                WHERE status='ATENDIMENTO_ASSUMIDO'
+                  AND assignment_delivery_status='PROCESSING'
+                  AND assignment_delivery_claimed_at IS NOT NULL
+                  AND assignment_delivery_claimed_at<=?
+                """,
+                (now, now - int(stale_after_ms)),
+            )
+            return cursor.rowcount
+
+    async def claim_assignment_notification(
+        self, request_id: int
+    ) -> dict[str, object] | None:
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE tag_requests
+                SET assignment_delivery_status='PROCESSING',
+                    assignment_delivery_attempts=assignment_delivery_attempts+1,
+                    assignment_delivery_claimed_at=?,
+                    assignment_delivery_error=NULL, updated_at=?
+                WHERE id=? AND status='ATENDIMENTO_ASSUMIDO'
+                  AND assignment_delivery_status IN ('PENDING', 'FAILED')
+                """,
+                (now, now, request_id),
+            )
+            if cursor.rowcount != 1:
+                return None
+            cursor = await connection.execute(
+                "SELECT * FROM tag_requests WHERE id=?", (request_id,)
+            )
+            request = await cursor.fetchone()
+            assert request is not None
+            return self._row(request)
+
+    async def mark_assignment_notification_delivered(
+        self, request_id: int, *, delivery_message_id: int | None
+    ) -> bool:
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE tag_requests
+                SET assignment_delivery_status='DELIVERED',
+                    assignment_delivery_claimed_at=NULL,
+                    assignment_delivery_message_id=?,
+                    assignment_delivery_error=NULL, updated_at=?
+                WHERE id=? AND assignment_delivery_status='PROCESSING'
+                """,
+                (delivery_message_id, now, request_id),
+            )
+            return cursor.rowcount == 1
+
+    async def mark_assignment_notification_failed(
+        self, request_id: int, *, error: str
+    ) -> bool:
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE tag_requests
+                SET assignment_delivery_status='FAILED',
+                    assignment_delivery_claimed_at=NULL,
+                    assignment_delivery_error=?, updated_at=?
+                WHERE id=? AND assignment_delivery_status='PROCESSING'
+                """,
+                (error[:500], now, request_id),
+            )
+            return cursor.rowcount == 1
 
     async def recover_responsible_notification_claims(
         self, *, stale_after_ms: int = 300_000
@@ -1503,6 +2011,33 @@ class TagService:
             event_type="TAG_REQUEST_REJECTED",
         )
 
+    async def archive_departed_member(
+        self, guild_id: int, discord_id: int
+    ) -> dict[str, object] | None:
+        """Archive the member's active request after a Discord departure."""
+        active_statuses = tuple(sorted(self.ACTIVE_STATUSES))
+        placeholders = ",".join("?" for _ in active_statuses)
+        request = await self.database.fetchone(
+            f"""
+            SELECT * FROM tag_requests
+            WHERE guild_id=? AND discord_id=? AND status IN ({placeholders})
+            ORDER BY requested_at DESC, id DESC LIMIT 1
+            """,
+            (guild_id, discord_id, *active_statuses),
+        )
+        if not request:
+            return None
+        return await self._terminalize(
+            int(request["id"]),
+            actor_id=0,
+            expected_version=int(request["version"]),
+            reason="Membro saiu do servidor.",
+            status="CANCELADO",
+            event_type="TAG_REQUEST_MEMBER_LEFT",
+            notify_member=False,
+            enqueue_role_sync=False,
+        )
+
     async def cancel_request(
         self,
         request_id: int,
@@ -1574,6 +2109,8 @@ class TagService:
         reason: str,
         status: str,
         event_type: str,
+        notify_member: bool = True,
+        enqueue_role_sync: bool = True,
     ) -> dict[str, object]:
         normalized_reason = reason.strip()
         if not normalized_reason:
@@ -1594,7 +2131,7 @@ class TagService:
                 """
                 UPDATE tag_requests
                 SET status=?, terminal_by=?, terminal_at=?, terminal_reason=?,
-                    terminal_notification_status='PENDING',
+                    terminal_notification_status=?,
                     terminal_notification_attempts=0,
                     terminal_notification_claimed_at=NULL,
                     terminal_notification_message_id=NULL,
@@ -1602,7 +2139,16 @@ class TagService:
                     claimed_by=NULL, claimed_at=NULL, version=version+1, updated_at=?
                 WHERE id=? AND version=?
                 """,
-                (status, actor_id, now, normalized_reason, now, request_id, expected_version),
+                (
+                    status,
+                    actor_id,
+                    now,
+                    normalized_reason,
+                    "PENDING" if notify_member else "DELIVERED",
+                    now,
+                    request_id,
+                    expected_version,
+                ),
             )
             if cursor.rowcount != 1:
                 raise ConflictError("Esta solicitação já foi alterada. Atualize o painel.")
@@ -1654,9 +2200,10 @@ class TagService:
                 connection=connection,
                 correlation_id=correlation_id,
             )
-            await self._enqueue_role_sync(
-                connection, terminal, requested_by=actor_id, now=now
-            )
+            if enqueue_role_sync:
+                await self._enqueue_role_sync(
+                    connection, terminal, requested_by=actor_id, now=now
+                )
             return self._row(terminal)
 
     async def confirm_tag(

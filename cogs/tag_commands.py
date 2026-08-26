@@ -7,7 +7,7 @@ import discord
 from discord.ext import commands, tasks
 
 from choque.embeds import branded_embed
-from choque.errors import NotFoundError, PermissionDenied, ValidationError
+from choque.errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
 from choque.tags import TagService
 from choque.time_utils import discord_timestamp
 
@@ -93,6 +93,9 @@ class ErrorModal(discord.ui.Modal):
 
 def request_embed(bot: ChoqueBot, request: dict[str, object]) -> discord.Embed:
     status = str(request["status"])
+    waiting_role_scan = str(request.get("intake_source") or "MEMBER_REQUEST") == (
+        "WAITING_ROLE_SCAN"
+    )
     labels = {
         "AGUARDANDO_SET": "🟠 Aguardando set",
         "ATENDIMENTO_ASSUMIDO": "🟡 Atendimento assumido",
@@ -114,9 +117,16 @@ def request_embed(bot: ChoqueBot, request: dict[str, object]) -> discord.Embed:
         "EXPIRADO": discord.Color.dark_grey(),
     }
     terminal = status in {"CONCLUIDO", "RECUSADO", "CANCELADO", "EXPIRADO"}
+    title = f"🏷️ Solicitação de Tag • #{request['id']}"
+    if waiting_role_scan and status == "AGUARDANDO_CONFIRMACAO":
+        title = "🏷️ CONFIRMAÇÃO DE TAG IN-GAME"
+    elif waiting_role_scan and status == "CONCLUIDO":
+        title = "✅ TAG CONFIRMADA"
+    elif waiting_role_scan and status in {"AGUARDANDO_SET", "ATENDIMENTO_ASSUMIDO"}:
+        title = "📡 SOLICITAÇÃO DE SET DE TAG"
     embed = branded_embed(
         bot.config.branding,
-        title=f"🏷️ Solicitação de Tag • #{request['id']}",
+        title=title,
         description=(
             f"{labels.get(status, status)}\nFicha encerrada; o histórico foi preservado."
             if terminal
@@ -125,6 +135,8 @@ def request_embed(bot: ChoqueBot, request: dict[str, object]) -> discord.Embed:
         color=colors.get(status),
     )
     embed.add_field(name="Membro", value=f"<@{request['discord_id']}>", inline=True)
+    if waiting_role_scan:
+        embed.add_field(name="ID do membro", value=f"`{request['discord_id']}`", inline=True)
     embed.add_field(name="ID MTA", value=f"`{request['character_id_snapshot']}`", inline=True)
     embed.add_field(name="Status", value=labels.get(status, status), inline=True)
     if str(request.get("request_origin") or "SET_REQUEST") == "EXISTING_DECLARATION":
@@ -143,7 +155,29 @@ def request_embed(bot: ChoqueBot, request: dict[str, object]) -> discord.Embed:
         inline=False,
     )
     if request.get("claimed_by"):
-        embed.add_field(name="Responsável", value=f"<@{request['claimed_by']}>", inline=True)
+        embed.add_field(
+            name="Responsável pelo Set", value=f"<@{request['claimed_by']}>", inline=True
+        )
+    elif waiting_role_scan and status in {"AGUARDANDO_SET", "ATENDIMENTO_ASSUMIDO"}:
+        embed.add_field(name="Responsável pelo Set", value="Nenhum comando assumiu", inline=True)
+    if waiting_role_scan and status == "CONCLUIDO":
+        embed.add_field(name="Situação anterior", value="Aguardando Set", inline=True)
+        embed.add_field(name="Nova situação", value="Tag Setada", inline=True)
+        embed.add_field(
+            name="Ação",
+            value=(
+                "Confirmação realizada pelo próprio membro"
+                if int(request.get("confirmed_by") or 0) == int(request["discord_id"])
+                else "Procedimento concluído pelo responsável"
+            ),
+            inline=False,
+        )
+    if waiting_role_scan and request.get("confirmation_delivery_error"):
+        embed.add_field(
+            name="Contato privado",
+            value="DM indisponível; o Comando deve realizar contato manual.",
+            inline=False,
+        )
     if terminal:
         ended_at = request.get("confirmed_at") or request.get("terminal_at")
         if ended_at:
@@ -354,13 +388,24 @@ class TagOperationalPendencyModal(ErrorModal):
 
 
 class TagMemberRequestView(ErrorView):
-    def __init__(self, request_id: int, version: int, status: str) -> None:
+    def __init__(
+        self,
+        request_id: int,
+        version: int,
+        status: str,
+        *,
+        intake_source: str = "MEMBER_REQUEST",
+    ) -> None:
         super().__init__(timeout=None)
         self.request_id = request_id
         self.version = version
         self.status = status
+        self.intake_source = intake_source
         self.confirm.custom_id = f"choque:tag:confirm:{request_id}:v1"
         self.not_received.custom_id = f"choque:tag:not-received:{request_id}:v1"
+        if intake_source == "WAITING_ROLE_SCAN":
+            self.confirm.label = "Já estou com a tag setada"
+            self.not_received.label = "Ainda não tenho a tag setada"
         self.confirm.disabled = status != "AGUARDANDO_CONFIRMACAO"
         self.not_received.disabled = status != "AGUARDANDO_CONFIRMACAO"
 
@@ -370,22 +415,55 @@ class TagMemberRequestView(ErrorView):
             interaction, self.request_id, "tag.confirm.self"
         )
         bot = get_bot(interaction)
+        cog = bot.get_cog("TagCommands")
+        if isinstance(cog, TagCommands):
+            await cog.require_current_tag_roles(
+                member, allow_set_role=True, require_waiting_role=False
+            )
         result = await bot.services.tags.confirm_tag(
             self.request_id, discord_id=member.id, expected_version=self.version
         )
-        cog = bot.get_cog("TagCommands")
         if isinstance(cog, TagCommands):
             await cog.refresh_admin_panel(member.guild)
             await cog.refresh_request_card(member.guild, result)
         await interaction.response.edit_message(
-            embed=request_embed(bot, result), view=TagMemberRequestView(
-                self.request_id, int(result["version"]), str(result["status"])
-            )
+            embed=request_embed(bot, result),
+            view=(
+                None
+                if self.intake_source == "WAITING_ROLE_SCAN"
+                else TagMemberRequestView(
+                    self.request_id,
+                    int(result["version"]),
+                    str(result["status"]),
+                    intake_source=str(result.get("intake_source") or "MEMBER_REQUEST"),
+                )
+            ),
         )
 
     @discord.ui.button(label="Não recebi a tag", emoji="❌", style=discord.ButtonStyle.danger)
     async def not_received(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await require_request_member(interaction, self.request_id, "tag.report_missing")
+        member = await require_request_member(interaction, self.request_id, "tag.report_missing")
+        if self.intake_source == "WAITING_ROLE_SCAN":
+            bot = get_bot(interaction)
+            cog = bot.get_cog("TagCommands")
+            if isinstance(cog, TagCommands):
+                await cog.require_current_tag_roles(
+                    member, allow_set_role=False, require_waiting_role=True
+                )
+            result = await bot.services.tags.report_waiting_role_missing(
+                self.request_id,
+                discord_id=member.id,
+                expected_version=self.version,
+            )
+            if isinstance(cog, TagCommands):
+                await cog.refresh_admin_panel(member.guild)
+                await cog.flush_responsible_notifications(member.guild)
+            await interaction.response.edit_message(
+                content="Sua solicitação foi encaminhada para a Central de Tags.",
+                embed=request_embed(bot, result),
+                view=None,
+            )
+            return
         await interaction.response.send_modal(TagIssueModal(self.request_id, self.version))
 
 
@@ -466,7 +544,10 @@ class TagMemberPanelView(ErrorView):
         await interaction.response.send_message(
             embed=request_embed(bot, request),
             view=TagMemberRequestView(
-                int(request["id"]), int(request["version"]), str(request["status"])
+                int(request["id"]),
+                int(request["version"]),
+                str(request["status"]),
+                intake_source=str(request.get("intake_source") or "MEMBER_REQUEST"),
             ),
             ephemeral=True,
         )
@@ -527,6 +608,21 @@ class TagAdminPanelView(ErrorView):
             interaction,
             title="👥 Todos que faltam setar",
             statuses=("AGUARDANDO_SET",),
+        )
+
+    @discord.ui.button(
+        label="Atualizar Lista",
+        emoji="🔄",
+        style=discord.ButtonStyle.success,
+        custom_id="choque:tag:admin:refresh-list:v1",
+        row=1,
+    )
+    async def refresh_list(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await require_responsible(interaction)
+        await show_tag_requests(
+            interaction,
+            title="🏷️ CENTRAL DE CONTROLE DE TAGS",
+            statuses=("AGUARDANDO_SET", "ATENDIMENTO_ASSUMIDO"),
         )
 
     @discord.ui.button(
@@ -849,6 +945,7 @@ class TagRequestSelect(discord.ui.Select):
                 int(request["version"]),
                 str(request["status"]),
                 str(request.get("request_origin") or "SET_REQUEST"),
+                str(request.get("intake_source") or "MEMBER_REQUEST"),
             ),
         )
 
@@ -1095,14 +1192,20 @@ class TagRequestAdminView(ErrorView):
         version: int,
         status: str,
         request_origin: str = "SET_REQUEST",
+        intake_source: str = "MEMBER_REQUEST",
     ) -> None:
         super().__init__(timeout=600)
         self.request_id = request_id
         self.version = version
         self.status = status
         self.request_origin = request_origin
+        self.intake_source = intake_source
         if request_origin == "EXISTING_DECLARATION":
             self.set_done.label = "Validar tag existente"
+        elif intake_source == "WAITING_ROLE_SCAN":
+            self.claim.label = "Assumir Set"
+            self.set_done.label = "Finalizar Set"
+            self.call_member.label = "Enviar aviso"
         self.claim.disabled = status not in {"AGUARDANDO_SET", "PENDENCIA"}
         self.release.disabled = status != "ATENDIMENTO_ASSUMIDO"
         self.set_done.disabled = status != "ATENDIMENTO_ASSUMIDO"
@@ -1125,13 +1228,21 @@ class TagRequestAdminView(ErrorView):
     async def claim(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         responsible = await require_responsible(interaction)
         bot = get_bot(interaction)
+        cog = bot.get_cog("TagCommands")
+        request = await bot.services.tags.get_request(self.request_id)
+        if request is None:
+            raise NotFoundError("Solicitação de tag não encontrada.")
+        if isinstance(cog, TagCommands):
+            await cog.require_request_target_roles(
+                responsible.guild, request, allow_set_role=False
+            )
         result = await bot.services.tags.claim_request(
             self.request_id, responsible_id=responsible.id, expected_version=self.version
         )
-        cog = bot.get_cog("TagCommands")
         if isinstance(cog, TagCommands):
             await cog.refresh_admin_panel(responsible.guild)
             await cog.refresh_request_card(responsible.guild, result)
+            await cog.deliver_assignment_notification(responsible.guild, result)
         await interaction.response.edit_message(
             embed=request_embed(bot, result),
             view=TagRequestAdminView(
@@ -1139,6 +1250,7 @@ class TagRequestAdminView(ErrorView):
                 int(result["version"]),
                 str(result["status"]),
                 self.request_origin,
+                self.intake_source,
             ),
         )
 
@@ -1149,7 +1261,29 @@ class TagRequestAdminView(ErrorView):
 
     @discord.ui.button(label="Set realizado", emoji="✅", style=discord.ButtonStyle.success)
     async def set_done(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await require_responsible(interaction)
+        responsible = await require_responsible(interaction)
+        if self.intake_source == "WAITING_ROLE_SCAN":
+            bot = get_bot(interaction)
+            request = await bot.services.tags.get_request(self.request_id)
+            if request is None:
+                raise NotFoundError("Solicitação de tag não encontrada.")
+            cog = bot.get_cog("TagCommands")
+            if isinstance(cog, TagCommands):
+                await cog.require_request_target_roles(
+                    responsible.guild, request, allow_set_role=True
+                )
+            result = await bot.services.tags.complete_waiting_role_set(
+                self.request_id,
+                responsible_id=responsible.id,
+                expected_version=self.version,
+            )
+            if isinstance(cog, TagCommands):
+                await cog.refresh_admin_panel(responsible.guild)
+                await cog.refresh_request_card(responsible.guild, result)
+            await interaction.response.edit_message(
+                embed=request_embed(bot, result), view=None
+            )
+            return
         await interaction.response.send_modal(
             TagSetModal(
                 self.request_id,
@@ -1222,23 +1356,34 @@ class TagRequestCardView(ErrorView):
         self.request_id = int(request["id"])
         self.status = str(request["status"])
         self.request_origin = str(request.get("request_origin") or "SET_REQUEST")
+        self.intake_source = str(request.get("intake_source") or "MEMBER_REQUEST")
         if self.status in {"AGUARDANDO_SET", "PENDENCIA"}:
             self._add(
-                "claim", "Assumir", "🙋", discord.ButtonStyle.primary
+                "claim",
+                "Assumir Set" if self.intake_source == "WAITING_ROLE_SCAN" else "Assumir",
+                "🎖️" if self.intake_source == "WAITING_ROLE_SCAN" else "🙋",
+                discord.ButtonStyle.primary,
             )
             self._add(
                 "details", "Ver detalhes", "🔎", discord.ButtonStyle.secondary
             )
         elif self.status == "ATENDIMENTO_ASSUMIDO":
             self._add(
-                "call", "Chamar para DP", "📍", discord.ButtonStyle.primary
+                "call",
+                "Enviar aviso" if self.intake_source == "WAITING_ROLE_SCAN" else "Chamar para DP",
+                "📨" if self.intake_source == "WAITING_ROLE_SCAN" else "📍",
+                discord.ButtonStyle.primary,
             )
             self._add(
                 "set",
                 (
-                    "Validar tag existente"
-                    if self.request_origin == "EXISTING_DECLARATION"
-                    else "Tag aplicada"
+                    "Finalizar Set"
+                    if self.intake_source == "WAITING_ROLE_SCAN"
+                    else (
+                        "Validar tag existente"
+                        if self.request_origin == "EXISTING_DECLARATION"
+                        else "Tag aplicada"
+                    )
                 ),
                 "✅",
                 discord.ButtonStyle.success,
@@ -1290,11 +1435,17 @@ class TagRequestCardView(ErrorView):
                     int(request["version"]),
                     str(request["status"]),
                     str(request.get("request_origin") or "SET_REQUEST"),
+                    str(request.get("intake_source") or "MEMBER_REQUEST"),
                 ),
                 ephemeral=True,
             )
             return
         if action == "claim":
+            cog = bot.get_cog("TagCommands")
+            if isinstance(cog, TagCommands):
+                await cog.require_request_target_roles(
+                    responsible.guild, request, allow_set_role=False
+                )
             result = await bot.services.tags.claim_request(
                 self.request_id,
                 responsible_id=responsible.id,
@@ -1305,7 +1456,6 @@ class TagRequestCardView(ErrorView):
                 embed=request_embed(bot, result),
                 view=TagRequestCardView(result),
             )
-            cog = bot.get_cog("TagCommands")
             if isinstance(cog, TagCommands):
                 message_id = result.get("responsible_notification_message_id")
                 if message_id:
@@ -1316,6 +1466,7 @@ class TagRequestCardView(ErrorView):
                     )
                 await cog.register_request_card_view(result)
                 await cog.refresh_admin_panel(responsible.guild)
+                await cog.deliver_assignment_notification(responsible.guild, result)
             return
         if action == "call":
             await call_tag_member_to_dp(
@@ -1325,6 +1476,25 @@ class TagRequestCardView(ErrorView):
             )
             return
         if action == "set":
+            if self.intake_source == "WAITING_ROLE_SCAN":
+                cog = bot.get_cog("TagCommands")
+                if isinstance(cog, TagCommands):
+                    await cog.require_request_target_roles(
+                        responsible.guild, request, allow_set_role=True
+                    )
+                result = await bot.services.tags.complete_waiting_role_set(
+                    self.request_id,
+                    responsible_id=responsible.id,
+                    expected_version=int(request["version"]),
+                )
+                await interaction.response.edit_message(
+                    content=None,
+                    embed=request_embed(bot, result),
+                    view=None,
+                )
+                if isinstance(cog, TagCommands):
+                    await cog.refresh_admin_panel(responsible.guild)
+                return
             await interaction.response.send_modal(
                 TagSetModal(
                     self.request_id,
@@ -1371,6 +1541,80 @@ class TagCommands(commands.Cog):
                 "Os cargos AGUARDANDO SET e TAG SETADA precisam ser diferentes."
             )
 
+    async def require_current_tag_roles(
+        self,
+        member: discord.Member,
+        *,
+        allow_set_role: bool,
+        require_waiting_role: bool,
+    ) -> None:
+        """Recheck Discord roles immediately before a tag-state mutation."""
+        await self.require_member_request_configuration(member.guild)
+        waiting_role_id = int(
+            await self.services.settings.get(member.guild.id, "tag_waiting_role_id")
+        )
+        set_role_id = int(
+            await self.services.settings.get(member.guild.id, "tag_set_role_id")
+        )
+        current_role_ids = {int(role.id) for role in member.roles}
+        has_waiting = waiting_role_id in current_role_ids
+        has_set = set_role_id in current_role_ids
+        if require_waiting_role and not has_waiting:
+            raise ConflictError("O membro não possui mais o cargo AGUARDANDO SET.")
+        if not allow_set_role and has_set:
+            raise ConflictError("O membro já possui o cargo TAG SETADA.")
+        if not has_waiting and not has_set:
+            raise ConflictError("Os cargos atuais do membro não permitem esta alteração.")
+
+    async def require_request_target_roles(
+        self,
+        guild: discord.Guild,
+        request: dict[str, object],
+        *,
+        allow_set_role: bool,
+    ) -> discord.Member:
+        member = guild.get_member(int(request["discord_id"]))
+        if member is None:
+            try:
+                member = await guild.fetch_member(int(request["discord_id"]))
+            except discord.DiscordException as exc:
+                raise NotFoundError("O membro não está mais no servidor.") from exc
+        await self.require_current_tag_roles(
+            member,
+            allow_set_role=allow_set_role,
+            require_waiting_role=not allow_set_role,
+        )
+        return member
+
+    async def scan_waiting_role_members(self, guild: discord.Guild) -> int:
+        """Persist and deliver one proactive check per current waiting member."""
+        waiting_role_id = await self.services.settings.get(guild.id, "tag_waiting_role_id")
+        set_role_id = await self.services.settings.get(guild.id, "tag_set_role_id")
+        if not waiting_role_id or not set_role_id or int(waiting_role_id) == int(set_role_id):
+            return 0
+        detected = 0
+        for member in guild.members:
+            if member.bot:
+                continue
+            role_ids = {int(role.id) for role in member.roles}
+            if int(waiting_role_id) not in role_ids or int(set_role_id) in role_ids:
+                continue
+            try:
+                request = await self.services.tags.request_tag_from_waiting_role(
+                    guild.id, member.id
+                )
+            except (NotFoundError, ValidationError) as exc:
+                await self.services.audit.record(
+                    guild.id,
+                    "TAG_WAITING_ROLE_SCAN_SKIPPED",
+                    target_id=member.id,
+                    reason=str(exc),
+                )
+                continue
+            detected += 1
+            await self.deliver_confirmation_notification(guild, request)
+        return detected
+
     def register_confirmation_view(self, request: dict[str, object]) -> None:
         """Register the request-scoped persistent controls before the DM is usable.
 
@@ -1384,7 +1628,10 @@ class TagCommands(commands.Cog):
             return
         self.bot.add_view(
             TagMemberRequestView(
-                int(request["id"]), int(request["version"]), str(request["status"])
+                int(request["id"]),
+                int(request["version"]),
+                str(request["status"]),
+                intake_source=str(request.get("intake_source") or "MEMBER_REQUEST"),
             )
         )
         self._registered_confirmation_views.add(key)
@@ -1477,9 +1724,14 @@ class TagCommands(commands.Cog):
         if not claimed:
             return False
         if not await self.services.settings.get(guild.id, "tag_dm_enabled"):
-            await self.services.tags.mark_confirmation_notification_delivered(
-                int(claimed["id"]), delivery_message_id=None
-            )
+            if str(claimed.get("intake_source") or "MEMBER_REQUEST") == "WAITING_ROLE_SCAN":
+                await self.services.tags.escalate_waiting_role_dm_failure(
+                    int(claimed["id"]), error="Mensagens privadas desativadas na configuração."
+                )
+            else:
+                await self.services.tags.mark_confirmation_notification_delivered(
+                    int(claimed["id"]), delivery_message_id=None
+                )
             return False
         try:
             member = guild.get_member(int(claimed["discord_id"]))
@@ -1487,15 +1739,34 @@ class TagCommands(commands.Cog):
                 member = await guild.fetch_member(int(claimed["discord_id"]))
             self.register_confirmation_view(claimed)
             message = await member.send(
-                "🏷️ **Sua tag foi marcada como realizada.** Confira seu personagem no MTA "
-                "e confirme abaixo quando estiver correta.",
+                (
+                    "🏷️ **Controle de setagem de tag**\n"
+                    "Identificamos que você está com o cargo **Aguardando Set**. "
+                    "Confirme abaixo a situação atual da sua tag in-game."
+                    if str(claimed.get("intake_source") or "MEMBER_REQUEST")
+                    == "WAITING_ROLE_SCAN"
+                    else "🏷️ **Sua tag foi marcada como realizada.** Confira seu personagem no MTA "
+                    "e confirme abaixo quando estiver correta."
+                ),
                 embed=request_embed(self.bot, claimed),
                 view=TagMemberRequestView(
                     int(claimed["id"]),
                     int(claimed["version"]),
                     str(claimed["status"]),
+                    intake_source=str(claimed.get("intake_source") or "MEMBER_REQUEST"),
                 ),
             )
+        except discord.Forbidden as exc:
+            if str(claimed.get("intake_source") or "MEMBER_REQUEST") == "WAITING_ROLE_SCAN":
+                await self.services.tags.escalate_waiting_role_dm_failure(
+                    int(claimed["id"]), error="O membro não permite mensagens privadas."
+                )
+            else:
+                await self.services.tags.mark_confirmation_notification_failed(
+                    int(claimed["id"]), error=str(exc)
+                )
+            LOGGER.warning("Não foi possível notificar confirmação da tag %s: %s", claimed["id"], exc)
+            return False
         except discord.DiscordException as exc:
             await self.services.tags.mark_confirmation_notification_failed(
                 int(claimed["id"]), error=str(exc)
@@ -1580,6 +1851,53 @@ class TagCommands(commands.Cog):
         delivered = 0
         for request in await self.services.tags.pending_responsible_notifications(guild.id):
             delivered += int(await self.deliver_responsible_notification(guild, request))
+        return delivered
+
+    async def deliver_assignment_notification(
+        self, guild: discord.Guild, request: dict[str, object]
+    ) -> bool:
+        """Tell the member who assumed the request from durable delivery state."""
+        claimed = await self.services.tags.claim_assignment_notification(int(request["id"]))
+        if not claimed:
+            return False
+        if not await self.services.settings.get(guild.id, "tag_dm_enabled"):
+            await self.services.tags.mark_assignment_notification_failed(
+                int(claimed["id"]), error="Mensagens privadas desativadas na configuração."
+            )
+            return False
+        try:
+            member = guild.get_member(int(claimed["discord_id"]))
+            if member is None:
+                member = await guild.fetch_member(int(claimed["discord_id"]))
+            message = await member.send(
+                "🎖️ **Seu atendimento de tag foi assumido.**\n"
+                f"Responsável pelo Set: <@{claimed['claimed_by']}>."
+            )
+        except discord.DiscordException as exc:
+            await self.services.tags.mark_assignment_notification_failed(
+                int(claimed["id"]), error=str(exc)
+            )
+            LOGGER.warning(
+                "Não foi possível avisar a atribuição da tag %s: %s", claimed["id"], exc
+            )
+            return False
+        delivered = await self.services.tags.mark_assignment_notification_delivered(
+            int(claimed["id"]), delivery_message_id=message.id
+        )
+        if delivered:
+            await self.services.audit.record(
+                guild.id,
+                "TAG_ASSIGNMENT_NOTIFICATION_DELIVERED",
+                actor_id=int(claimed["claimed_by"]),
+                target_id=int(claimed["discord_id"]),
+                after={"tag_request_id": int(claimed["id"]), "message_id": message.id},
+            )
+        return delivered
+
+    async def flush_assignment_notifications(self, guild: discord.Guild) -> int:
+        delivered = 0
+        for request in await self.services.tags.pending_assignment_notifications(guild.id):
+            delivered += int(await self.deliver_assignment_notification(guild, request))
         return delivered
 
     async def deliver_terminal_notification(
@@ -1669,11 +1987,14 @@ class TagCommands(commands.Cog):
             try:
                 await self.services.tags.recover_confirmation_notification_claims()
                 await self.services.tags.recover_responsible_notification_claims()
+                await self.services.tags.recover_assignment_notification_claims()
                 await self.services.tags.recover_terminal_notification_claims()
+                await self.scan_waiting_role_members(guild)
                 await self.restore_confirmation_views(guild)
                 await self.restore_request_card_views(guild)
                 await self.flush_responsible_notifications(guild)
                 await self.flush_request_card_refreshes(guild)
+                await self.flush_assignment_notifications(guild)
                 await self.flush_confirmation_notifications(guild)
                 await self.expire_due_requests(guild)
                 await self.flush_terminal_notifications(guild)
@@ -1683,6 +2004,83 @@ class TagCommands(commands.Cog):
     @confirmation_retry.before_loop
     async def before_confirmation_retry(self) -> None:
         await self.bot.wait_until_ready()
+
+    async def open_admin(self, interaction: discord.Interaction) -> None:
+        await require_responsible(interaction)
+        if not interaction.guild:
+            raise ValidationError("Este painel só pode ser usado dentro do servidor.")
+        await interaction.response.send_message(
+            embed=await build_admin_panel_embed(self.bot, interaction.guild.id),
+            view=TagAdminPanelView(),
+            ephemeral=True,
+        )
+
+    @commands.Cog.listener()
+    async def on_member_update(
+        self, before: discord.Member, after: discord.Member
+    ) -> None:
+        if (
+            getattr(getattr(self, "bot", None), "check_mode", False)
+            or before.guild.id != after.guild.id
+            or after.bot
+        ):
+            return
+        waiting_role_id = await self.services.settings.get(
+            after.guild.id, "tag_waiting_role_id"
+        )
+        set_role_id = await self.services.settings.get(after.guild.id, "tag_set_role_id")
+        if not waiting_role_id or not set_role_id:
+            return
+        before_roles = {int(role.id) for role in before.roles}
+        after_roles = {int(role.id) for role in after.roles}
+        waiting_added = (
+            int(waiting_role_id) not in before_roles and int(waiting_role_id) in after_roles
+        )
+        set_added = int(set_role_id) not in before_roles and int(set_role_id) in after_roles
+        if set_added and int(waiting_role_id) in after_roles:
+            waiting_role = after.guild.get_role(int(waiting_role_id))
+            if waiting_role is not None:
+                await after.remove_roles(
+                    waiting_role,
+                    reason="CHOQUE - BGR • TAG SETADA remove AGUARDANDO SET",
+                )
+                await self.services.audit.record(
+                    after.guild.id,
+                    "DISCORD_TAG_WAITING_ROLE_REMOVED",
+                    target_id=after.id,
+                    after={"set_role_id": int(set_role_id)},
+                )
+            return
+        if waiting_added and int(set_role_id) not in after_roles:
+            try:
+                request = await self.services.tags.request_tag_from_waiting_role(
+                    after.guild.id, after.id
+                )
+            except (NotFoundError, ValidationError) as exc:
+                await self.services.audit.record(
+                    after.guild.id,
+                    "TAG_WAITING_ROLE_SCAN_SKIPPED",
+                    target_id=after.id,
+                    reason=str(exc),
+                )
+                return
+            await self.deliver_confirmation_notification(after.guild, request)
+            await self.flush_responsible_notifications(after.guild)
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member) -> None:
+        if getattr(getattr(self, "bot", None), "check_mode", False):
+            return
+        try:
+            archived = await self.services.tags.archive_departed_member(
+                member.guild.id, member.id
+            )
+        except ConflictError:
+            return
+        if archived is None:
+            return
+        await self.refresh_request_card(member.guild, archived)
+        await self.refresh_admin_panel(member.guild)
 
     async def publish_or_refresh_member_panel(
         self, guild: discord.Guild, channel: discord.TextChannel
@@ -1789,11 +2187,14 @@ class TagCommands(commands.Cog):
         for guild in self.bot.guilds:
             await self.services.tags.recover_confirmation_notification_claims()
             await self.services.tags.recover_responsible_notification_claims()
+            await self.services.tags.recover_assignment_notification_claims()
             await self.services.tags.recover_terminal_notification_claims()
+            await self.scan_waiting_role_members(guild)
             await self.restore_confirmation_views(guild)
             await self.restore_request_card_views(guild)
             await self.flush_responsible_notifications(guild)
             await self.flush_request_card_refreshes(guild)
+            await self.flush_assignment_notifications(guild)
             await self.flush_confirmation_notifications(guild)
             await self.expire_due_requests(guild)
             await self.flush_terminal_notifications(guild)
