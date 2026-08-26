@@ -58,4 +58,34 @@ describe("command dashboard snapshot", () => {
     expect(within(queue).getAllByRole("listitem")).toHaveLength(1);
     expect(within(queue).getByText("Sentinela")).toBeInTheDocument();
   });
+
+  it("exposes recent administrative items as a semantic list", async () => {
+    const generatedAt = Date.parse("2026-08-26T15:30:00.000Z");
+    api.commandCenterFetch.mockResolvedValue({
+      generated_at: generatedAt,
+      readiness: { counts: {} },
+      patrols: [],
+      queue: [],
+      inbox: [{
+        id: 3,
+        type: "TRANSFER",
+        data: { code: "TRF-003", status: "PENDING", created_at: generatedAt },
+      }],
+      changes: { counts: {}, events: [] },
+      capabilities: {
+        view_inbox: true,
+        view_changes: false,
+        view_all_operations: false,
+      },
+    });
+
+    const view = render(await DashboardPage());
+    const inbox = within(view.container).getByRole("list", {
+      name: "Pendências administrativas recentes",
+    });
+
+    expect(inbox.tagName).toBe("UL");
+    expect(within(inbox).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(inbox).getByRole("link", { name: /TRF-003/ })).toHaveAttribute("href", "/inbox");
+  });
 });
