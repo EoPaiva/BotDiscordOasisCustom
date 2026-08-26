@@ -480,23 +480,32 @@ async def test_registration_gate_does_not_reactivate_inactive_member(service_bun
     )
     record = await gate.reconcile_identity(GUILD_ID, DISCORD_ID, source="REJOIN")
     assert record["status"] == "BLOCKED"
-    assert record["access_tier"] == "REGISTERED_VISITOR"
+    assert record["access_tier"] == "CANDIDATE"
 
 
 @pytest.mark.asyncio
-async def test_registration_gate_unknown_visitor_creates_identity_without_membership(
+async def test_registration_gate_new_identity_creates_effective_member(
     service_bundle,
 ):
     gate = service_bundle["registration_gate"]
     settings = service_bundle["settings"]
     database = service_bundle["database"]
     await settings.set(GUILD_ID, "registration_gate_enabled", True, DISCORD_ID)
+    await database.execute(
+        """
+        INSERT INTO ranks(
+            guild_id, name, prefix, level, discord_role_id, rbac_profile, created_at
+        ) VALUES (?, 'ʀᴇᴄʀᴜᴛᴀ', '[REC]', 1, 90001, 'MEMBRO', 1)
+        """,
+        (GUILD_ID,),
+    )
 
     first = await gate.submit(
         GUILD_ID,
         9001,
         mta_nick="Visitante",
         bgr_id="9001",
+        discord_nick="Discord Visitante",
         idempotency_key="same-submit",
     )
     second = await gate.submit(
@@ -509,8 +518,8 @@ async def test_registration_gate_unknown_visitor_creates_identity_without_member
 
     assert first["id"] == second["id"]
     assert first["status"] == "REGISTERED"
-    assert first["access_tier"] == "REGISTERED_VISITOR"
-    assert first["member_id"] is None
+    assert first["access_tier"] == "RECRUIT"
+    assert first["member_id"] is not None
     assert await gate.pending_review_notifications(GUILD_ID) == []
     with pytest.raises(ConflictError):
         await gate.approve_new_member(
@@ -519,6 +528,23 @@ async def test_registration_gate_unknown_visitor_creates_identity_without_member
             reason="Tentativa inválida",
             discord_nick="Visitante",
         )
+    member = await database.fetchone(
+        "SELECT * FROM members WHERE guild_id=? AND discord_id=9001",
+        (GUILD_ID,),
+    )
+    assert member is not None
+    assert member["status"] == "ACTIVE"
+    assert member["discord_nick"] == "Discord Visitante"
+    assert member["rank_id"] is not None
+    checklist = await database.fetchone(
+        "SELECT * FROM recruit_onboarding_checklists WHERE member_id=?",
+        (member["id"],),
+    )
+    assert checklist["registration_status"] == "COMPLETED"
+    outbox = await database.fetchone(
+        "SELECT * FROM web_action_outbox WHERE target_discord_id=9001"
+    )
+    assert outbox["action_type"] == "MEMBER_SYNC"
     total = await database.fetchone(
         "SELECT COUNT(*) AS total FROM registration_gate_records WHERE discord_id=9001"
     )

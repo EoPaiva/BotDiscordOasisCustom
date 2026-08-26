@@ -51,7 +51,7 @@ def build_registration_panel_embed(bot: ChoqueBot) -> discord.Embed:
     embed.add_field(
         name="🎖️ Níveis de acesso",
         value=(
-            "`VISITANTE` recepção, tickets, recrutamento e transferências.\n"
+            "`NÃO CADASTRADO` ainda não concluiu a Portaria.\n"
             "`CANDIDATO` área do processo seletivo.\n"
             "`RECRUTA / MEMBRO` áreas internas conforme cargo e patente.\n"
             "`COMPANHEIRO DE FARDA` pode realizar o mesmo cadastro pela Portaria após "
@@ -109,7 +109,7 @@ def registration_status_embed(bot: ChoqueBot, member: discord.Member, record) ->
     embed.add_field(name="Situação", value=f"`{label}`", inline=True)
     embed.add_field(
         name="Nível",
-        value=f"`{record['access_tier'] if record else 'VISITANTE'}`",
+        value=f"`{record['access_tier'] if record else 'NÃO CADASTRADO'}`",
         inline=True,
     )
     embed.add_field(name="Sincronização", value=f"`{sync_status}`", inline=True)
@@ -141,6 +141,7 @@ class RegistrationModal(discord.ui.Modal, title="Portaria Digital • Identifica
                 interaction.user.id,
                 mta_nick=str(self.mta_nick),
                 bgr_id=str(self.character_id),
+                discord_nick=interaction.user.display_name,
             )
             submission_outcome = (
                 str(record.get("submission_outcome") or "")

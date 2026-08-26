@@ -21,6 +21,111 @@ from .conftest import DISCORD_ID, GUILD_ID
 
 
 @pytest.mark.asyncio
+async def test_migration_44_retires_visitor_and_links_completed_registration(
+    tmp_path,
+    monkeypatch,
+):
+    target = tmp_path / "registration-v43.db"
+    all_migrations = database_module.MIGRATIONS
+    monkeypatch.setattr(
+        database_module,
+        "MIGRATIONS",
+        tuple(item for item in all_migrations if item[0] <= 43),
+    )
+    database = Database(target)
+    await database.open()
+    await database.execute(
+        """
+        INSERT INTO ranks(
+            guild_id, name, prefix, level, discord_role_id, rbac_profile, created_at
+        ) VALUES (?, 'ʀᴇᴄʀᴜᴛᴀ', '[REC]', 1, 991, 'MEMBRO', 1)
+        """,
+        (GUILD_ID,),
+    )
+    await database.execute(
+        """
+        INSERT INTO registration_gate_records(
+            guild_id, discord_id, status, access_tier, mta_nick, bgr_id,
+            source, sync_status, submitted_at, completed_at, created_at, updated_at
+        ) VALUES (?, 7001, 'REGISTERED', 'REGISTERED_VISITOR', 'Novo_Membro', '7001',
+                  'SELF_REGISTRATION', 'SYNCED', 1, 1, 1, 1)
+        """,
+        (GUILD_ID,),
+    )
+    await database.execute(
+        """
+        INSERT INTO registration_gate_records(
+            guild_id, discord_id, status, access_tier, mta_nick, bgr_id,
+            source, sync_status, submitted_at, completed_at, created_at, updated_at
+        ) VALUES (?, 7004, 'REGISTERED', 'CANDIDATE', 'Candidato_Legado', '7004',
+                  'SELF_REGISTRATION', 'SYNCED', 1, 1, 1, 1)
+        """,
+        (GUILD_ID,),
+    )
+    await database.execute(
+        """
+        INSERT INTO registration_gate_records(
+            guild_id, discord_id, status, access_tier,
+            source, sync_status, created_at, updated_at
+        ) VALUES (?, 7002, 'UNREGISTERED', 'REGISTERED_VISITOR',
+                  'SYSTEM_RECONCILIATION', 'NOT_REQUIRED', 1, 1)
+        """,
+        (GUILD_ID,),
+    )
+    await database.close()
+
+    monkeypatch.setattr(database_module, "MIGRATIONS", all_migrations)
+    migrated = Database(target)
+    await migrated.open()
+    try:
+        record = await migrated.fetchone(
+            "SELECT * FROM registration_gate_records WHERE discord_id=7001"
+        )
+        member = await migrated.fetchone(
+            "SELECT * FROM members WHERE guild_id=? AND discord_id=7001",
+            (GUILD_ID,),
+        )
+        legacy_candidate = await migrated.fetchone(
+            "SELECT * FROM registration_gate_records WHERE discord_id=7004"
+        )
+        empty = await migrated.fetchone(
+            "SELECT * FROM registration_gate_records WHERE discord_id=7002"
+        )
+        assert member is not None
+        assert member["status"] == "ACTIVE"
+        assert member["character_id"] == "7001"
+        assert record["member_id"] == member["id"]
+        assert record["access_tier"] == "RECRUIT"
+        assert record["sync_status"] == "PENDING"
+        assert empty["status"] == "UNREGISTERED"
+        assert empty["access_tier"] == "CANDIDATE"
+        assert legacy_candidate["member_id"] is not None
+        assert legacy_candidate["access_tier"] == "RECRUIT"
+        remaining = await migrated.fetchone(
+            "SELECT COUNT(*) AS total FROM registration_gate_records "
+            "WHERE access_tier='REGISTERED_VISITOR'"
+        )
+        assert int(remaining["total"]) == 0
+        outbox = await migrated.fetchone(
+            "SELECT * FROM web_action_outbox WHERE target_discord_id=7001"
+        )
+        assert outbox["action_type"] == "MEMBER_SYNC"
+        with pytest.raises(sqlite3.IntegrityError):
+            await migrated.execute(
+                """
+                INSERT INTO registration_gate_records(
+                    guild_id, discord_id, status, access_tier,
+                    source, sync_status, created_at, updated_at
+                ) VALUES (?, 7003, 'UNREGISTERED', 'REGISTERED_VISITOR',
+                          'SYSTEM_RECONCILIATION', 'NOT_REQUIRED', 1, 1)
+                """,
+                (GUILD_ID,),
+            )
+    finally:
+        await migrated.close()
+
+
+@pytest.mark.asyncio
 async def test_migration_copies_legacy_and_creates_pre_migration_backup(tmp_path):
     legacy = tmp_path / "oasis_custom_data.db"
     connection = sqlite3.connect(legacy)
@@ -394,14 +499,20 @@ async def test_migration_nine_preserves_existing_tickets_and_allows_other_subjec
             active INTEGER NOT NULL DEFAULT 1,
             created_at INTEGER NOT NULL DEFAULT 1
         );
-                CREATE TABLE members (
-                    id INTEGER PRIMARY KEY,
-                    guild_id INTEGER NOT NULL,
-                    discord_id INTEGER NOT NULL,
-                    discord_nick TEXT,
-                    character_id TEXT,
-                    rank_id INTEGER REFERENCES ranks(id)
-                );
+                    CREATE TABLE members (
+                        id INTEGER PRIMARY KEY,
+                        guild_id INTEGER NOT NULL,
+                        discord_id INTEGER NOT NULL,
+                        discord_nick TEXT,
+                        mta_nick TEXT NOT NULL DEFAULT '',
+                        character_id TEXT,
+                        rank_id INTEGER REFERENCES ranks(id),
+                        status TEXT NOT NULL DEFAULT 'ACTIVE',
+                        joined_at INTEGER NOT NULL DEFAULT 1,
+                        last_activity_at INTEGER,
+                        created_at INTEGER NOT NULL DEFAULT 1,
+                        updated_at INTEGER NOT NULL DEFAULT 1
+                    );
         CREATE TABLE authorized_voice_channels (
             guild_id INTEGER NOT NULL,
             channel_id INTEGER NOT NULL,

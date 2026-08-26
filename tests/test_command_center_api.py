@@ -340,7 +340,7 @@ def test_registration_gate_dashboard_configuration_and_review(api_client) -> Non
             INSERT INTO registration_gate_records(
                 guild_id, discord_id, status, access_tier, mta_nick, bgr_id,
                 source, sync_status, submitted_at, created_at, updated_at
-            ) VALUES (?, 9901, 'PENDING', 'REGISTERED_VISITOR', 'Visitante_QA', '9901',
+            ) VALUES (?, 9901, 'PENDING', 'CANDIDATE', 'Visitante_QA', '9901',
                       'SELF_REGISTRATION', 'NOT_REQUIRED', ?, ?, ?)
             """,
             (GUILD_ID, now, now, now),

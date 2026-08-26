@@ -98,6 +98,7 @@ async def test_registration_and_point_panels_are_detailed_and_keep_persistent_ac
     assert len(registration.fields) == 5
     assert "Realizar cadastro" in (registration.description or "")
     assert "Candidatar-me agora" not in (registration.description or "")
+    assert "VISITANTE" not in str(registration.to_dict())
     assert custom_ids(RegistrationPanelView()) == {
         "choque:member:identify:v2",
         "choque:member:register:v3",

@@ -3829,6 +3829,204 @@ ON tag_requests(guild_id, responsible_notification_message_id,
                 request_card_rendered_version, version, updated_at, id);
 """
 
+MIGRATION_044 = """
+-- Níveis legados permitiam concluir a Portaria sem criar vínculo no efetivo.
+-- Cadastros completos e sem conflito tornam-se membros ativos; registros vazios
+-- continuam não cadastrados e conflitos voltam para a revisão humana.
+DROP TABLE IF EXISTS visitor_effective_members;
+CREATE TEMP TABLE visitor_effective_members AS
+SELECT r.id AS registration_id,
+       r.guild_id,
+       r.discord_id,
+       r.mta_nick,
+       r.bgr_id,
+       COALESCE(r.completed_at, r.submitted_at, r.created_at) AS joined_at,
+       (
+           SELECT rk.id
+           FROM ranks rk
+           WHERE rk.guild_id=r.guild_id AND rk.active=1
+           ORDER BY rk.level, rk.id
+           LIMIT 1
+       ) AS rank_id
+FROM registration_gate_records r
+WHERE r.status='REGISTERED'
+  AND r.access_tier IN ('REGISTERED_VISITOR','CANDIDATE','RECRUIT')
+  AND r.member_id IS NULL
+  AND trim(COALESCE(r.mta_nick, ''))<>''
+  AND trim(COALESCE(r.bgr_id, ''))<>''
+  AND NOT EXISTS (
+      SELECT 1 FROM members m
+      WHERE m.guild_id=r.guild_id AND m.discord_id=r.discord_id
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM members m
+      WHERE m.guild_id=r.guild_id
+        AND lower(trim(COALESCE(m.character_id, '')))=lower(trim(r.bgr_id))
+  );
+
+INSERT INTO members(
+    guild_id, discord_id, discord_nick, mta_nick, character_id,
+    rank_id, status, joined_at, last_activity_at, created_at, updated_at
+)
+SELECT guild_id, discord_id, mta_nick, mta_nick, bgr_id,
+       rank_id, 'ACTIVE', joined_at, joined_at, joined_at, joined_at
+FROM visitor_effective_members;
+
+INSERT INTO recruit_onboarding_checklists(
+    guild_id, member_id, registration_status, updated_at
+)
+SELECT v.guild_id, m.id, 'COMPLETED',
+       CAST(strftime('%s','now') AS INTEGER) * 1000
+FROM visitor_effective_members v
+JOIN members m ON m.guild_id=v.guild_id AND m.discord_id=v.discord_id
+WHERE 1
+ON CONFLICT(guild_id, member_id) DO UPDATE SET
+    registration_status='COMPLETED', updated_at=excluded.updated_at;
+
+INSERT INTO web_action_outbox(
+    guild_id, action_type, target_discord_id, payload_json,
+    requested_by, correlation_id, available_at, created_at
+)
+SELECT v.guild_id, 'MEMBER_SYNC', v.discord_id,
+       '{"source":"REGISTERED_VISITOR_RETIREMENT","flow":"PORTARIA_DIGITAL"}',
+       v.discord_id, 'visitor-retirement-member-sync:' || v.registration_id,
+       CAST(strftime('%s','now') AS INTEGER) * 1000,
+       CAST(strftime('%s','now') AS INTEGER) * 1000
+FROM visitor_effective_members v;
+
+UPDATE registration_gate_records
+SET member_id=(
+        SELECT m.id FROM members m
+        WHERE m.guild_id=registration_gate_records.guild_id
+          AND m.discord_id=registration_gate_records.discord_id
+    ),
+    access_tier=CASE
+        WHEN EXISTS (
+            SELECT 1 FROM visitor_effective_members v
+            WHERE v.registration_id=registration_gate_records.id AND v.rank_id IS NOT NULL
+        ) THEN 'RECRUIT'
+        ELSE 'MEMBER'
+    END,
+    conflict_code=NULL, conflict_member_id=NULL,
+    sync_status='PENDING', sync_error=NULL,
+    completed_at=COALESCE(completed_at, submitted_at, created_at),
+    version=version+1,
+    updated_at=CAST(strftime('%s','now') AS INTEGER) * 1000
+WHERE id IN (SELECT registration_id FROM visitor_effective_members);
+
+INSERT INTO registration_gate_events(
+    guild_id, registration_id, event_type, actor_id, source, metadata_json, created_at
+)
+SELECT guild_id, registration_id, 'REGISTRATION_IDENTITY_LINKED', NULL,
+       'SYSTEM_RECONCILIATION',
+       '{"source":"REGISTERED_VISITOR_RETIREMENT"}',
+       CAST(strftime('%s','now') AS INTEGER) * 1000
+FROM visitor_effective_members;
+
+INSERT INTO audit_logs(
+    correlation_id, guild_id, action, actor_id, target_id,
+    before_json, after_json, reason, created_at
+)
+SELECT 'registration-visitor-retirement:' || registration_id,
+       guild_id, 'REGISTRATION_IDENTITY_LINKED', NULL, discord_id,
+       '{"access_tier":"LEGACY_UNLINKED","member_id":null}',
+       '{"access_tier":"RECRUIT_OR_MEMBER","member_linked":true}',
+       'Aposentadoria do nível visitante; cadastro funcional convertido em membro efetivo.',
+       CAST(strftime('%s','now') AS INTEGER) * 1000
+FROM visitor_effective_members;
+
+-- Um ID já usado por outro membro nunca é sobrescrito automaticamente.
+DELETE FROM registration_delivery_claims
+WHERE registration_id IN (
+    SELECT r.id
+    FROM registration_gate_records r
+    WHERE r.status='REGISTERED'
+      AND r.access_tier IN ('REGISTERED_VISITOR','CANDIDATE','RECRUIT')
+      AND r.member_id IS NULL
+      AND trim(COALESCE(r.mta_nick, ''))<>''
+      AND trim(COALESCE(r.bgr_id, ''))<>''
+      AND EXISTS (
+          SELECT 1 FROM members m
+          WHERE m.guild_id=r.guild_id
+            AND lower(trim(COALESCE(m.character_id, '')))=lower(trim(r.bgr_id))
+      )
+);
+
+UPDATE registration_gate_records
+SET status='REQUIRES_REVIEW', access_tier='CANDIDATE',
+    conflict_code='BGR_ID_ALREADY_LINKED',
+    conflict_member_id=(
+        SELECT m.id FROM members m
+        WHERE m.guild_id=registration_gate_records.guild_id
+          AND lower(trim(COALESCE(m.character_id, '')))=
+              lower(trim(registration_gate_records.bgr_id))
+        ORDER BY m.id LIMIT 1
+    ),
+    completed_at=NULL, reviewed_at=NULL, reviewed_by=NULL, review_reason=NULL,
+    review_channel_id=NULL, review_message_id=NULL,
+    result_channel_id=NULL, result_message_id=NULL,
+    delivery_status='PENDING', sync_status='NOT_REQUIRED', sync_error=NULL,
+    version=version+1,
+    updated_at=CAST(strftime('%s','now') AS INTEGER) * 1000
+WHERE status='REGISTERED'
+  AND access_tier IN ('REGISTERED_VISITOR','CANDIDATE','RECRUIT')
+  AND member_id IS NULL
+  AND trim(COALESCE(mta_nick, ''))<>''
+  AND trim(COALESCE(bgr_id, ''))<>''
+  AND EXISTS (
+      SELECT 1 FROM members m
+      WHERE m.guild_id=registration_gate_records.guild_id
+        AND lower(trim(COALESCE(m.character_id, '')))=
+            lower(trim(registration_gate_records.bgr_id))
+  );
+
+-- Registros sem identidade continuam sem cadastro; nenhum membro falso é criado.
+UPDATE registration_gate_records
+SET status='UNREGISTERED', access_tier='CANDIDATE', member_id=NULL,
+    completed_at=NULL, sync_status='NOT_REQUIRED', sync_error=NULL,
+    version=version+1,
+    updated_at=CAST(strftime('%s','now') AS INTEGER) * 1000
+WHERE status='REGISTERED'
+  AND access_tier IN ('REGISTERED_VISITOR','CANDIDATE','RECRUIT')
+  AND member_id IS NULL
+  AND (trim(COALESCE(mta_nick, ''))='' OR trim(COALESCE(bgr_id, ''))='');
+
+UPDATE registration_gate_records
+SET access_tier=CASE
+        WHEN member_id IS NOT NULL AND status='REGISTERED' THEN
+            CASE WHEN (
+                SELECT m.rank_id FROM members m
+                WHERE m.id=registration_gate_records.member_id
+            )=(
+                SELECT rk.id FROM ranks rk
+                WHERE rk.guild_id=registration_gate_records.guild_id AND rk.active=1
+                ORDER BY rk.level, rk.id LIMIT 1
+            ) THEN 'RECRUIT' ELSE 'MEMBER' END
+        ELSE 'CANDIDATE'
+    END,
+    version=version+1,
+    updated_at=CAST(strftime('%s','now') AS INTEGER) * 1000
+WHERE access_tier='REGISTERED_VISITOR';
+
+DROP TABLE visitor_effective_members;
+
+DROP TRIGGER IF EXISTS registration_gate_reject_visitor_insert;
+CREATE TRIGGER registration_gate_reject_visitor_insert
+BEFORE INSERT ON registration_gate_records
+WHEN NEW.access_tier='REGISTERED_VISITOR'
+BEGIN
+    SELECT RAISE(ABORT, 'REGISTERED_VISITOR foi aposentado');
+END;
+
+DROP TRIGGER IF EXISTS registration_gate_reject_visitor_update;
+CREATE TRIGGER registration_gate_reject_visitor_update
+BEFORE UPDATE OF access_tier ON registration_gate_records
+WHEN NEW.access_tier='REGISTERED_VISITOR'
+BEGIN
+    SELECT RAISE(ABORT, 'REGISTERED_VISITOR foi aposentado');
+END;
+"""
+
 MIGRATIONS = (
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -3873,6 +4071,7 @@ MIGRATIONS = (
     (41, MIGRATION_041),
     (42, MIGRATION_042),
     (43, MIGRATION_043),
+    (44, MIGRATION_044),
 )
 
 

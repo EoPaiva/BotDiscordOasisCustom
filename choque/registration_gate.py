@@ -9,6 +9,7 @@ from typing import Any
 import aiosqlite
 
 from .audit import AuditService
+from .channel_names import normalize_stylized_label
 from .database import Database
 from .errors import ConflictError, NotFoundError, ValidationError
 from .identity import normalize_bgr_id
@@ -18,7 +19,7 @@ from .time_utils import utc_now_ms
 REGISTRATION_STATUSES = frozenset(
     {"UNREGISTERED", "PENDING", "REGISTERED", "REQUIRES_REVIEW", "BLOCKED"}
 )
-ACCESS_TIERS = frozenset({"REGISTERED_VISITOR", "CANDIDATE", "RECRUIT", "MEMBER"})
+ACCESS_TIERS = frozenset({"CANDIDATE", "RECRUIT", "MEMBER"})
 ACCESS_CLASSES = frozenset({"ONBOARDING_VISIBLE", "MEMBER_ONLY", "STAFF_ONLY", "PUBLIC"})
 RESULT_DELIVERY_CLAIM_TTL_MS = 5 * 60 * 1000
 REGISTRATION_EVENTS = frozenset(
@@ -1008,7 +1009,7 @@ class RegistrationGateService:
             await connection.execute(
                 """
                 UPDATE registration_gate_records
-                SET status='BLOCKED', access_tier='REGISTERED_VISITOR',
+                SET status='BLOCKED', access_tier='CANDIDATE',
                     source='ADMIN_APPROVAL', conflict_code='ADMIN_DEACTIVATED',
                     conflict_member_id=NULL, sync_status='PENDING', sync_error=NULL,
                     completed_at=NULL, reviewed_at=?, reviewed_by=?, review_reason=?,
@@ -1492,6 +1493,7 @@ class RegistrationGateService:
         *,
         mta_nick: str,
         bgr_id: str,
+        discord_nick: str | None = None,
         idempotency_key: str | None = None,
     ):
         if await self.settings.get(guild_id, "security_lockdown", False):
@@ -1565,12 +1567,10 @@ class RegistrationGateService:
                 )
 
             reopened_cycle = bool(current and current["status"] == "UNREGISTERED")
-            visitor_upgrade = bool(
+            registered_without_member = bool(
                 current
                 and current["status"] == "REGISTERED"
-                and current["access_tier"] == "REGISTERED_VISITOR"
                 and current["member_id"] is None
-                and (recruitment or compliance)
             )
             submitted_matches_member = bool(
                 member
@@ -1600,7 +1600,7 @@ class RegistrationGateService:
                 current
                 and current["status"] == "REGISTERED"
                 and not approved_recruitment_needs_registration
-                and not visitor_upgrade
+                and not registered_without_member
                 and not member
             ):
                 result = dict(current)
@@ -1631,7 +1631,7 @@ class RegistrationGateService:
             conflicting_member = await self._member_by_bgr(connection, guild_id, normalized_id)
 
             status = "PENDING"
-            tier = "REGISTERED_VISITOR"
+            tier = "CANDIDATE"
             member_id = None
             recruitment_id = None
             conflict_code = None
@@ -1679,23 +1679,46 @@ class RegistrationGateService:
                     tier = "CANDIDATE"
                     conflict_code = "RECRUITMENT_IDENTITY_MISMATCH"
                     event_type = "REGISTRATION_REVIEW_REQUIRED"
-                else:
+                elif recruitment["status"] == "APPROVED":
+                    member_id, tier = await self._create_effective_member(
+                        connection,
+                        guild_id=guild_id,
+                        discord_id=discord_id,
+                        discord_nick=discord_nick or nick,
+                        mta_nick=expected_nick or nick,
+                        bgr_id=normalized_id,
+                        actor_id=discord_id,
+                    )
                     status = "REGISTERED"
-                    tier = "RECRUIT" if recruitment["status"] == "APPROVED" else "CANDIDATE"
                     nick = expected_nick or nick
                     sync_status = "PENDING"
                     event_type = "REGISTRATION_COMPLETED"
+                else:
+                    status = "PENDING"
+                    tier = "CANDIDATE"
+                    nick = expected_nick or nick
+                    conflict_code = "RECRUITMENT_APPROVAL_REQUIRED"
+                    sync_status = "NOT_REQUIRED"
+                    event_type = "REGISTRATION_REVIEW_REQUIRED"
             elif compliance:
                 status = "PENDING"
                 conflict_code = "FUNCTIONAL_ROLE_REVIEW_REQUIRED"
                 sync_status = "NOT_REQUIRED"
                 event_type = "REGISTRATION_REVIEW_REQUIRED"
             else:
-                # Uma identidade de visitante é útil para suporte e auditoria, mas não
-                # representa ingresso na corporação. Sem candidatura ou cargo funcional
-                # monitorado, o fluxo termina aqui e nunca entra na fila de novos membros.
+                # A Portaria é o cadastro funcional da CHOQUE. Uma identidade válida e
+                # sem conflito cria o membro canônico na mesma transação; nunca existe
+                # um estado intermediário "cadastrado sem vínculo".
+                member_id, tier = await self._create_effective_member(
+                    connection,
+                    guild_id=guild_id,
+                    discord_id=discord_id,
+                    discord_nick=discord_nick or nick,
+                    mta_nick=nick,
+                    bgr_id=normalized_id,
+                    actor_id=discord_id,
+                )
                 status = "REGISTERED"
-                tier = "REGISTERED_VISITOR"
                 sync_status = "PENDING"
                 event_type = "REGISTRATION_COMPLETED"
 
@@ -1745,8 +1768,77 @@ class RegistrationGateService:
 
     @staticmethod
     def _tier_for_member(member: Mapping[str, Any]) -> str:
-        rank_name = str(member["rank_name"] or "").upper()
-        return "RECRUIT" if "RECRUTA" in rank_name else "MEMBER"
+        rank_name = normalize_stylized_label(str(member["rank_name"] or ""))
+        return "RECRUIT" if "recruta" in rank_name else "MEMBER"
+
+    @staticmethod
+    async def _initial_rank(
+        connection: aiosqlite.Connection,
+        guild_id: int,
+    ):
+        cursor = await connection.execute(
+            "SELECT id, name FROM ranks WHERE guild_id=? AND active=1 ORDER BY level, id",
+            (guild_id,),
+        )
+        ranks = await cursor.fetchall()
+        if not ranks:
+            return None
+        return next(
+            (
+                rank
+                for rank in ranks
+                if "recruta" in normalize_stylized_label(str(rank["name"] or ""))
+            ),
+            ranks[0],
+        )
+
+    async def _create_effective_member(
+        self,
+        connection: aiosqlite.Connection,
+        *,
+        guild_id: int,
+        discord_id: int,
+        discord_nick: str,
+        mta_nick: str,
+        bgr_id: str,
+        actor_id: int,
+    ) -> tuple[int, str]:
+        now = utc_now_ms()
+        rank = await self._initial_rank(connection, guild_id)
+        rank_id = int(rank["id"]) if rank else None
+        rank_name = str(rank["name"] or "") if rank else ""
+        try:
+            cursor = await connection.execute(
+                """
+                INSERT INTO members(
+                    guild_id, discord_id, discord_nick, mta_nick, character_id,
+                    rank_id, status, joined_at, last_activity_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?)
+                """,
+                (
+                    guild_id,
+                    discord_id,
+                    discord_nick,
+                    mta_nick,
+                    bgr_id,
+                    rank_id,
+                    now,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+        except aiosqlite.IntegrityError as exc:
+            raise ConflictError("Discord ou ID BGR já está vinculado a outro membro.") from exc
+        member_id = int(cursor.lastrowid)
+        await self._create_onboarding_checklist(connection, guild_id, member_id)
+        await self._enqueue_member_sync(connection, guild_id, discord_id, actor_id)
+        tier = (
+            "RECRUIT"
+            if "recruta" in normalize_stylized_label(rank_name)
+            else "MEMBER"
+        )
+        return member_id, tier
 
     async def reconcile_identity(
         self,
@@ -1772,25 +1864,41 @@ class RegistrationGateService:
                 conflict = None
             elif member:
                 status = "BLOCKED"
-                tier = "REGISTERED_VISITOR"
+                tier = "CANDIDATE"
                 sync_status = "PENDING"
                 member_id = int(member["id"])
                 recruitment_id = None
                 nick = str(member["mta_nick"])
                 bgr_id = str(member["character_id"] or "") or None
                 conflict = "FORMER_OR_INACTIVE_MEMBER"
-            elif recruitment:
+            elif recruitment and recruitment["status"] == "APPROVED":
+                member_id, tier = await self._create_effective_member(
+                    connection,
+                    guild_id=guild_id,
+                    discord_id=discord_id,
+                    discord_nick=str(recruitment["candidate_nick"]),
+                    mta_nick=str(recruitment["candidate_nick"]),
+                    bgr_id=str(recruitment["bgr_id"]),
+                    actor_id=actor_id or discord_id,
+                )
                 status = "REGISTERED"
-                tier = "RECRUIT" if recruitment["status"] == "APPROVED" else "CANDIDATE"
                 sync_status = "PENDING"
-                member_id = None
                 recruitment_id = int(recruitment["id"])
                 nick = str(recruitment["candidate_nick"])
                 bgr_id = str(recruitment["bgr_id"])
                 conflict = None
+            elif recruitment:
+                status = "PENDING"
+                tier = "CANDIDATE"
+                sync_status = "NOT_REQUIRED"
+                member_id = None
+                recruitment_id = int(recruitment["id"])
+                nick = str(recruitment["candidate_nick"])
+                bgr_id = str(recruitment["bgr_id"])
+                conflict = "RECRUITMENT_APPROVAL_REQUIRED"
             else:
                 status = "UNREGISTERED"
-                tier = "REGISTERED_VISITOR"
+                tier = "CANDIDATE"
                 sync_status = "PENDING"
                 member_id = None
                 recruitment_id = None
@@ -1873,26 +1981,6 @@ class RegistrationGateService:
                 (record["guild_id"], record["discord_id"]),
             )
             compliance = await compliance_cursor.fetchone()
-            recruitment_approved = None
-            if record["recruitment_application_id"]:
-                recruitment_cursor = await connection.execute(
-                    """
-                    SELECT id FROM recruitment_applications
-                    WHERE id=? AND guild_id=? AND discord_id=? AND status='APPROVED'
-                    """,
-                    (
-                        record["recruitment_application_id"],
-                        record["guild_id"],
-                        record["discord_id"],
-                    ),
-                )
-                recruitment_approved = await recruitment_cursor.fetchone()
-            if not compliance and not recruitment_approved:
-                raise ConflictError(
-                    "Visitantes não podem ser convertidos em membros pela Portaria. "
-                    "Use o processo seletivo ou valide um vínculo funcional reconhecido."
-                )
-
             is_companion = bool(
                 compliance
                 and companion_role_id
@@ -1903,12 +1991,8 @@ class RegistrationGateService:
                 compliance and compliance["assigned_rank_id"] is not None
             ) else None
             rank_name = str(compliance["assigned_rank_name"] or "") if compliance else ""
-            if recruitment_approved and rank_id is None and not is_companion:
-                rank_cursor = await connection.execute(
-                    "SELECT id, name FROM ranks WHERE guild_id=? AND active=1 ORDER BY level LIMIT 1",
-                    (record["guild_id"],),
-                )
-                rank = await rank_cursor.fetchone()
+            if rank_id is None and not is_companion:
+                rank = await self._initial_rank(connection, int(record["guild_id"]))
                 rank_id = int(rank["id"]) if rank else None
                 rank_name = str(rank["name"]) if rank else ""
             try:
@@ -1946,9 +2030,13 @@ class RegistrationGateService:
                 """,
                 (
                     (
-                        "REGISTERED_VISITOR"
+                        "MEMBER"
                         if is_companion
-                        else "RECRUIT" if "RECRUTA" in rank_name.upper() else "MEMBER"
+                        else (
+                            "RECRUIT"
+                            if "recruta" in normalize_stylized_label(rank_name)
+                            else "MEMBER"
+                        )
                     ),
                     member_id,
                     now,
@@ -2038,7 +2126,7 @@ class RegistrationGateService:
                     guild_id=int(record["guild_id"]),
                     discord_id=old_discord_id,
                     status="BLOCKED",
-                    access_tier="REGISTERED_VISITOR",
+                    access_tier="CANDIDATE",
                     source="ADMIN_APPROVAL",
                     mta_nick=str(member["mta_nick"]),
                     bgr_id=str(member["character_id"] or "") or None,
@@ -2079,7 +2167,7 @@ class RegistrationGateService:
             tier = (
                 self._tier_for_member(member)
                 if member["status"] == "ACTIVE"
-                else "REGISTERED_VISITOR"
+                else "CANDIDATE"
             )
             status = "REGISTERED" if member["status"] == "ACTIVE" else "BLOCKED"
             await connection.execute(
