@@ -264,6 +264,8 @@ então publique os painéis definitivos. Em caso de rollback, pare o bot, preser
 análise e restaure a cópia `choque_bgr.db.migration-backup`.
 
 Decisões técnicas estão em [`docs/adr/`](docs/adr/) e o estado da entrega em
-[`docs/IMPLEMENTATION_REPORT.md`](docs/IMPLEMENTATION_REPORT.md). Para continuidade, consulte o
-[`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md), a [`fila oficial`](docs/PHASE_QUEUE.md) e o
-[`registro de cobertura dos pedidos`](docs/REQUEST_LEDGER.md).
+[`docs/IMPLEMENTATION_REPORT.md`](docs/IMPLEMENTATION_REPORT.md). Para assumir uma nova sessão, siga
+[`BOOTSTRAP_PROMPT.md`](BOOTSTRAP_PROMPT.md), leia [`PROJECT_STATE.md`](PROJECT_STATE.md) e continue
+da próxima ação em [`SESSION_HANDOFF.md`](SESSION_HANDOFF.md). O [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md)
+permanece como registro histórico; a [`fila oficial`](docs/PHASE_QUEUE.md) e o
+[`registro de cobertura dos pedidos`](docs/REQUEST_LEDGER.md) preservam a ordem e o escopo.
