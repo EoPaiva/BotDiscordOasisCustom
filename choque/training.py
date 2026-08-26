@@ -562,6 +562,16 @@ class TrainingService:
             if cursor.rowcount != 1:
                 raise ConflictError("O treinamento foi finalizado simultaneamente.")
             course_name = str(training["course_name"] or training["name"])
+            cursor = await connection.execute(
+                """
+                SELECT id, course_role_id FROM course_catalog
+                WHERE guild_id=? AND lower(name)=lower(?) AND active=1
+                ORDER BY id LIMIT 1
+                """,
+                (guild_id, course_name),
+            )
+            catalog_course = await cursor.fetchone()
+            qualification_syncs = 0
             for participant in participants:
                 await connection.execute(
                     """
@@ -585,6 +595,56 @@ class TrainingService:
                         participant["decision_notes"],
                     ),
                 )
+                if participant["result_status"] == "APPROVED" and catalog_course:
+                    operation_id = (
+                        f"training:{guild_id}:{training_id}:{participant['member_id']}:"
+                        f"course:{catalog_course['id']}"
+                    )
+                    cursor = await connection.execute(
+                        """
+                        INSERT OR IGNORE INTO qualification_changes(
+                            guild_id, member_id, discord_id, course_id, action, source,
+                            actor_id, reason, correlation_id, recorded_at
+                        ) VALUES (?, ?, ?, ?, 'GRANT', 'TRAINING', ?, ?, ?, ?)
+                        """,
+                        (
+                            guild_id,
+                            participant["member_id"],
+                            participant["discord_id"],
+                            catalog_course["id"],
+                            actor_id,
+                            f"Aprovação no treinamento #{training_id}.",
+                            operation_id,
+                            now,
+                        ),
+                    )
+                    if cursor.rowcount == 1:
+                        await connection.execute(
+                            """
+                            INSERT OR IGNORE INTO web_action_outbox(
+                                guild_id, action_type, target_discord_id, payload_json,
+                                requested_by, correlation_id, status, available_at, created_at
+                            ) VALUES (?, 'QUALIFICATION_SYNC', ?, ?, ?, ?, 'PENDING', ?, ?)
+                            """,
+                            (
+                                guild_id,
+                                participant["discord_id"],
+                                json.dumps(
+                                    {
+                                        "course_id": int(catalog_course["id"]),
+                                        "granted": True,
+                                        "source": "TRAINING",
+                                    },
+                                    ensure_ascii=False,
+                                    sort_keys=True,
+                                ),
+                                actor_id,
+                                f"{operation_id}:discord",
+                                now,
+                                now,
+                            ),
+                        )
+                        qualification_syncs += 1
             approved = sum(row["result_status"] == "APPROVED" for row in participants)
             failed = sum(row["result_status"] == "FAILED" for row in participants)
             await self.audit.record(
@@ -598,6 +658,8 @@ class TrainingService:
                     "approved": approved,
                     "failed": failed,
                     "course_name": course_name,
+                    "course_id": int(catalog_course["id"]) if catalog_course else None,
+                    "qualification_syncs": qualification_syncs,
                 },
                 connection=connection,
             )
@@ -800,6 +862,12 @@ class TrainingService:
             (guild_id, internal_code.lower()),
         )
 
+    async def course_by_id(self, guild_id: int, course_id: int):
+        return await self.database.fetchone(
+            "SELECT * FROM course_catalog WHERE guild_id=? AND id=? AND active=1",
+            (guild_id, course_id),
+        )
+
     async def course_requirements(self, guild_id: int, course_id: int):
         return await self.database.fetchall(
             """
@@ -809,6 +877,41 @@ class TrainingService:
             """,
             (guild_id, course_id),
         )
+
+    async def configure_course_panel_channel(
+        self, guild_id: int, course_id: int, channel_id: int, actor_id: int
+    ) -> dict[str, object]:
+        if channel_id <= 0:
+            raise ValidationError("Selecione um canal de curso válido.")
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                "SELECT * FROM course_catalog WHERE guild_id=? AND id=? AND active=1",
+                (guild_id, course_id),
+            )
+            course = await cursor.fetchone()
+            if not course:
+                raise NotFoundError("Curso ativo não encontrado.")
+            await connection.execute(
+                "UPDATE course_catalog SET panel_channel_id=?, updated_at=? WHERE id=?",
+                (channel_id, now, course_id),
+            )
+            await self.audit.record(
+                guild_id,
+                "COURSE_PANEL_CHANNEL_UPDATED",
+                actor_id=actor_id,
+                target_id=course_id,
+                before={"panel_channel_id": course["panel_channel_id"]},
+                after={"panel_channel_id": channel_id},
+                reason="Canal do painel individual do curso atualizado.",
+                connection=connection,
+            )
+        return {
+            "course_id": course_id,
+            "internal_code": str(course["internal_code"]),
+            "course_name": str(course["name"]),
+            "panel_channel_id": channel_id,
+        }
 
     async def _course_eligibility(
         self,
@@ -870,12 +973,28 @@ class TrainingService:
         requirements = list(await cursor.fetchall())
         missing = [row for row in requirements if int(row["required_role_id"]) not in current_roles]
         if missing:
-            reasons.append("requisitos de cargo não atendidos")
+            reasons.append(
+                "requisitos de cargo não atendidos: "
+                + ", ".join(str(row["required_role_name"]) for row in missing)
+            )
 
         if member:
             minimum_rank = course["minimum_rank_level"]
             if minimum_rank is not None and int(member["rank_level"]) < int(minimum_rank):
-                reasons.append(f"patente mínima de nível {minimum_rank} não atendida")
+                cursor = await connection.execute(
+                    """
+                    SELECT name FROM ranks WHERE guild_id=? AND level>=?
+                    ORDER BY level, id LIMIT 1
+                    """,
+                    (guild_id, minimum_rank),
+                )
+                minimum_rank_row = await cursor.fetchone()
+                minimum_rank_name = (
+                    str(minimum_rank_row["name"])
+                    if minimum_rank_row
+                    else f"nível {minimum_rank}"
+                )
+                reasons.append(f"patente mínima não atendida: {minimum_rank_name}")
             history_guild_id, history_member = await self._canonical_member_context(
                 guild_id, discord_id, member
             )
@@ -894,10 +1013,19 @@ class TrainingService:
             )
             total_ms = max(0, int((await cursor.fetchone())["total_ms"]))
             if total_ms < int(course["minimum_valid_hours_ms"]):
-                reasons.append("tempo mínimo de serviço válido não atendido")
+                required_hours = int(course["minimum_valid_hours_ms"]) / 3_600_000
+                current_hours = total_ms / 3_600_000
+                reasons.append(
+                    "tempo mínimo de serviço válido não atendido: "
+                    f"{current_hours:.1f}h de {required_hours:.1f}h"
+                )
             tenure_ms = max(0, self.clock() - int(history_member["joined_at"]))
             if tenure_ms < int(course["minimum_tenure_days"]) * DAY_MS:
-                reasons.append("tempo mínimo de corporação não atendido")
+                current_days = tenure_ms // DAY_MS
+                reasons.append(
+                    "tempo mínimo de corporação não atendido: "
+                    f"{current_days} de {int(course['minimum_tenure_days'])} dia(s)"
+                )
             if bool(course["require_no_active_suspension"]):
                 cursor = await connection.execute(
                     """
@@ -914,6 +1042,17 @@ class TrainingService:
                 )
                 if await cursor.fetchone():
                     reasons.append("suspensão ativa impede a solicitação")
+            if bool(course["require_no_active_adv"]):
+                cursor = await connection.execute(
+                    """
+                    SELECT 1 FROM punishments WHERE guild_id=? AND member_id=?
+                      AND punishment_type='WARNING' AND status='ACTIVE'
+                      AND (ends_at IS NULL OR ends_at>?) LIMIT 1
+                    """,
+                    (history_guild_id, history_member["id"], self.clock()),
+                )
+                if await cursor.fetchone():
+                    reasons.append("ADV ativa impede a solicitação")
             prerequisite = course["prerequisite_course_name"]
             if prerequisite:
                 cursor = await connection.execute(
@@ -963,6 +1102,7 @@ class TrainingService:
             "minimum_rank_level": course["minimum_rank_level"],
             "minimum_valid_hours_ms": int(course["minimum_valid_hours_ms"]),
             "minimum_tenure_days": int(course["minimum_tenure_days"]),
+            "require_no_active_adv": bool(course["require_no_active_adv"]),
             "prerequisite_course_name": course["prerequisite_course_name"],
             "_course": course,
             "_member": member,

@@ -770,7 +770,13 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     continuam proibidos. O primeiro bloco, **ADV**, está concluído localmente sobre o ledger disciplinar
     canônico: quatro gravidades, prazo configurável, expiração idempotente, histórico/auditoria e painel
     global paginado recuperável. Gate local: 53 testes focados e 559 testes da suíte completa, com Ruff,
-    compileall, `main.py --check` e `git diff --check` verdes. Ainda não foi publicado em produção.
+    compileall, `main.py --check` e `git diff --check` verdes. O segundo bloco, **Cursos**, também está
+    concluído localmente: cada curso possui canal/painel persistente próprio; requisitos exibem patente,
+    cargos, horas, tempo de corporação, curso anterior, suspensão e ADV; a conclusão aprovada grava o
+    histórico canônico e enfileira uma única sincronização do cargo do curso. A migration 50 preserva o
+    índice agregado apenas como orientação, sem concentrar candidaturas. Gate local consolidado: 68 testes
+    focados e 561 testes da suíte completa, além de Ruff, compileall, `main.py --check` e `git diff --check`.
+    ADV e Cursos ainda não foram publicados em produção.
 
 57. 🔄 **Prompt Master — Reformulação Completa do Site CHOQUE — fase visual ativa.**
     Fonte integral: `C:\Users\mpaii\.codex\attachments\89ef54de-2878-4b01-8ba7-9c600f45a3ad\pasted-text.txt`,
@@ -783,3 +789,13 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     status com fonte real. Gates: 57 testes web, lint, typecheck e build. Permanecem ativos o Centro
     de Comando, telas administrativas, mobile/acessibilidade e consolidação visual completa, sem
     alterar contratos, URLs, RBAC ou regras de negócio existentes.
+
+58. ⏳ **Prompt Master — Identidade Visual / Design System CHOQUE — registrado na fila.**
+    Fonte recebida: `C:\Users\mpaii\.codex\attachments\8f7db861-0f81-4655-a0fc-b3fc90133b12\pasted-text.txt`,
+    SHA-256 `78C71E32434F0B6B1DC711B51E2BC872A5406B47E043817BD7624038ADFA5221`. A imagem tática
+    encaminhada junto é a referência visual obrigatória. O contrato exige military tech institucional,
+    base preto/grafite, verde funcional controlado, superfícies sólidas, tipografia condensada,
+    design tokens, acessibilidade, performance e UX `ver → entender → agir`, sem remover qualquer
+    função. O arquivo recebido termina incompleto na seção 65, após `Status com:`; esse limite foi
+    registrado sem inventar conteúdo. A execução visual entra depois dos blocos funcionais locais em
+    andamento e continua proibida de rollout na Discloud sem autorização explícita.

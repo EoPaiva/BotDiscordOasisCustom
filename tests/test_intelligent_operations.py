@@ -519,8 +519,14 @@ async def test_course_extended_requirements_are_enforced(service_bundle):
     )
     denied = await training.course_eligibility(GUILD_ID, DISCORD_ID, "operacoes", [])
     assert denied["eligible"] is False
-    assert "tempo mínimo de serviço válido não atendido" in denied["reasons"]
-    assert "tempo mínimo de corporação não atendido" in denied["reasons"]
+    assert any(
+        reason.startswith("tempo mínimo de serviço válido não atendido: 0.0h de 1.0h")
+        for reason in denied["reasons"]
+    )
+    assert any(
+        reason.startswith("tempo mínimo de corporação não atendido: 0 de 1 dia(s)")
+        for reason in denied["reasons"]
+    )
     assert "pré-requisito Básico não concluído" in denied["reasons"]
     await service_bundle["operations"].configure_course_requirements(
         GUILD_ID,
@@ -534,6 +540,30 @@ async def test_course_extended_requirements_are_enforced(service_bundle):
     )
     allowed = await training.course_eligibility(GUILD_ID, DISCORD_ID, "operacoes", [])
     assert allowed["eligible"] is True
+    await service_bundle["discipline"].apply_warning(
+        GUILD_ID,
+        DISCORD_ID,
+        actor_id=900,
+        warning_type="LEVE",
+        reason="Teste de bloqueio do curso",
+        duration_days=2,
+    )
+    await service_bundle["operations"].configure_course_requirements(
+        GUILD_ID,
+        course_id,
+        DISCORD_ID,
+        minimum_rank_level=10,
+        minimum_valid_hours=0,
+        minimum_tenure_days=0,
+        require_no_active_suspension=True,
+        require_no_active_adv=True,
+        prerequisite_course_name=None,
+    )
+    blocked_by_adv = await training.course_eligibility(
+        GUILD_ID, DISCORD_ID, "operacoes", []
+    )
+    assert blocked_by_adv["eligible"] is False
+    assert blocked_by_adv["reasons"] == ["ADV ativa impede a solicitação"]
 
 
 @pytest.mark.asyncio

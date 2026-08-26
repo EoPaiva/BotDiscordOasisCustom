@@ -87,53 +87,94 @@ def build_training_landing_embed(bot: ChoqueBot) -> discord.Embed:
 
 async def build_course_catalog_embed(bot: ChoqueBot, guild_id: int) -> discord.Embed:
     rows = await bot.services.training.catalog(guild_id)
-    embed = branded_embed(
+    return branded_embed(
         bot.config.branding,
-        title="🎖️ Catálogo de Cursos • CHOQUE - BGR",
+        title="🎖️ Central de Cursos • CHOQUE - BGR",
         description=(
-            "Selecione o curso no botão correspondente. A elegibilidade é conferida novamente "
-            "no servidor no instante da solicitação; possuir os requisitos não garante aprovação.\n\n"
-            "**Fluxo:** requisito → solicitação → análise do Instrutor/Comando → convocação."
+            f"Existem **{len(rows)} curso(s) ativo(s)**. Cada curso possui uma mensagem própria "
+            "no canal correspondente, com requisitos, situação e ação de candidatura.\n\n"
+            "**Fluxo:** requisitos → solicitação → análise humana → convocação → "
+            "treinamento → qualificação e cargo."
         ),
     )
-    for row in rows:
-        requirements = await bot.services.training.course_requirements(guild_id, int(row["id"]))
-        requirement_text = " + ".join(
-            f"<@&{requirement['required_role_id']}>" for requirement in requirements
-        ) or "Cadastro ativo"
-        source_url = (
-            f"https://discord.com/channels/{guild_id}/{row['source_channel_id']}/"
-            f"{row['source_message_id']}"
+
+
+async def build_course_panel_embed(
+    bot: ChoqueBot, guild_id: int, course_id: int
+) -> discord.Embed:
+    row = await bot.services.training.course_by_id(guild_id, course_id)
+    if not row:
+        raise NotFoundError("Curso ativo não encontrado.")
+    requirements = await bot.services.training.course_requirements(guild_id, course_id)
+    requirement_lines = [
+        f"• Cargo/curso: <@&{requirement['required_role_id']}>"
+        for requirement in requirements
+    ]
+    if row["minimum_rank_level"] is not None:
+        rank = await bot.services.database.fetchone(
+            """
+            SELECT name FROM ranks WHERE guild_id=? AND level>=?
+            ORDER BY level, id LIMIT 1
+            """,
+            (guild_id, row["minimum_rank_level"]),
         )
-        status = "🟢 Solicitações abertas" if row["enrollment_status"] == "OPEN" else "🔒 Fechado"
-        embed.add_field(
-            name=f"{'🟢' if row['enrollment_status'] == 'OPEN' else '🔒'} {row['name']}",
-            value=(
-                f"**Requisito:** {requirement_text}\n"
-                f"**Nota mínima:** {row['passing_score']} • **Nova tentativa:** "
-                f"{row['cooldown_days']} dias\n"
-                f"**Situação:** {status} • [edital histórico]({source_url})"
-            ),
-            inline=False,
+        rank_label = str(rank["name"]) if rank else f"nível {row['minimum_rank_level']}"
+        requirement_lines.append(f"• Patente mínima: **{rank_label}**")
+    minimum_hours = int(row["minimum_valid_hours_ms"]) / 3_600_000
+    if minimum_hours:
+        requirement_lines.append(f"• Bate-ponto válido: **{minimum_hours:g}h**")
+    if int(row["minimum_tenure_days"]):
+        requirement_lines.append(
+            f"• Tempo de corporação: **{row['minimum_tenure_days']} dia(s)**"
         )
-    if not rows:
-        embed.description = "O catálogo ainda não foi importado pela Administração."
-    embed.set_footer(
-        text=(
-            "CHOQUE - BGR • Inscrições validadas por cargo, status, duplicidade e intervalo"
+    if row["prerequisite_course_name"]:
+        requirement_lines.append(
+            f"• Curso anterior: **{row['prerequisite_course_name']}**"
         )
+    if bool(row["require_no_active_suspension"]):
+        requirement_lines.append("• Não possuir suspensão ativa")
+    if bool(row["require_no_active_adv"]):
+        requirement_lines.append("• Não possuir ADV ativa")
+    if not requirement_lines:
+        requirement_lines.append("• Cadastro ativo na CHOQUE")
+    status = "🟢 Solicitações abertas" if row["enrollment_status"] == "OPEN" else "🔒 Fechado"
+    source_url = (
+        f"https://discord.com/channels/{guild_id}/{row['source_channel_id']}/"
+        f"{row['source_message_id']}"
     )
+    embed = branded_embed(
+        bot.config.branding,
+        title=f"🎓 {row['name']}",
+        description=str(row["description"]),
+    )
+    embed.add_field(name="Requisitos", value="\n".join(requirement_lines), inline=False)
+    embed.add_field(name="Situação", value=status)
+    embed.add_field(name="Nota mínima", value=f"**{row['passing_score']}**")
+    embed.add_field(name="Nova tentativa", value=f"**{row['cooldown_days']} dia(s)**")
+    embed.add_field(
+        name="Processo",
+        value=(
+            "A elegibilidade é validada no servidor. A decisão e o resultado do treinamento "
+            "permanecem humanos. A conclusão registra o histórico e sincroniza o cargo."
+        ),
+        inline=False,
+    )
+    embed.add_field(name="Edital de origem", value=f"[Consultar mensagem]({source_url})")
+    embed.set_footer(text=f"CHOQUE - BGR • Curso {row['internal_code']}")
     return embed
 
 
-class CourseApplicationButton(discord.ui.Button["CourseCatalogView"]):
-    def __init__(self, internal_code: str, label: str, row: int) -> None:
+class CourseApplicationButton(discord.ui.Button[discord.ui.View]):
+    def __init__(
+        self, internal_code: str, label: str, row: int = 0, *, disabled: bool = False
+    ) -> None:
         super().__init__(
             label=label,
             emoji="📝",
             style=discord.ButtonStyle.primary,
             custom_id=f"choque:course:apply:{internal_code}:v1",
             row=row,
+            disabled=disabled,
         )
         self.internal_code = internal_code
 
@@ -173,6 +214,18 @@ class CourseCatalogView(MemberView):
                     index // 5,
                 )
             )
+
+
+class CoursePanelView(MemberView):
+    def __init__(self, internal_code: str, label: str, *, enrollment_open: bool) -> None:
+        super().__init__(timeout=None)
+        self.add_item(
+            CourseApplicationButton(
+                internal_code,
+                label="Candidatar-me" if enrollment_open else "Inscrições fechadas",
+                disabled=not enrollment_open,
+            )
+        )
 
 
 async def build_event_embed(bot: ChoqueBot, guild_id: int, training_id: int) -> discord.Embed:
@@ -499,6 +552,75 @@ class CourseApplicationQueueView(AdminView):
         self.add_item(CourseApplicationSelect(rows))
 
 
+class CoursePanelChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, course_id: int) -> None:
+        self.course_id = course_id
+        super().__init__(
+            placeholder="Selecione o canal exclusivo deste curso",
+            channel_types=[discord.ChannelType.text],
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        actor = await require_training_admin(interaction)
+        selected = actor.guild.get_channel(int(self.values[0].id))
+        if not isinstance(selected, discord.TextChannel):
+            raise ValidationError("Selecione um canal de texto do servidor.")
+        bot = get_bot(interaction)
+        result = await bot.services.training.configure_course_panel_channel(
+            actor.guild.id, self.course_id, selected.id, actor.id
+        )
+        cog = bot.get_cog("TrainingCommands")
+        if not isinstance(cog, TrainingCommands):
+            raise NotFoundError("O módulo de cursos não está disponível.")
+        message = await cog.publish_course_panel(actor.guild, self.course_id, selected)
+        await interaction.response.edit_message(
+            content=(
+                f"✅ Painel de **{result['course_name']}** publicado em {selected.mention}: "
+                f"{message.jump_url}"
+            ),
+            view=None,
+        )
+
+
+class CoursePanelChannelView(AdminView):
+    def __init__(self, course_id: int) -> None:
+        super().__init__(timeout=300)
+        self.add_item(CoursePanelChannelSelect(course_id))
+
+
+class CoursePanelCourseSelect(discord.ui.Select):
+    def __init__(self, courses: list) -> None:
+        super().__init__(
+            placeholder="Selecione o curso que terá painel próprio",
+            options=[
+                discord.SelectOption(
+                    label=str(row["name"])[:100],
+                    value=str(row["id"]),
+                    description=(
+                        f"{row['enrollment_status']} • "
+                        f"canal {row['panel_channel_id'] or 'a definir'}"
+                    )[:100],
+                )
+                for row in courses[:25]
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await require_training_admin(interaction)
+        await interaction.response.edit_message(
+            content="Agora selecione o canal exclusivo do curso:",
+            view=CoursePanelChannelView(int(self.values[0])),
+        )
+
+
+class CoursePanelCourseView(AdminView):
+    def __init__(self, courses: list) -> None:
+        super().__init__(timeout=300)
+        self.add_item(CoursePanelCourseSelect(courses))
+
+
 class TrainingAdminView(AdminView):
     def __init__(self) -> None:
         super().__init__(timeout=300)
@@ -556,6 +678,19 @@ class TrainingAdminView(AdminView):
         await interaction.response.send_message(
             "Selecione uma solicitação de curso:",
             view=CourseApplicationQueueView(rows),
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="Painéis por curso", emoji="🧭", style=discord.ButtonStyle.secondary)
+    async def course_panels(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        courses = await get_bot(interaction).services.training.catalog(interaction.guild.id)
+        if not courses:
+            raise NotFoundError("Não há cursos ativos para configurar.")
+        await interaction.response.send_message(
+            "Escolha um curso. Cada um manterá sua própria mensagem persistente:",
+            view=CoursePanelCourseView(courses),
             ephemeral=True,
         )
 
@@ -898,6 +1033,23 @@ class TrainingCommands(commands.Cog):
     async def cog_load(self) -> None:
         for row in await self.services.training.persistent_events():
             self.bot.add_view(TrainingEventView(int(row["id"])), message_id=int(row["message_id"]))
+        rows = await self.services.database.fetchall(
+            """
+            SELECT c.internal_code, c.name, c.enrollment_status, p.message_id
+            FROM course_panel_messages p
+            JOIN course_catalog c ON c.id=p.course_id AND c.guild_id=p.guild_id
+            WHERE c.active=1
+            """
+        )
+        for row in rows:
+            self.bot.add_view(
+                CoursePanelView(
+                    str(row["internal_code"]),
+                    str(row["name"]),
+                    enrollment_open=str(row["enrollment_status"]) == "OPEN",
+                ),
+                message_id=int(row["message_id"]),
+            )
 
     async def open_admin(self, interaction: discord.Interaction) -> None:
         await require_training_admin(interaction)
@@ -947,9 +1099,24 @@ class TrainingCommands(commands.Cog):
                     message = None
             embed = await build_course_catalog_embed(self.bot, guild.id)
             if message is not None:
-                await message.edit(embed=embed, view=CourseCatalogView())
+                await message.edit(embed=embed, view=None)
             else:
-                message = await channel.send(embed=embed, view=CourseCatalogView())
+                if panel:
+                    old_channel = guild.get_channel(int(panel["channel_id"]))
+                    if isinstance(old_channel, discord.TextChannel):
+                        try:
+                            old_message = await old_channel.fetch_message(int(panel["message_id"]))
+                            await old_message.edit(
+                                embed=branded_embed(
+                                    self.bot.config.branding,
+                                    title="🎖️ Central de Cursos transferida",
+                                    description=f"Consulte o índice atual em {channel.mention}.",
+                                ),
+                                view=None,
+                            )
+                        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                            pass
+                message = await channel.send(embed=embed)
                 await self.services.settings.upsert_panel(
                     guild.id,
                     "COURSE_CATALOG",
@@ -957,6 +1124,82 @@ class TrainingCommands(commands.Cog):
                     message.id,
                 )
             return message
+
+    async def publish_course_panel(
+        self, guild: discord.Guild, course_id: int, channel: discord.TextChannel
+    ) -> discord.Message:
+        course = await self.services.training.course_by_id(guild.id, course_id)
+        if not course:
+            raise NotFoundError("Curso ativo não encontrado.")
+        async with self._catalog_lock:
+            stored = await self.services.database.fetchone(
+                """
+                SELECT channel_id, message_id FROM course_panel_messages
+                WHERE guild_id=? AND course_id=?
+                """,
+                (guild.id, course_id),
+            )
+            message = None
+            if stored and int(stored["channel_id"]) == channel.id:
+                try:
+                    message = await channel.fetch_message(int(stored["message_id"]))
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    message = None
+            elif stored:
+                old_channel = guild.get_channel(int(stored["channel_id"]))
+                if isinstance(old_channel, discord.TextChannel):
+                    try:
+                        old_message = await old_channel.fetch_message(int(stored["message_id"]))
+                        await old_message.edit(
+                            embed=branded_embed(
+                                self.bot.config.branding,
+                                title=f"🎓 Painel de {course['name']} transferido",
+                                description=f"Consulte o painel atual em {channel.mention}.",
+                            ),
+                            view=None,
+                        )
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        pass
+            embed = await build_course_panel_embed(self.bot, guild.id, course_id)
+            view = CoursePanelView(
+                str(course["internal_code"]),
+                str(course["name"]),
+                enrollment_open=str(course["enrollment_status"]) == "OPEN",
+            )
+            if message is not None:
+                await message.edit(embed=embed, view=view)
+            else:
+                message = await channel.send(embed=embed, view=view)
+            await self.services.database.execute(
+                """
+                INSERT INTO course_panel_messages(
+                    guild_id, course_id, channel_id, message_id, updated_at
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(guild_id, course_id) DO UPDATE SET
+                    channel_id=excluded.channel_id,
+                    message_id=excluded.message_id,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    guild.id,
+                    course_id,
+                    channel.id,
+                    message.id,
+                    self.services.training.clock(),
+                ),
+            )
+            return message
+
+    async def publish_configured_course_panels(self, guild: discord.Guild) -> list[int]:
+        published: list[int] = []
+        for course in await self.services.training.catalog(guild.id):
+            channel_id = course["panel_channel_id"] or course["source_channel_id"]
+            channel = guild.get_channel(int(channel_id)) if channel_id else None
+            if not isinstance(channel, discord.TextChannel):
+                continue
+            await self.publish_course_panel(guild, int(course["id"]), channel)
+            published.append(int(course["id"]))
+        return published
 
     async def publish_event(self, guild: discord.Guild, training_id: int) -> discord.Message:
         channel_id = await self.services.settings.get(guild.id, "training_panel_channel_id")
@@ -1028,6 +1271,10 @@ class TrainingCommands(commands.Cog):
                     await self.publish_course_catalog(guild, catalog_channel)
                 except discord.DiscordException:
                     pass
+            try:
+                await self.publish_configured_course_panels(guild)
+            except discord.DiscordException:
+                pass
             for event in await self.services.training.active_trainings(guild.id):
                 if event["message_id"]:
                     await self.refresh_event_message(guild, int(event["id"]))

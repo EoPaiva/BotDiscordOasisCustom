@@ -7,7 +7,9 @@ Atualizado em 2026-08-25.
 | Pedido | Estado | Fonte e garantia de escopo |
 |---|---|---|
 | Evolução Completa do Ecossistema CHOQUE | EM EXECUÇÃO POR FASES | Fonte integral preservada na fase 56, SHA-256 `797967256032CBA953CC3493D745E4706AD5EDC506EAF2D2AE68444B170B44A6`; 65 seções consolidadas sem duplicar sistemas existentes. |
+| Cursos por canal, requisitos e qualificação | CONCLUÍDO LOCALMENTE, SEM ROLLOUT | Migration 50, painel persistente individual por curso, requisitos completos e sincronização idempotente do cargo após aprovação. Gates: 68 testes focados, 561 testes completos, Ruff, compileall e `main.py --check`. |
 | Reformulação Completa do Site CHOQUE | FASE VISUAL ATIVA | Fonte integral preservada na fase 57, SHA-256 `808436337D493D5548FF12696DEC465A2DC6BF6B6A983FF191861D6AD25D3B45`; primeira entrega publicada e referência visual tática definida como contrato das telas restantes. |
+| Identidade Visual / Design System CHOQUE | REGISTRADO NA FILA | Fonte recebida na fase 58, SHA-256 `78C71E32434F0B6B1DC711B51E2BC872A5406B47E043817BD7624038ADFA5221`, com a imagem tática como referência obrigatória. O arquivo termina no meio da seção 65 (`Status com:`); o trecho ausente não será inferido. |
 
 ## Central de Auxílio Financeiro, Metas, Transparência e Honrarias — em desenvolvimento isolado
 

@@ -4354,6 +4354,27 @@ CREATE TABLE discipline_adv_panel_pages (
 );
 """
 
+MIGRATION_050 = """
+-- Cada curso passa a possuir painel e canal próprios. O painel agregado antigo
+-- permanece apenas como índice durante a transição e não concentra mais ações.
+ALTER TABLE course_catalog ADD COLUMN panel_channel_id INTEGER;
+ALTER TABLE course_catalog ADD COLUMN require_no_active_adv INTEGER NOT NULL DEFAULT 0
+    CHECK (require_no_active_adv IN (0,1));
+
+CREATE TABLE course_panel_messages (
+    guild_id INTEGER NOT NULL,
+    course_id INTEGER NOT NULL REFERENCES course_catalog(id) ON DELETE RESTRICT,
+    channel_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(guild_id, course_id),
+    UNIQUE(guild_id, message_id)
+);
+
+CREATE INDEX ix_course_panels_channel
+ON course_panel_messages(guild_id, channel_id, course_id);
+"""
+
 MIGRATIONS = (
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -4404,6 +4425,7 @@ MIGRATIONS = (
     (47, MIGRATION_047),
     (48, MIGRATION_048),
     (49, MIGRATION_049),
+    (50, MIGRATION_050),
 )
 
 

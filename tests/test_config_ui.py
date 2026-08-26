@@ -495,7 +495,8 @@ async def test_phase_four_and_five_panels_are_persistent_and_have_stable_custom_
         assert all(custom_id.startswith("choque:") for custom_id in custom_ids)
     admin = TrainingAdminView()
     assert admin.timeout == 300
-    assert len(admin.children) == 4
+    assert len(admin.children) == 5
+    assert "Painéis por curso" in {item.label for item in admin.children}
 
     ticket_panel = TicketPanelView()
     assert "choque:ticket:other:v1" in {item.custom_id for item in ticket_panel.children}

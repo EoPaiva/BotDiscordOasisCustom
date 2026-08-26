@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from types import SimpleNamespace
 
 import pytest
 
+from choque.config import Branding
 from choque.errors import ConflictError
+from cogs.training_commands import (
+    CoursePanelView,
+    build_course_catalog_embed,
+    build_course_panel_embed,
+)
 
 from .conftest import DISCORD_ID, GUILD_ID
 
@@ -153,6 +161,58 @@ async def test_training_completion_requires_decisions_and_records_course(service
 
 
 @pytest.mark.asyncio
+async def test_training_completion_queues_exactly_one_course_role_sync(service_bundle):
+    training = service_bundle["training"]
+    database = service_bundle["database"]
+    await training.import_catalog_course(
+        GUILD_ID,
+        actor_id=900,
+        internal_code="operador_choque",
+        name="Operador de Choque",
+        description="Qualificação operacional",
+        course_role_id=9_900,
+        course_role_name="Curso Operador de Choque",
+        passing_score=80,
+        cooldown_days=7,
+        enrollment_status="OPEN",
+        notes=None,
+        source_channel_id=300,
+        source_message_id=302,
+        source_content_sha256="b" * 64,
+        requirements=[],
+    )
+    event_id = int((await create_event(service_bundle))["training_id"])
+    await training.enroll(GUILD_ID, event_id, DISCORD_ID)
+    await training.close_enrollment(GUILD_ID, event_id, actor_id=900)
+    await training.decide_participant(
+        GUILD_ID,
+        event_id,
+        DISCORD_ID,
+        actor_id=900,
+        attendance="PRESENT",
+        result="APPROVED",
+    )
+
+    await training.complete_training(GUILD_ID, event_id, actor_id=900)
+
+    changes = await database.fetchall(
+        "SELECT * FROM qualification_changes WHERE source='TRAINING'"
+    )
+    outbox = await database.fetchall(
+        "SELECT * FROM web_action_outbox WHERE action_type='QUALIFICATION_SYNC'"
+    )
+    assert len(changes) == 1
+    assert changes[0]["action"] == "GRANT"
+    assert len(outbox) == 1
+    assert outbox[0]["status"] == "PENDING"
+    assert json.loads(outbox[0]["payload_json"]) == {
+        "course_id": changes[0]["course_id"],
+        "granted": True,
+        "source": "TRAINING",
+    }
+
+
+@pytest.mark.asyncio
 async def test_training_cancellation_is_preserved_in_history(service_bundle):
     training = service_bundle["training"]
     event_id = int((await create_event(service_bundle))["training_id"])
@@ -179,6 +239,37 @@ async def test_course_catalog_import_is_idempotent_and_preserves_requirements(se
     assert [(row["required_role_id"], row["required_role_name"]) for row in requirements] == [
         (111, "Praças")
     ]
+
+
+@pytest.mark.asyncio
+async def test_course_panel_channel_is_persistent_audited_and_individual(service_bundle):
+    imported = await import_course(service_bundle)
+    course_id = int(imported["course_id"])
+    training = service_bundle["training"]
+    configured = await training.configure_course_panel_channel(
+        GUILD_ID, course_id, 7_001, actor_id=900
+    )
+    assert configured["panel_channel_id"] == 7_001
+    row = await training.course_by_id(GUILD_ID, course_id)
+    assert row["panel_channel_id"] == 7_001
+    audit = await service_bundle["database"].fetchone(
+        "SELECT action FROM audit_logs WHERE action='COURSE_PANEL_CHANNEL_UPDATED'"
+    )
+    assert audit["action"] == "COURSE_PANEL_CHANNEL_UPDATED"
+
+    bot = SimpleNamespace(
+        config=SimpleNamespace(branding=Branding()),
+        services=SimpleNamespace(training=training, database=service_bundle["database"]),
+    )
+    index = await build_course_catalog_embed(bot, GUILD_ID)
+    panel = await build_course_panel_embed(bot, GUILD_ID, course_id)
+    assert not index.fields
+    assert "1 curso(s) ativo(s)" in index.description
+    assert panel.title == "🎓 Abordagem Básica"
+    assert any(field.name == "Requisitos" for field in panel.fields)
+    view = CoursePanelView("abordagem_basica", "Abordagem Básica", enrollment_open=True)
+    assert len(view.children) == 1
+    assert view.children[0].custom_id == "choque:course:apply:abordagem_basica:v1"
 
 
 @pytest.mark.asyncio

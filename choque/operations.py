@@ -2707,6 +2707,14 @@ class OperationsService:
             """,
             (guild_id, member["id"], now, now),
         )
+        active_adv = await self.database.fetchone(
+            """
+            SELECT 1 FROM punishments WHERE guild_id=? AND member_id=?
+              AND punishment_type='WARNING' AND status='ACTIVE'
+              AND (ends_at IS NULL OR ends_at>?) LIMIT 1
+            """,
+            (guild_id, member["id"], now),
+        )
         prereq_ok = True
         prereq = course["prerequisite_course_name"]
         if prereq:
@@ -2728,6 +2736,8 @@ class OperationsService:
             "minimum_tenure": tenure_days >= int(course["minimum_tenure_days"]),
             "no_active_suspension": not bool(course["require_no_active_suspension"])
             or suspension is None,
+            "no_active_adv": not bool(course["require_no_active_adv"])
+            or active_adv is None,
             "prerequisite_course": prereq_ok,
         }
         return {
@@ -2750,6 +2760,7 @@ class OperationsService:
         minimum_tenure_days: int,
         require_no_active_suspension: bool,
         prerequisite_course_name: str | None,
+        require_no_active_adv: bool = False,
     ) -> None:
         if minimum_valid_hours < 0 or minimum_tenure_days < 0:
             raise ValidationError("Horas e tempo de corporação não podem ser negativos.")
@@ -2765,7 +2776,7 @@ class OperationsService:
                 """
                 UPDATE course_catalog SET minimum_rank_level=?, minimum_valid_hours_ms=?,
                     minimum_tenure_days=?, require_no_active_suspension=?,
-                    prerequisite_course_name=?, updated_at=?
+                    prerequisite_course_name=?, require_no_active_adv=?, updated_at=?
                 WHERE guild_id=? AND id=?
                 """,
                 (
@@ -2774,6 +2785,7 @@ class OperationsService:
                     minimum_tenure_days,
                     int(require_no_active_suspension),
                     (prerequisite_course_name or "").strip() or None,
+                    int(require_no_active_adv),
                     self.clock(),
                     guild_id,
                     course_id,
@@ -2789,6 +2801,7 @@ class OperationsService:
                     "minimum_valid_hours_ms": course["minimum_valid_hours_ms"],
                     "minimum_tenure_days": course["minimum_tenure_days"],
                     "prerequisite_course_name": course["prerequisite_course_name"],
+                    "require_no_active_adv": course["require_no_active_adv"],
                 },
                 after={
                     "minimum_rank_level": minimum_rank_level,
@@ -2796,6 +2809,7 @@ class OperationsService:
                     "minimum_tenure_days": minimum_tenure_days,
                     "require_no_active_suspension": require_no_active_suspension,
                     "prerequisite_course_name": prerequisite_course_name,
+                    "require_no_active_adv": require_no_active_adv,
                 },
                 connection=connection,
             )
