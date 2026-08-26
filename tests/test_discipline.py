@@ -5,8 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from choque.config import Branding
 from choque.errors import ConflictError
-from cogs.discipline_commands import discipline_candidates, exoneration_candidates
+from cogs.discipline_commands import (
+    build_adv_dashboard_embeds,
+    discipline_candidates,
+    exoneration_candidates,
+)
 
 from .conftest import CALL_A, DISCORD_ID, GUILD_ID
 
@@ -183,3 +188,115 @@ async def test_concurrent_warning_completion_has_one_winner(service_bundle):
     )
     assert len([result for result in results if isinstance(result, dict)]) == 1
     assert len([result for result in results if isinstance(result, ConflictError)]) == 1
+
+
+@pytest.mark.asyncio
+async def test_adv_persists_severity_duration_and_dashboard_projection(service_bundle):
+    discipline = service_bundle["discipline"]
+    clock = service_bundle["clock"]
+
+    warning = await discipline.apply_warning(
+        GUILD_ID,
+        DISCORD_ID,
+        900,
+        "GRAVISSIMA",
+        "Insubordinação em serviço",
+        duration_days=30,
+        evidence_url="https://example.com/adv-proof",
+    )
+
+    assert warning["severity"] == "GRAVISSIMA"
+    assert warning["duration_days"] == 30
+    assert warning["ends_at"] == clock.value + 30 * DAY_MS
+
+    rows = await discipline.active_warning_dashboard(GUILD_ID)
+    assert len(rows) == 1
+    assert rows[0]["mta_nick"] == "Choque_User"
+    assert rows[0]["severity"] == "GRAVISSIMA"
+    assert rows[0]["duration_days"] == 30
+    assert rows[0]["remaining_ms"] == 30 * DAY_MS
+
+
+@pytest.mark.asyncio
+async def test_adv_expiration_is_idempotent_and_keeps_history(service_bundle):
+    discipline = service_bundle["discipline"]
+    database = service_bundle["database"]
+    clock = service_bundle["clock"]
+    warning = await discipline.apply_warning(
+        GUILD_ID,
+        DISCORD_ID,
+        900,
+        "LEVE",
+        "Orientação formal com prazo",
+        duration_days=1,
+    )
+
+    clock.advance(DAY_MS + 1)
+    first, second = await asyncio.gather(
+        discipline.expire_due_warnings(GUILD_ID),
+        discipline.expire_due_warnings(GUILD_ID),
+    )
+
+    assert sorted((first, second), key=len) == [[], [int(warning["punishment_id"])]]
+    persisted = await database.fetchone(
+        "SELECT status, severity, duration_days, ends_at FROM punishments WHERE id=?",
+        (warning["punishment_id"],),
+    )
+    assert dict(persisted) == {
+        "status": "EXPIRED",
+        "severity": "LEVE",
+        "duration_days": 1,
+        "ends_at": warning["ends_at"],
+    }
+    audits = await database.fetchall(
+        "SELECT id FROM audit_logs WHERE action='WARNING_EXPIRED' AND target_id=?",
+        (DISCORD_ID,),
+    )
+    assert len(audits) == 1
+    history = await discipline.history(GUILD_ID, DISCORD_ID)
+    warning_history = [row for row in history if row["record_type"] == "WARNING"]
+    assert len(warning_history) == 1
+    assert warning_history[0]["status"] == "EXPIRED"
+
+
+@pytest.mark.asyncio
+async def test_adv_dashboard_is_paginated_and_does_not_expose_evidence(service_bundle):
+    discipline = service_bundle["discipline"]
+    members = service_bundle["members"]
+    for offset in range(6):
+        discord_id = DISCORD_ID + offset
+        if offset:
+            await members.create_or_update(
+                GUILD_ID,
+                discord_id,
+                discord_nick=f"Militar {offset}",
+                mta_nick=f"Militar_{offset}",
+                character_id=str(800 + offset),
+                unit="BGR",
+                rank_id=None,
+                actor_id=900,
+            )
+        await discipline.apply_warning(
+            GUILD_ID,
+            discord_id,
+            900,
+            "GRAVE",
+            f"Motivo disciplinar {offset}",
+            duration_days=30,
+            evidence_url=f"https://example.com/private/{offset}",
+        )
+
+    bot = SimpleNamespace(
+        config=SimpleNamespace(branding=Branding()),
+        services=SimpleNamespace(discipline=discipline),
+    )
+    embeds = await build_adv_dashboard_embeds(bot, GUILD_ID)
+
+    assert len(embeds) == 2
+    assert len(embeds[0].fields) == 5
+    assert len(embeds[1].fields) == 1
+    rendered = "\n".join(
+        str(field.value) for embed in embeds for field in embed.fields
+    )
+    assert "Gravidade:** Grave" in rendered
+    assert "example.com/private" not in rendered

@@ -12,7 +12,8 @@ from .shift_validation import closed_validation_values
 from .time_utils import utc_now_ms
 
 DAY_MS = 86_400_000
-WARNING_TYPES = ("LEVE", "MODERADA", "GRAVE", "ADMINISTRATIVA")
+WARNING_TYPES = ("LEVE", "MODERADA", "GRAVE", "GRAVISSIMA")
+LEGACY_WARNING_SEVERITY = {"ADMINISTRATIVA": "GRAVISSIMA"}
 
 
 class DisciplineService:
@@ -169,17 +170,23 @@ class DisciplineService:
         warning_type: str,
         reason: str,
         *,
+        duration_days: int | None = None,
         evidence_url: str | None = None,
         observation: str | None = None,
         occurrence_id: int | None = None,
     ) -> dict[str, object]:
-        warning_type = warning_type.strip().upper()
+        warning_type = LEGACY_WARNING_SEVERITY.get(
+            warning_type.strip().upper(), warning_type.strip().upper()
+        )
         if warning_type not in WARNING_TYPES:
-            raise ValidationError("Selecione um tipo de advertência válido.")
+            raise ValidationError("Selecione uma gravidade de ADV válida.")
+        if duration_days is not None and not 1 <= duration_days <= 3650:
+            raise ValidationError("A ADV deve durar entre 1 e 3650 dias.")
         reason = self._required(reason, "o motivo da advertência")
         evidence_url = self._optional(evidence_url)
         observation = self._optional(observation)
         now = self.clock()
+        ends_at = now + duration_days * DAY_MS if duration_days is not None else None
         async with self.database.transaction() as connection:
             member = await self._member_in_tx(connection, guild_id, discord_id)
             occurrence = None
@@ -200,8 +207,9 @@ class DisciplineService:
                 INSERT INTO punishments(
                     guild_id, member_id, discord_id, punishment_type, warning_type,
                     reason, evidence_url, observation, previous_member_status,
-                    starts_at, status, created_by, created_at
-                ) VALUES (?, ?, ?, 'WARNING', ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
+                    starts_at, ends_at, status, created_by, created_at, severity,
+                    duration_days
+                ) VALUES (?, ?, ?, 'WARNING', ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?)
                 """,
                 (
                     guild_id,
@@ -213,8 +221,11 @@ class DisciplineService:
                     observation,
                     member["status"],
                     now,
+                    ends_at,
                     actor_id,
                     now,
+                    warning_type,
+                    duration_days,
                 ),
             )
             punishment_id = int(cursor.lastrowid)
@@ -238,6 +249,9 @@ class DisciplineService:
                 after={
                     "punishment_id": punishment_id,
                     "warning_type": warning_type,
+                    "severity": warning_type,
+                    "duration_days": duration_days,
+                    "ends_at": ends_at,
                     "status": "ACTIVE",
                     "occurrence_id": occurrence_id,
                     "evidence_url": evidence_url,
@@ -250,9 +264,91 @@ class DisciplineService:
             "discord_id": discord_id,
             "type": "WARNING",
             "warning_type": warning_type,
+            "severity": warning_type,
+            "duration_days": duration_days,
+            "ends_at": ends_at,
             "status": "ACTIVE",
             "occurrence_id": occurrence_id,
         }
+
+    async def active_warning_dashboard(
+        self, guild_id: int, *, limit: int = 250
+    ) -> list[dict[str, object]]:
+        """Return the durable active-ADV projection used by Discord panels."""
+
+        now = self.clock()
+        rows = await self.database.fetchall(
+            """
+            SELECT p.*, m.mta_nick, r.name AS rank_name
+            FROM punishments p
+            JOIN members m ON m.id=p.member_id
+            LEFT JOIN ranks r ON r.id=m.rank_id
+            WHERE p.guild_id=? AND p.punishment_type='WARNING' AND p.status='ACTIVE'
+            ORDER BY
+                CASE p.severity
+                    WHEN 'GRAVISSIMA' THEN 4
+                    WHEN 'GRAVE' THEN 3
+                    WHEN 'MODERADA' THEN 2
+                    ELSE 1
+                END DESC,
+                COALESCE(p.ends_at, 9223372036854775807), p.created_at, p.id
+            LIMIT ?
+            """,
+            (guild_id, limit),
+        )
+        result: list[dict[str, object]] = []
+        for row in rows:
+            item = dict(row)
+            ends_at = item.get("ends_at")
+            item["remaining_ms"] = max(0, int(ends_at) - now) if ends_at is not None else None
+            result.append(item)
+        return result
+
+    async def expire_due_warnings(self, guild_id: int) -> list[int]:
+        """Expire due ADVs once while preserving their immutable audit history."""
+
+        now = self.clock()
+        expired: list[int] = []
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT id, discord_id, severity, ends_at, version
+                FROM punishments
+                WHERE guild_id=? AND punishment_type='WARNING' AND status='ACTIVE'
+                  AND ends_at IS NOT NULL AND ends_at<=?
+                ORDER BY ends_at, id
+                """,
+                (guild_id, now),
+            )
+            rows = await cursor.fetchall()
+            for row in rows:
+                cursor = await connection.execute(
+                    """
+                    UPDATE punishments
+                    SET status='EXPIRED', version=version+1
+                    WHERE id=? AND status='ACTIVE' AND version=?
+                    """,
+                    (row["id"], row["version"]),
+                )
+                if cursor.rowcount != 1:
+                    continue
+                punishment_id = int(row["id"])
+                expired.append(punishment_id)
+                await self.audit.record(
+                    guild_id,
+                    "WARNING_EXPIRED",
+                    actor_id=None,
+                    target_id=int(row["discord_id"]),
+                    before={
+                        "punishment_id": punishment_id,
+                        "status": "ACTIVE",
+                        "severity": row["severity"],
+                    },
+                    after={"status": "EXPIRED", "ended_at": row["ends_at"]},
+                    reason="Prazo disciplinar encerrado automaticamente.",
+                    connection=connection,
+                )
+        return expired
 
     async def apply_suspension(
         self,
@@ -518,7 +614,8 @@ class DisciplineService:
             """
             SELECT id, 'OCCURRENCE' AS record_type, status, description AS reason,
                    NULL AS warning_type, evidence_url, observation, created_by, created_at,
-                   NULL AS starts_at, NULL AS ends_at
+                   NULL AS starts_at, NULL AS ends_at, NULL AS severity,
+                   NULL AS duration_days
             FROM disciplinary_occurrences WHERE guild_id=? AND discord_id=?
             """,
             (guild_id, discord_id),
@@ -526,7 +623,8 @@ class DisciplineService:
         measures = await self.database.fetchall(
             """
             SELECT id, punishment_type AS record_type, status, reason, warning_type,
-                   evidence_url, observation, created_by, created_at, starts_at, ends_at
+                   evidence_url, observation, created_by, created_at, starts_at, ends_at,
+                   severity, duration_days
             FROM punishments WHERE guild_id=? AND discord_id=?
               AND punishment_type IN ('WARNING','SUSPENSION')
             """,

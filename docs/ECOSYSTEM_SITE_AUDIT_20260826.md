@@ -43,6 +43,15 @@ Toda evolução segue a ordem **mapear → reutilizar → corrigir → integrar 
 | Analytics | Usar consultas reais; nunca preencher a interface com demonstrações apresentadas como produção. |
 | QG 3D / Neural Core | Fases posteriores, condicionadas a telemetria real, custo medido e utilidade operacional comprovada. |
 
+## Marco local da Fase B — ADV
+
+- gravidades `LEVE`, `MODERADA`, `GRAVE` e `GRAVISSIMA` persistidas no registro disciplinar canônico;
+- prazo configurável em dias, expiração automática transacional e auditoria única por encerramento;
+- painel global paginado, sem evidência privada, com IDs de mensagens duráveis e recuperação após reinício;
+- publicação administrativa por canal configurado, sem duplicar o painel disciplinar existente;
+- gate local: 53 testes focados, 559 testes na suíte completa, Ruff, compileall, inicialização e diff verdes;
+- estado: pronto para rollout controlado, ainda sem migration ou recursos novos em produção.
+
 ## Fases de entrega
 
 ### Fase A — Recrutamento e identidade visual

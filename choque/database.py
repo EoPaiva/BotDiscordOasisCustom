@@ -4283,6 +4283,77 @@ WHERE setting_key='recruitment_public_url'
   );
 """
 
+MIGRATION_049 = """
+-- ADVs passam a possuir gravidade e prazo próprios sem substituir o ledger
+-- disciplinar existente. Registros legados continuam íntegros e recebem
+-- somente a projeção de gravidade equivalente ao tipo histórico.
+-- Alguns snapshots pré-versionados começam seu histórico após a disciplina;
+-- nesses casos a tabela ainda não existe, embora a migration floor seja
+-- legítima. Criá-la condicionalmente mantém esse caminho de restauração.
+CREATE TABLE IF NOT EXISTS punishments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    punishment_type TEXT NOT NULL CHECK (
+        punishment_type IN ('WARNING','SUSPENSION','DISMISSAL')
+    ),
+    warning_type TEXT,
+    reason TEXT NOT NULL,
+    evidence_url TEXT,
+    observation TEXT,
+    previous_member_status TEXT,
+    starts_at INTEGER NOT NULL,
+    ends_at INTEGER,
+    status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (
+        status IN ('SCHEDULED','ACTIVE','FULFILLED','REVOKED','EXPIRED')
+    ),
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    fulfilled_by INTEGER,
+    fulfilled_at INTEGER,
+    fulfilled_reason TEXT,
+    revoked_by INTEGER,
+    revoked_at INTEGER,
+    revoke_reason TEXT
+);
+ALTER TABLE punishments ADD COLUMN severity TEXT CHECK (
+    severity IS NULL OR severity IN ('LEVE','MODERADA','GRAVE','GRAVISSIMA')
+);
+ALTER TABLE punishments ADD COLUMN duration_days INTEGER CHECK (
+    duration_days IS NULL OR duration_days BETWEEN 1 AND 3650
+);
+ALTER TABLE punishments ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+
+UPDATE punishments
+SET severity = CASE warning_type
+    WHEN 'LEVE' THEN 'LEVE'
+    WHEN 'MODERADA' THEN 'MODERADA'
+    WHEN 'GRAVE' THEN 'GRAVE'
+    WHEN 'ADMINISTRATIVA' THEN 'GRAVISSIMA'
+    ELSE 'MODERADA'
+END
+WHERE punishment_type='WARNING' AND severity IS NULL;
+
+UPDATE punishments
+SET duration_days = CAST((ends_at - starts_at + 86399999) / 86400000 AS INTEGER)
+WHERE punishment_type='WARNING' AND ends_at IS NOT NULL AND duration_days IS NULL;
+
+CREATE INDEX ix_active_adv_dashboard
+ON punishments(guild_id, status, ends_at, created_at, id)
+WHERE punishment_type='WARNING';
+
+CREATE TABLE discipline_adv_panel_pages (
+    guild_id INTEGER NOT NULL,
+    page_number INTEGER NOT NULL CHECK (page_number >= 1),
+    channel_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(guild_id, page_number),
+    UNIQUE(guild_id, message_id)
+);
+"""
+
 MIGRATIONS = (
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -4332,6 +4403,7 @@ MIGRATIONS = (
     (46, MIGRATION_046),
     (47, MIGRATION_047),
     (48, MIGRATION_048),
+    (49, MIGRATION_049),
 )
 
 

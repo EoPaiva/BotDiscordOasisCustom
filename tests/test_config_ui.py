@@ -79,7 +79,7 @@ async def test_configuration_submenus_fit_discord_component_limits():
     assert len(channels.children) == 25
     assert len(CHANNEL_SETTINGS) == 25
     assert len(roles.children) == 8
-    assert len(panels.children) == 14
+    assert len(panels.children) == 15
     assert len(modules.children) == 12
     for view in (channels, roles, panels, modules):
         assert all(0 <= (item.row or 0) <= 4 for item in view.children)

@@ -1974,6 +1974,7 @@ class PanelsConfigurationView(AdminView):
             "REQUESTS": "Publicar central de solicitações",
             "CAREER": "Publicar painel de carreira",
             "DISCIPLINE": "Publicar painel de disciplina",
+            "ADV": "Publicar painel global de ADVs",
             "TRAINING": "Publicar painel de treinamentos",
             "COURSE_CATALOG": "Publicar catálogo de cursos",
             "ACTIVITY": "Publicar painel de atividade semanal",
@@ -2025,6 +2026,10 @@ class PanelsConfigurationView(AdminView):
     @discord.ui.button(label="Disciplina", emoji="⚖️", style=discord.ButtonStyle.danger)
     async def discipline(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         await self.choose_channel(interaction, "DISCIPLINE")
+
+    @discord.ui.button(label="ADVs ativas", emoji="📋", style=discord.ButtonStyle.danger)
+    async def adv(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await self.choose_channel(interaction, "ADV")
 
     @discord.ui.button(label="Treinamentos", emoji="🎓", style=discord.ButtonStyle.primary)
     async def training(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
@@ -2092,12 +2097,16 @@ async def publish_panel_to_channel(
             raise ValidationError("O módulo de carreira não está carregado.")
         message = await cog.publish_or_refresh(actor.guild, channel)
         setting_key = "career_panel_channel_id"
-    elif panel_type == "DISCIPLINE":
+    elif panel_type in {"DISCIPLINE", "ADV"}:
         cog = bot.get_cog("DisciplineCommands")
         if not cog:
             raise ValidationError("O módulo disciplinar não está carregado.")
-        message = await cog.publish_or_refresh(actor.guild, channel)
-        setting_key = "discipline_panel_channel_id"
+        if panel_type == "ADV":
+            message = await cog.publish_adv_dashboard(actor.guild, channel)
+            setting_key = "discipline_adv_channel_id"
+        else:
+            message = await cog.publish_or_refresh(actor.guild, channel)
+            setting_key = "discipline_panel_channel_id"
     elif panel_type in {"TRAINING", "COURSE_CATALOG"}:
         cog = bot.get_cog("TrainingCommands")
         if not cog:

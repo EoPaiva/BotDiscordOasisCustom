@@ -1174,3 +1174,16 @@ Fora do escopo atual: eventos, API e integração MTA.
 - Validação: 7 testes focados, 546 na suíte completa, Ruff, compileall, diff e check de inicialização.
   Rollout com backup íntegro, migration 46, health 200, um Gateway e reinício sem duplicar 8 recursos
   nem 6 mensagens persistentes.
+
+# Ecossistema CHOQUE — bloco ADV pronto localmente em 2026-08-26
+
+- O módulo disciplinar existente foi ampliado, sem criar um ledger paralelo, com quatro gravidades e
+  duração configurável para ADVs.
+- A migration 49 preserva os registros legados, adiciona versão otimista e uma projeção durável das
+  páginas do painel global.
+- Expiração automática usa compare-and-set e grava uma única auditoria; concluir ou revogar continua
+  preservando todo o histórico.
+- O painel global mostra somente ADVs ativas em páginas de cinco itens, sem expor links de evidência,
+  edita as mesmas mensagens e remove páginas excedentes da projeção sem apagar o histórico Discord.
+- Gates locais: 53 testes focados, **559 testes Python** na suíte completa, Ruff, compileall,
+  `main.py --check` e `git diff --check`. Produção ainda não foi alterada por este bloco.

@@ -77,6 +77,7 @@ class SettingsService:
         "requests_panel_channel_id": None,
         "career_panel_channel_id": None,
         "discipline_panel_channel_id": None,
+        "discipline_adv_channel_id": None,
         "training_panel_channel_id": None,
         "activity_panel_channel_id": None,
         "activity_absence_alert_destination_guild_id": None,

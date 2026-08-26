@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 from zoneinfo import ZoneInfo
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from choque.discipline import WARNING_TYPES
 from choque.embeds import branded_embed
@@ -20,6 +20,13 @@ from cogs.member_sync import sync_member_status_roles
 
 HISTORY_PAGE_SIZE = 10
 DISCIPLINE_MEMBER_PAGE_SIZE = 25
+ADV_PAGE_SIZE = 5
+ADV_SEVERITY_LABELS = {
+    "LEVE": ("🟢", "Leve"),
+    "MODERADA": ("🟡", "Moderada"),
+    "GRAVE": ("🟠", "Grave"),
+    "GRAVISSIMA": ("🔴", "Gravíssima"),
+}
 LOGGER = logging.getLogger(__name__)
 
 
@@ -93,6 +100,53 @@ def build_discipline_landing_embed(bot: ChoqueBot) -> discord.Embed:
     )
 
 
+async def build_adv_dashboard_embeds(bot: ChoqueBot, guild_id: int) -> list[discord.Embed]:
+    rows = await bot.services.discipline.active_warning_dashboard(guild_id)
+    page_count = max(1, math.ceil(len(rows) / ADV_PAGE_SIZE))
+    embeds: list[discord.Embed] = []
+    for page in range(page_count):
+        page_rows = rows[page * ADV_PAGE_SIZE : (page + 1) * ADV_PAGE_SIZE]
+        embed = branded_embed(
+            bot.config.branding,
+            title="📋 ADVs ativas • CHOQUE - BGR",
+            description=(
+                "Projeção atual das advertências disciplinares vigentes. "
+                "O histórico permanece preservado depois do encerramento."
+                if page_rows
+                else "Nenhuma ADV está ativa neste momento."
+            ),
+        )
+        for row in page_rows:
+            severity = str(row.get("severity") or row.get("warning_type") or "MODERADA")
+            icon, label = ADV_SEVERITY_LABELS.get(severity, ("⚪", severity.title()))
+            duration = row.get("duration_days")
+            ends_at = row.get("ends_at")
+            period = (
+                f"{duration} dia(s) • expira {discord_timestamp(int(ends_at), 'R')}"
+                if duration is not None and ends_at is not None
+                else "Sem prazo definido (registro legado)"
+            )
+            embed.add_field(
+                name=f"{icon} ADV #{row['id']} • <@{row['discord_id']}>",
+                value=(
+                    f"**Gravidade:** {label}\n"
+                    f"**Patente:** {row.get('rank_name') or 'Não definida'}\n"
+                    f"**Motivo:** {str(row['reason'])[:600]}\n"
+                    f"**Aplicada:** {discord_timestamp(int(row['created_at']), 'd')}\n"
+                    f"**Duração:** {period}"
+                ),
+                inline=False,
+            )
+        embed.set_footer(
+            text=(
+                f"{bot.config.branding.footer} • Página {page + 1}/{page_count} • "
+                f"{len(rows)} ADV(s) ativa(s)"
+            )
+        )
+        embeds.append(embed)
+    return embeds
+
+
 async def build_summary_embed(
     bot: ChoqueBot, guild: discord.Guild, discord_id: int
 ) -> discord.Embed:
@@ -134,7 +188,7 @@ async def build_history_embed(
         record_type = str(row["record_type"])
         subtype = f" • {row['warning_type']}" if row.get("warning_type") else ""
         period = ""
-        if record_type == "SUSPENSION":
+        if record_type in {"SUSPENSION", "WARNING"} and row.get("ends_at") is not None:
             period = (
                 f"\nPeríodo: {discord_timestamp(int(row['starts_at']), 'd')} → "
                 f"{discord_timestamp(int(row['ends_at']), 'd')}"
@@ -619,6 +673,9 @@ class WarningTypeView(AdminView):
 
 
 class WarningModal(ErrorModal, title="Dados da advertência"):
+    duration = discord.ui.TextInput(
+        label="Duração em dias", placeholder="30", min_length=1, max_length=4
+    )
     reason = discord.ui.TextInput(
         label="Motivo", style=discord.TextStyle.paragraph, min_length=3, max_length=1000
     )
@@ -635,6 +692,10 @@ class WarningModal(ErrorModal, title="Dados da advertência"):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         actor = await require_admin(interaction)
+        duration_text = str(self.duration).strip()
+        if not duration_text.isdigit() or not 1 <= int(duration_text) <= 3650:
+            raise ValidationError("A duração da ADV deve ficar entre 1 e 3650 dias.")
+        duration_days = int(duration_text)
         target = actor.guild.get_member(self.target_id)
         if not target:
             raise NotFoundError("O membro não está mais no servidor.")
@@ -642,7 +703,8 @@ class WarningModal(ErrorModal, title="Dados da advertência"):
             get_bot(interaction).config.branding,
             title="⚠️ Confirmar advertência",
             description=(
-                f"**Membro:** {target.mention}\n**Tipo:** {self.warning_type}\n"
+                f"**Membro:** {target.mention}\n**Gravidade:** {self.warning_type}\n"
+                f"**Duração:** {duration_days} dia(s)\n"
                 f"**Motivo:** {self.reason}\n**Evidência:** {self.evidence or '—'}\n\n"
                 "A medida só será gravada após a confirmação."
             ),
@@ -653,6 +715,7 @@ class WarningModal(ErrorModal, title="Dados da advertência"):
                 actor.id,
                 target.id,
                 self.warning_type,
+                duration_days,
                 str(self.reason),
                 str(self.evidence),
                 str(self.observation),
@@ -668,6 +731,7 @@ class WarningConfirmationView(AdminView):
         owner_id: int,
         target_id: int,
         warning_type: str,
+        duration_days: int,
         reason: str,
         evidence: str,
         observation: str,
@@ -677,6 +741,7 @@ class WarningConfirmationView(AdminView):
         self.owner_id = owner_id
         self.target_id = target_id
         self.warning_type = warning_type
+        self.duration_days = duration_days
         self.reason = reason
         self.evidence = evidence
         self.observation = observation
@@ -699,6 +764,7 @@ class WarningConfirmationView(AdminView):
             actor.id,
             self.warning_type,
             self.reason,
+            duration_days=self.duration_days,
             evidence_url=self.evidence,
             observation=self.observation,
             occurrence_id=self.occurrence_id,
@@ -707,8 +773,8 @@ class WarningConfirmationView(AdminView):
         if target:
             try:
                 await target.send(
-                    f"Você recebeu uma advertência **{self.warning_type}** no CHOQUE - BGR. "
-                    f"Motivo: {self.reason}"
+                    f"Você recebeu uma ADV **{self.warning_type}** com duração de "
+                    f"**{self.duration_days} dia(s)** no CHOQUE - BGR. Motivo: {self.reason}"
                 )
             except discord.Forbidden:
                 pass
@@ -717,6 +783,9 @@ class WarningConfirmationView(AdminView):
             embed=None,
             view=None,
         )
+        cog = get_bot(interaction).get_cog("DisciplineCommands")
+        if isinstance(cog, DisciplineCommands):
+            await cog.refresh_adv_dashboard(actor.guild)
 
     @discord.ui.button(label="Cancelar", emoji="✖️", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
@@ -1029,6 +1098,9 @@ class MeasureDecisionModal(ErrorModal, title="Decidir medida disciplinar"):
         await interaction.response.send_message(
             f"✅ Medida **#{self.punishment_id}** marcada como {label}.", ephemeral=True
         )
+        cog = bot.get_cog("DisciplineCommands")
+        if isinstance(cog, DisciplineCommands):
+            await cog.refresh_adv_dashboard(actor.guild)
 
 
 class DisciplineCommands(commands.Cog):
@@ -1036,8 +1108,117 @@ class DisciplineCommands(commands.Cog):
         self.bot = cast("ChoqueBot", bot)
         self.services = self.bot.services
         self._panel_lock = asyncio.Lock()
+        self._adv_panel_lock = asyncio.Lock()
         self._dismissed_reconciled: set[int] = set()
         self.bot.add_view(DisciplinePanelView())
+        if not self.bot.check_mode:
+            self.expire_adv_warnings.start()
+
+    def cog_unload(self) -> None:
+        self.expire_adv_warnings.cancel()
+
+    async def publish_adv_dashboard(
+        self, guild: discord.Guild, channel: discord.TextChannel
+    ) -> discord.Message:
+        embeds = await build_adv_dashboard_embeds(self.bot, guild.id)
+        async with self._adv_panel_lock:
+            stored = await self.services.database.fetchall(
+                """
+                SELECT page_number, channel_id, message_id
+                FROM discipline_adv_panel_pages WHERE guild_id=? ORDER BY page_number
+                """,
+                (guild.id,),
+            )
+            by_page = {int(row["page_number"]): row for row in stored}
+            messages: list[discord.Message] = []
+            for page_number, embed in enumerate(embeds, start=1):
+                row = by_page.get(page_number)
+                message = None
+                if row and int(row["channel_id"]) == channel.id:
+                    try:
+                        message = await channel.fetch_message(int(row["message_id"]))
+                        await message.edit(embed=embed, view=None)
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        message = None
+                elif row:
+                    old_channel = guild.get_channel(int(row["channel_id"]))
+                    if isinstance(old_channel, discord.TextChannel):
+                        try:
+                            old_message = await old_channel.fetch_message(int(row["message_id"]))
+                            await old_message.edit(
+                                embed=branded_embed(
+                                    self.bot.config.branding,
+                                    title="📋 Painel de ADVs transferido",
+                                    description=f"Consulte o painel atual em {channel.mention}.",
+                                ),
+                                view=None,
+                            )
+                        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                            pass
+                if message is None:
+                    message = await channel.send(embed=embed)
+                messages.append(message)
+                await self.services.database.execute(
+                    """
+                    INSERT INTO discipline_adv_panel_pages(
+                        guild_id, page_number, channel_id, message_id, updated_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(guild_id, page_number) DO UPDATE SET
+                        channel_id=excluded.channel_id,
+                        message_id=excluded.message_id,
+                        updated_at=excluded.updated_at
+                    """,
+                    (guild.id, page_number, channel.id, message.id, self.services.discipline.clock()),
+                )
+            for row in stored[len(embeds) :]:
+                old_channel = guild.get_channel(int(row["channel_id"]))
+                if isinstance(old_channel, discord.TextChannel):
+                    try:
+                        old_message = await old_channel.fetch_message(int(row["message_id"]))
+                        await old_message.edit(
+                            embed=branded_embed(
+                                self.bot.config.branding,
+                                title="📋 Página de ADV encerrada",
+                                description="Esta página não é mais necessária. Consulte o painel ativo.",
+                            ),
+                            view=None,
+                        )
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        pass
+                await self.services.database.execute(
+                    "DELETE FROM discipline_adv_panel_pages WHERE guild_id=? AND page_number=?",
+                    (guild.id, int(row["page_number"])),
+                )
+            await self.services.settings.upsert_panel(
+                guild.id, "ADV", channel.id, messages[0].id
+            )
+            if not messages[0].pinned:
+                try:
+                    await messages[0].pin(reason="Painel global de ADVs ativas")
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
+            return messages[0]
+
+    async def refresh_adv_dashboard(self, guild: discord.Guild) -> discord.Message | None:
+        channel_id = await self.services.settings.get(guild.id, "discipline_adv_channel_id")
+        channel = guild.get_channel(int(channel_id)) if channel_id else None
+        if not isinstance(channel, discord.TextChannel):
+            return None
+        return await self.publish_adv_dashboard(guild, channel)
+
+    @tasks.loop(seconds=60)
+    async def expire_adv_warnings(self) -> None:
+        for guild in self.bot.guilds:
+            try:
+                expired = await self.services.discipline.expire_due_warnings(guild.id)
+                if expired:
+                    await self.refresh_adv_dashboard(guild)
+            except Exception:
+                LOGGER.exception("Falha ao expirar ADVs da guild %s", guild.id)
+
+    @expire_adv_warnings.before_loop
+    async def before_expire_adv_warnings(self) -> None:
+        await self.bot.wait_until_ready()
 
     async def _reconcile_dismissed_members(self, guild: discord.Guild) -> None:
         if guild.id in self._dismissed_reconciled:
@@ -1130,12 +1311,15 @@ class DisciplineCommands(commands.Cog):
                 )
             channel_id = await self.services.settings.get(guild.id, "discipline_panel_channel_id")
             channel = guild.get_channel(int(channel_id)) if channel_id else None
-            if not isinstance(channel, discord.TextChannel):
-                continue
+            if isinstance(channel, discord.TextChannel):
+                try:
+                    await self.publish_or_refresh(guild, channel)
+                except discord.DiscordException:
+                    pass
             try:
-                await self.publish_or_refresh(guild, channel)
-            except discord.DiscordException:
-                pass
+                await self.refresh_adv_dashboard(guild)
+            except Exception:
+                LOGGER.exception("Falha ao restaurar o painel global de ADVs da guild %s", guild.id)
 
 
 async def setup(bot: commands.Bot) -> None:

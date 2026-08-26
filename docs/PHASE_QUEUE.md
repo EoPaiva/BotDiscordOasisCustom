@@ -767,7 +767,10 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     técnicas estão em `docs/ECOSYSTEM_SITE_AUDIT_20260826.md`. Os blocos restantes avançam por
     dependência após a fase visual ativa, começando por ADV/cursos, sincronização/transferências e
     analytics factuais. Dados simulados apresentados como produção, IA decisora e sistemas paralelos
-    continuam proibidos.
+    continuam proibidos. O primeiro bloco, **ADV**, está concluído localmente sobre o ledger disciplinar
+    canônico: quatro gravidades, prazo configurável, expiração idempotente, histórico/auditoria e painel
+    global paginado recuperável. Gate local: 53 testes focados e 559 testes da suíte completa, com Ruff,
+    compileall, `main.py --check` e `git diff --check` verdes. Ainda não foi publicado em produção.
 
 57. 🔄 **Prompt Master — Reformulação Completa do Site CHOQUE — fase visual ativa.**
     Fonte integral: `C:\Users\mpaii\.codex\attachments\89ef54de-2878-4b01-8ba7-9c600f45a3ad\pasted-text.txt`,
