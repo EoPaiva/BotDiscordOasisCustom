@@ -1220,3 +1220,14 @@ Fora do escopo atual: eventos, API e integração MTA.
 - TDD: `2ca8770` registra o contrato RED e `20d4153` entrega o GREEN.
 - Gates locais: 3 testes focados, **58 testes web**, typecheck, ESLint e build Next.js. Nenhuma ação
   de produção foi executada.
+
+# Site CHOQUE — timestamp factual do dashboard pronto localmente em 2026-08-26
+
+- O cabeçalho do Centro de Comando deixou de usar o relógio do render para rotular a situação. A
+  apresentação agora usa `generated_at`, já fornecido pela API, mantendo origem temporal coerente
+  com patrulhas, fila e demais métricas do mesmo snapshot.
+- O instante é exposto por `<time dateTime="...">`, com texto em `pt-BR`/`America/Sao_Paulo`, sem
+  polling adicional, dado simulado ou mudança de contrato.
+- TDD: `5e36506` registra o contrato RED e `098fea0` entrega o GREEN.
+- Gate consolidado do portal: 4 testes focados, **59 testes web**, `npm audit` sem vulnerabilidades,
+  typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.

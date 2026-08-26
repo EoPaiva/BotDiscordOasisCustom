@@ -800,8 +800,10 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     alterar contratos, URLs, RBAC ou regras de negócio existentes. O primeiro corte local do Centro
     de Comando tornou o drawer móvel modal e acessível: estado expandido explícito, foco contido,
     fechamento por `Escape` e retorno do foco ao acionador. TDD preservado nos commits `2ca8770`
-    (RED) e `20d4153` (GREEN); 3 testes focados, 58 testes web, typecheck, lint e build passaram. O
-    corte permanece somente local e não foi publicado.
+    (RED) e `20d4153` (GREEN). O segundo corte fez o cabeçalho do dashboard mostrar o timestamp do
+    snapshot real da API em `<time>`, sem usar o relógio do render; `5e36506` preserva o RED e
+    `098fea0` entrega o GREEN. Gate consolidado: 4 testes focados, 59 testes web, `npm audit` sem
+    vulnerabilidades, typecheck, lint e build. Os cortes permanecem somente locais e não publicados.
 
 58. ⏳ **Prompt Master — Identidade Visual / Design System CHOQUE — registrado na fila.**
     Fonte recebida: `C:\Users\mpaii\.codex\attachments\8f7db861-0f81-4655-a0fc-b3fc90133b12\pasted-text.txt`,

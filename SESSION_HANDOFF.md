@@ -5,12 +5,12 @@
 
 ## Handoff
 
-**Última atualização:** 2026-08-26 13:38 -03:00
+**Última atualização:** 2026-08-26 15:43 -03:00
 
 **Branch atual:** `codex/phase-b-transfers`
 
 **Último commit funcional:**
-`20d4153` — `fix: make command drawer keyboard accessible`
+`098fea0` — `fix: show factual dashboard snapshot time`
 
 **Commit do protocolo:** este arquivo pertence ao commit de documentação imediatamente posterior;
 confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferência impossível.
@@ -40,10 +40,10 @@ Centro de Comando está concluído e não há código parcial neste computador.
 
 ### Última ação concluída
 
-O protocolo de continuidade foi instalado na raiz. Depois, a Fase 57 avançou no menu móvel do Centro
-de Comando: `2ca8770` preserva o teste RED e `20d4153` implementa drawer modal, `aria-expanded`, foco
-inicial/contido, fechamento por `Escape` e retorno do foco ao acionador. Nenhum contrato, URL, RBAC,
-API ou regra de negócio foi alterado.
+O protocolo de continuidade foi instalado na raiz. Depois, a Fase 57 avançou em dois cortes do
+Centro de Comando: `2ca8770`/`20d4153` entregam o drawer móvel acessível;
+`5e36506`/`098fea0` fazem o cabeçalho usar o `generated_at` real da API em um elemento `<time>`, em
+vez do relógio do render. Nenhum contrato, URL, RBAC, API ou regra de negócio foi alterado.
 
 ### Ação em andamento
 
@@ -158,9 +158,10 @@ antes de qualquer rollout.
 
 ### Gate do corte local da Fase 57
 
-- 3 testes focados de `app-shell` passaram.
-- 58 testes Web passaram.
+- 3 testes focados de `app-shell` e 1 teste focado de dashboard passaram.
+- 59 testes Web passaram.
 - Typecheck, ESLint e build Next.js passaram.
+- `npm audit` encontrou 0 vulnerabilidades.
 - `git diff --check` passou antes dos commits.
 
 ### Validação deste checkpoint documental
@@ -207,9 +208,9 @@ npm run build
 
 - [ ] Com gates verdes e autorização nova, executar merge/push/deploy controlado, validar health,
   migration, Gateway único, duas decisões, outbox e rollback.
-- [ ] Continuar a Fase 57 em outro corte local: abrir
-  `web/src/app/(command)/dashboard/page.tsx`, inventariar a apresentação atual contra o contrato
-  tático e escrever primeiro um teste focado para a menor melhoria acessível, sem dados simulados.
+- [ ] Continuar a Fase 57 em outro corte local: abrir `MetricStrip` em
+  `web/src/components/ui.tsx` e seu teste em `web/src/components/ui.test.tsx`; escrever primeiro um
+  teste focado para expor métricas como pares semânticos de termo/valor, preservando CSS e conteúdo.
 - [ ] Consolidar a Fase 58, Design System, sem inventar o trecho ausente do prompt original.
 - [ ] Continuar os blocos restantes do Prompt Master do ecossistema pela ordem da fila oficial.
 
@@ -235,8 +236,11 @@ o rollout depende de gates verdes e de um novo “pode publicar” explícito.
   `9a71063`, `0c3a989`, `305888c`, `fab9bbb`, `447ce5e`.
 - A branch estava limpa antes da criação destes três documentos.
 - Nenhuma variável local foi lida, impressa ou copiada.
-- O protocolo e o corte da Fase 57 acrescentaram `4a5faba`, `2ca8770` e `20d4153`; confirmar o hash
-  do commit documental final com `git log -1 --oneline`.
+- O protocolo e os cortes da Fase 57 acrescentaram `4a5faba`, `2ca8770`, `20d4153`, `5e36506` e
+  `098fea0`; confirmar o hash do commit documental final com `git log -1 --oneline`.
+- Um cache antigo de build foi movido para `web/.next-stale-20260826-1542`. A exclusão autorizada
+  removeu seu conteúdo comum, mas o Windows/OneDrive reteve cinco diretórios vazios/reparse por ACL;
+  eles não aparecem no Git e não afetam build. Não alterar ACL do workspace para removê-los.
 
 ## 12. Não fazer
 
