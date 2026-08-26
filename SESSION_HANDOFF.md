@@ -3,14 +3,46 @@
 > Checkpoint operacional atual. O código e o estado real do repositório prevalecem.
 > Estado estrutural permanente: `PROJECT_STATE.md`.
 
+## 0. Checkpoint emergencial mais recente — Controle de Tags
+
+Esta seção supersede temporariamente a missão e a próxima ação antigas abaixo. O proprietário pediu
+pausa imediata para trocar de computador; por isso o corte foi fechado em commits locais, sem push,
+merge, deploy ou Discord real.
+
+**Branch:** `codex/phase-b-transfers`
+
+**Commits do corte:**
+
+- `8757005` — `test: define waiting-role tag control` (contratos RED);
+- `c29a726` — `feat: automate waiting-role tag control` (implementação GREEN).
+
+**Concluído localmente:** migration 53; detecção periódica e por `on_member_update` do cargo
+configurado `AGUARDANDO SET`; DM persistente e idempotente com respostas positiva/negativa;
+encaminhamento à ficha única da Central; fallback para contato manual quando a DM é proibida;
+assunção concorrente; aviso durável do responsável; finalização direta pelo responsável; cargos por
+outbox; auditoria; arquivamento ao sair do servidor; e entrada `🏷️ Tags` na Central Administrativa.
+
+**Validação concluída:** 85 testes focados verdes; Ruff do recorte verde; compileall verde;
+`main.py --check` verde com migration 53, 20 cogs, 46 comandos internos e 34 views persistentes;
+`git diff --check` verde. A suíte Python completa foi interrompida, sem falha observada, quando havia
+passado aproximadamente 51%, porque o proprietário pediu a pausa.
+
+**Próxima ação exata:** no novo computador, confirmar `git status --short --branch` e os dois commits
+acima. Depois revisar somente o diff `8757005..c29a726`, executar `pytest -q` completo e o scanner de
+segredos. Verificar especialmente o caso de cargo `TAG SETADA` adicionado fora do fluxo e se a lista
+administrativa deve incluir também quem ainda não respondeu à DM. Se os gates ficarem verdes,
+preservar o prompt original em `docs/source-prompts/`, atualizar ledger/fila/relatório e criar o
+commit documental. Não tocar produção; rollout continua dependendo da auditoria na máquina
+principal, banco em cópia e autorização nova.
+
 ## Handoff
 
-**Última atualização:** 2026-08-26 17:05 -03:00
+**Última atualização:** 2026-08-26 17:31 -03:00
 
 **Branch atual:** `codex/phase-b-transfers`
 
 **Último commit funcional:**
-`1526e03` — `feat: add durable dismissal records`
+`c29a726` — `feat: automate waiting-role tag control`
 
 **Commit do protocolo:** este arquivo pertence ao commit de documentação imediatamente posterior;
 confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferência impossível.

@@ -17,7 +17,7 @@ continuam humanas; toda mutação relevante é autorizada no backend, persistida
 sincronizada com o Discord de forma recuperável.
 
 **Status geral:** sistema amplo já operado em produção, com evolução local incremental. O código
-local possui migrations até a versão 52. O último estado de produção registrado na documentação do
+local possui migrations até a versão 53. O último estado de produção registrado na documentação do
 repositório é a migration 46; isso não foi revalidado ao vivo nesta inicialização.
 
 ## 2. Stack
@@ -183,7 +183,8 @@ handoff.
 
 ## 8. Sistemas e módulos
 
-- **Identidade e efetivo:** cadastro, patentes, cargos, apelidos, sincronização e Portaria.
+- **Identidade e efetivo:** cadastro, patentes, cargos, apelidos, sincronização, Portaria e controle
+  proativo de membros com `AGUARDANDO SET` pela Central de Tags canônica.
 - **Ponto e operações:** sessões de voz, segmentos, viaturas, patrulhas e PTR.
 - **Solicitações, carreira e disciplina:** fluxos humanos, histórico, recuperação e boletim durável
   de desligamento com motivo público fechado pelo perfil canônico do responsável.
