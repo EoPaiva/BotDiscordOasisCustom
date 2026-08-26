@@ -1291,3 +1291,13 @@ Fora do escopo atual: eventos, API e integração MTA.
 - TDD: `d6fd37c` registra o contrato RED e `93bc047` entrega o GREEN.
 - Gate consolidado do portal: 13 testes focados, **65 testes web em 17 arquivos**, `npm audit` sem
   vulnerabilidades, typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
+
+# Site CHOQUE — painel de decisão associado pronto localmente em 2026-08-26
+
+- Cada botão da caixa administrativa agora expõe `aria-controls` para o painel de decisão; o painel
+  recebe nome acessível pelo título ativo com `aria-labelledby`.
+- `useId()` mantém os identificadores únicos por instância. Troca de seleção, título, formulário,
+  decisões, dados e aparência foram preservados.
+- TDD: `2d1f744` registra o contrato RED e `e351128` entrega o GREEN.
+- Gate consolidado do portal: 13 testes focados, **65 testes web em 17 arquivos**, `npm audit` sem
+  vulnerabilidades, typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.

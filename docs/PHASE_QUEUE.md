@@ -816,8 +816,10 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     testes focados, 64 testes web, `npm audit` sem vulnerabilidades, typecheck, lint e build. O oitavo
     corte substituiu `listbox/option` sem navegação própria por `<ul>/<li>` e botões nativos na caixa
     administrativa, preservando seleção e decisão; `d6fd37c` registra o RED e `93bc047` entrega o
-    GREEN. Gate atual: 13 testes focados, 65 testes web em 17 arquivos, audit, typecheck, lint e build.
-    Os cortes permanecem somente locais e não publicados.
+    GREEN. O nono corte associa todos os seletores ao painel de decisão nomeado por IDs únicos e
+    `aria-controls`/`aria-labelledby`; `2d1f744` registra o RED e `e351128` entrega o GREEN. Gate
+    atual: 13 testes focados, 65 testes web em 17 arquivos, audit, typecheck, lint e build. Os cortes
+    permanecem somente locais e não publicados.
 
 58. ⏳ **Prompt Master — Identidade Visual / Design System CHOQUE — registrado na fila.**
     Fonte recebida: `C:\Users\mpaii\.codex\attachments\8f7db861-0f81-4655-a0fc-b3fc90133b12\pasted-text.txt`,
