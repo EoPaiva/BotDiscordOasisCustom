@@ -87,6 +87,7 @@ describe("command dashboard snapshot", () => {
     expect(inbox.tagName).toBe("UL");
     expect(within(inbox).getAllByRole("listitem")).toHaveLength(1);
     expect(within(inbox).getByRole("link", { name: /TRF-003/ })).toHaveAttribute("href", "/inbox");
+    expect(inbox.querySelector("time")).toHaveAttribute("dateTime", "2026-08-26T15:30:00.000Z");
   });
 
   it("exposes the change briefing as a semantic list", async () => {
