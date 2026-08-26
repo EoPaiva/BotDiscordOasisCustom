@@ -12,7 +12,12 @@ from choque.dismissals import (
     HIGH_COMMAND_DISMISSAL_REASON,
     STANDARD_DISMISSAL_REASON,
 )
-from choque.models import AdministrativeRequestType, PunishmentType, RbacProfile
+from choque.models import (
+    AdministrativeRequestType,
+    MemberStatus,
+    PunishmentType,
+    RbacProfile,
+)
 from choque.settings import SettingsService
 from cogs.career_commands import CareerCommands
 from scripts.remodel_discord_layout import CHANNEL_BY_KEY
@@ -123,6 +128,28 @@ async def test_approved_dismissal_request_uses_standard_reason(service_bundle) -
     assert payload["public_reason"] == STANDARD_DISMISSAL_REASON
     assert payload["source"] == "ADMINISTRATIVE_REQUEST"
     assert "privada" not in notification["payload_json"]
+
+
+@pytest.mark.asyncio
+async def test_direct_member_status_dismissal_also_enqueues_public_record(
+    service_bundle,
+) -> None:
+    await service_bundle["members"].change_status(
+        GUILD_ID,
+        DISCORD_ID,
+        MemberStatus.DISMISSED,
+        actor_id=999,
+        reason="Motivo interno do ajuste direto",
+    )
+
+    notifications = await service_bundle["database"].fetchall(
+        "SELECT * FROM career_notifications WHERE notification_type='DISMISSAL'"
+    )
+    assert len(notifications) == 1
+    payload = json.loads(notifications[0]["payload_json"])
+    assert payload["source"] == "DIRECT_STATUS_CHANGE"
+    assert payload["public_reason"] == STANDARD_DISMISSAL_REASON
+    assert "Motivo interno" not in notifications[0]["payload_json"]
 
 
 def test_dismissal_embed_is_formal_and_uses_recorded_timestamp() -> None:
