@@ -609,19 +609,33 @@ def test_command_center_access_matrix_is_server_authoritative(api_client) -> Non
     assert outsider.status_code == 403
     assert "member" not in outsider.text.lower()
 
-    # A regular member and a non-command role cannot disclose data through direct URLs
-    # nor mutate a member by calling the API directly.
-    for discord_id in (MEMBER_DISCORD_ID, INSTRUCTOR_DISCORD_ID):
-        assert client.get("/v1/me", headers=_headers(discord_id)).status_code == 403
-        assert client.get("/v1/members", headers=_headers(discord_id)).status_code == 403
-        assert (
-            client.post(
-                f"/v1/members/{MEMBER_DISCORD_ID}/rank",
-                headers=_headers(discord_id),
-                json={"target_rank_id": 1, "action": "PROMOTION", "reason": "Forjado"},
-            ).status_code
-            == 403
-        )
+    # Um membro comum não entra no Centro de Comando nem força mutações por URL direta.
+    assert client.get("/v1/me", headers=_headers(MEMBER_DISCORD_ID)).status_code == 403
+    assert client.get("/v1/members", headers=_headers(MEMBER_DISCORD_ID)).status_code == 403
+    assert (
+        client.post(
+            f"/v1/members/{MEMBER_DISCORD_ID}/rank",
+            headers=_headers(MEMBER_DISCORD_ID),
+            json={"target_rank_id": 1, "action": "PROMOTION", "reason": "Forjado"},
+        ).status_code
+        == 403
+    )
+
+    # O instrutor entra somente pelo escopo administrativo de recrutamento.
+    instructor_headers = _headers(INSTRUCTOR_DISCORD_ID)
+    assert client.get("/v1/me", headers=instructor_headers).status_code == 200
+    assert client.get(
+        "/v1/admin/recruitment/applications", headers=instructor_headers
+    ).status_code == 200
+    assert client.get("/v1/members", headers=instructor_headers).status_code == 403
+    assert (
+        client.post(
+            f"/v1/members/{MEMBER_DISCORD_ID}/rank",
+            headers=instructor_headers,
+            json={"target_rank_id": 1, "action": "PROMOTION", "reason": "Forjado"},
+        ).status_code
+        == 403
+    )
 
     # An active command member is admitted by the backend, not by the client navigation.
     assert client.get("/v1/me", headers=_headers(ADMIN_DISCORD_ID)).status_code == 200
@@ -1086,7 +1100,7 @@ def test_candidate_cannot_read_another_candidate_and_instructor_cannot_approve(
             "candidate_message": "Mensagem de teste",
         },
     )
-    assert visible.status_code == 403
+    assert visible.status_code == 200
     assert approve.status_code == 403
 
 

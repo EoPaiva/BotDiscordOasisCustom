@@ -17,7 +17,7 @@ LOGGER = logging.getLogger(__name__)
 SIGNATURE_VERSION = "choque-v1"
 NONCE_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{16,128}$")
 COMMAND_CENTER_PROFILES = frozenset({"COMANDO", "ALTO_COMANDO", "ADMINISTRADOR"})
-COMMAND_CENTER_ENTRY_PERMISSIONS = frozenset({"officer.review"})
+COMMAND_CENTER_ENTRY_PERMISSIONS = frozenset({"officer.review", "recruitment.view"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +148,7 @@ async def authenticate_request(
         await _record_access(request, guild_id, discord_id, "AUTH", "DENIED")
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Centro de Comando restrito ao Comando e Alto Comando.",
+            "Centro de Comando restrito ao Comando ou função administrativa autorizada.",
         )
     permissions = frozenset({"*"}) if technical_bootstrap else access.permissions
     profile = "ADMINISTRADOR" if technical_bootstrap else access.profile
