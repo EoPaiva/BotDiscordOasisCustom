@@ -57,12 +57,14 @@ async def test_transfer_submission_creates_stable_protocol_and_append_only_timel
 
     case = await tickets.transfer_case_for_ticket(GUILD_ID, ticket_id)
     history = await tickets.transfer_history(GUILD_ID, ticket_id)
+    mine = await tickets.mine(GUILD_ID, REQUESTER_ID)
 
     assert case["protocol"] == f"TRF-{GUILD_ID}-{ticket_id:06d}"
     assert case["status"] == "PENDING"
     assert case["requester_id"] == REQUESTER_ID
     assert json.loads(case["request_snapshot_json"]) == transfer_payload()
     assert [row["event_type"] for row in history] == ["SUBMITTED"]
+    assert mine[0]["transfer_protocol"] == case["protocol"]
 
     audit = await database.fetchone(
         """
