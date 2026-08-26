@@ -55,21 +55,23 @@ export default async function DashboardPage() {
       <div className="dashboard-grid">
         <section className="command-section patrol-sector">
           <SectionHeader index="02" title="Patrulhas em andamento" meta={`${data.patrols.length} operações ativas`} />
-          {data.patrols.length ? <div className="patrol-list">
+          {data.patrols.length ? <ul aria-label="Patrulhas em andamento" className="patrol-list">
             {data.patrols.map((patrol) => (
-              <article className="patrol-record" key={String(patrol.id)}>
-                <div className="patrol-code"><span>PTR</span><strong>{String(patrol.sequence_number ?? patrol.id).padStart(3, "0")}</strong></div>
-                <div className="patrol-body">
-                  <header><Status value={patrol.status} /><code>{String(patrol.voice_channel_name ?? `CALL ${String(patrol.voice_channel_id)}`)}</code></header>
-                  <div className="patrol-members">
-                    {String(patrol.member_names ?? "").split(" | ").filter(Boolean).map((name, index) => <span key={`${name}-${index}`}>EFETIVO <strong>{name}</strong></span>)}
-                    {!patrol.member_names && memberIds(patrol.member_ids).map((id) => <span key={id}>{id === String(patrol.commander_discord_id ?? "") ? "COMANDANTE" : "EFETIVO"} <strong>{id}</strong></span>)}
+              <li key={String(patrol.id)}>
+                <article className="patrol-record">
+                  <div className="patrol-code"><span>PTR</span><strong>{String(patrol.sequence_number ?? patrol.id).padStart(3, "0")}</strong></div>
+                  <div className="patrol-body">
+                    <header><Status value={patrol.status} /><code>{String(patrol.voice_channel_name ?? `CALL ${String(patrol.voice_channel_id)}`)}</code></header>
+                    <div className="patrol-members">
+                      {String(patrol.member_names ?? "").split(" | ").filter(Boolean).map((name, index) => <span key={`${name}-${index}`}>EFETIVO <strong>{name}</strong></span>)}
+                      {!patrol.member_names && memberIds(patrol.member_ids).map((id) => <span key={id}>{id === String(patrol.commander_discord_id ?? "") ? "COMANDANTE" : "EFETIVO"} <strong>{id}</strong></span>)}
+                    </div>
                   </div>
-                </div>
-                <div className="patrol-time"><Radio size={15} aria-hidden="true" /><strong>{duration(data.generated_at - Number(patrol.started_at ?? data.generated_at))}</strong><span>{String(patrol.member_count ?? 0)} militares</span></div>
-              </article>
+                  <div className="patrol-time"><Radio size={15} aria-hidden="true" /><strong>{duration(data.generated_at - Number(patrol.started_at ?? data.generated_at))}</strong><span>{String(patrol.member_count ?? 0)} militares</span></div>
+                </article>
+              </li>
             ))}
-          </div> : <EmptyState title="Nenhuma patrulha ativa" detail="As calls de patrulhamento permanecem disponíveis." />}
+          </ul> : <EmptyState title="Nenhuma patrulha ativa" detail="As calls de patrulhamento permanecem disponíveis." />}
           <Link className="text-link" href="/patrols">Abrir central de patrulhas <ArrowRight size={15} /></Link>
         </section>
 

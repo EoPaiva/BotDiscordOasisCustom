@@ -105,7 +105,7 @@ code { font-family: var(--font-mono), monospace; }
 .section-header h2 { margin: 0; font: 600 18px var(--font-title); letter-spacing: .055em; text-transform: uppercase; }
 .section-header p { margin: 0; color: var(--text-dim); font-size: 12px; }
 
-.patrol-list { display: grid; }
+.patrol-list { display: grid; margin: 0; padding: 0; list-style: none; }
 .patrol-record { display: grid; grid-template-columns: 72px minmax(0,1fr) 126px; min-height: 105px; border-bottom: 1px solid var(--line); }
 .patrol-code { display: grid; place-content: center; border-right: 1px solid var(--line); text-align: center; }
 .patrol-code span { color: var(--text-dim); font: 500 9px var(--font-mono); }
