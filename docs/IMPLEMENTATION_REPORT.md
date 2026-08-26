@@ -1251,3 +1251,13 @@ Fora do escopo atual: eventos, API e integração MTA.
 - TDD: `03b2bd6` registra o contrato RED e `ff86f4e` entrega o GREEN.
 - Gate consolidado do portal: 9 testes focados, **61 testes web**, typecheck, ESLint e build Next.js.
   Nenhuma ação de produção foi executada.
+
+# Site CHOQUE — pendências administrativas semânticas prontas localmente em 2026-08-26
+
+- As pendências administrativas recentes do dashboard agora usam `<ul>` com nome acessível e um
+  `<li>` por item. A coleção fica explícita para tecnologias assistivas quando `view_inbox` está ativo.
+- Links para `/inbox`, protocolos, status, datas, ordem, dados e visual existentes foram preservados;
+  o CSS apenas neutraliza estilos nativos da lista e mantém os seletores visuais equivalentes.
+- TDD: `b52379c` registra o contrato RED e `d0681c6` entrega o GREEN.
+- Gate consolidado do portal: 10 testes focados, **62 testes web**, `npm audit` sem vulnerabilidades,
+  typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
