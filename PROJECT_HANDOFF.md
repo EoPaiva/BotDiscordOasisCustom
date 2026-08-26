@@ -2183,3 +2183,17 @@ Programa Web. Tudo continua na ordem de
 - `scripts/publish_system_updates.py` é idempotente: localiza canal e mensagem pela identidade
   estável, edita em vez de duplicar, bloqueia menções e valida categoria, pin e permissões após a
   publicação. A segunda execução ao vivo reutilizou ambos com sucesso.
+
+# Unidades Especiais — concluído em 2026-08-26
+
+- Migration 46 e `SpecialUnitService` entregam candidaturas, vínculo único, níveis Integrante/
+  Auxiliar/Comando, transferência/saída, timeline e CAS sem duplicar identidade ou patente.
+- ROCAM, TÁTICO, ELITE e CORREGEDORIA possuem cargos correspondentes nos dois servidores. O principal
+  mantém uma categoria e uma central privada por unidade; o REC mantém somente candidatura e mesa.
+- Aprovação sincroniza os dois servidores pela outbox. Patente superior é preservada; patente abaixo
+  do piso sobe para Cabo pelo registro canônico de pessoal e gera notificação de carreira.
+- Tags e Cursos apontam para os sistemas oficiais. Administração e decisões são validadas no backend,
+  com autoavaliação bloqueada, motivo obrigatório e cargos funcionais sem permissões globais.
+- Gates: 546/546 testes, Ruff, compileall e `main.py --check`; backup prévio migration 45 com `ok`/FK 0.
+  Produção online em migration 46, standalone offline, Gateway único. Após restart, 8 recursos e os
+  mesmos 6 painéis permaneceram, sem ausência ou duplicação.

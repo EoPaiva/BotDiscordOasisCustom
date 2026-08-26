@@ -743,3 +743,17 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     em cinza e sem controles. A migration 43 versiona a projeção, e todas as treze pendências existentes
     foram migradas para o novo layout. Após reinício controlado continuaram treze fichas, zero ausentes,
     zero desatualizadas e zero duplicidades; 58 testes focados e 507 testes da suíte completa passaram.
+
+55. ✅ **Unidades Especiais e Comandos — concluída e publicada em 2026-08-26.**
+    Fonte: `C:\Users\mpaii\.codex\attachments\ad3d5ab5-22e3-4c12-bcfe-71388bb58cb0\pasted-text.txt`,
+    SHA-256 `65075C64A46ECEF620FB0BBA63DE51C89E88057FA96F3841E32DF510AC0FA701`.
+    ROCAM, TÁTICO, ELITE e CORREGEDORIA reutilizam identidade, patente, promoções, Qualificações,
+    Central de Tags, RBAC, auditoria, painéis e outbox canônicos. A migration 46 adiciona somente
+    candidaturas, vínculos, recursos Discord por guild e timeline imutável das unidades.
+    Produção mantém quatro centrais privadas no servidor principal e candidatura/mesa mínimas no REC,
+    com três cargos hierárquicos por unidade em ambos os servidores, todos sem permissões globais.
+    Aprovação sincroniza cargos nos dois servidores, nunca reduz patente e eleva somente quem estiver
+    abaixo de Cabo, usando o fluxo canônico de promoção e notificação. Designações e saídas são
+    versionadas, auditadas e recuperadas após reinício. Gate: 546 testes, Ruff, compileall,
+    `main.py --check`, backup íntegro, migration 46, health 200 e Gateway único. O reinício de prova
+    preservou os mesmos seis IDs de painéis e oito conjuntos de recursos, sem duplicação.

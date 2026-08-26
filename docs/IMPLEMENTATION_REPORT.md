@@ -1161,3 +1161,16 @@ Fora do escopo atual: eventos, API e integração MTA.
   canal e editou a mesma mensagem, preservando pin e permissões sem gerar flood.
 - QA focado: dez testes de canal/conteúdo, Ruff e validação ao vivo de nome, categoria, pin e
   permissões. O script permanece disponível para atualizar o resumo nas próximas versões.
+
+# Unidades Especiais e Comandos — concluído em 2026-08-26
+
+- A implementação integra quatro unidades ao cadastro canônico e introduz somente o agregado próprio
+  de candidatura/vínculo, com unicidade ativa, CAS, eventos imutáveis e recursos Discord por guild.
+- Painéis persistentes recuperam candidaturas e administração no REC e uma central privada por unidade
+  no principal. Cargos de Integrante, Auxiliar e Comando são hierárquicos e não têm permissões globais.
+- Aprovar é idempotente, bloqueia autoavaliação, sincroniza ambos os servidores e não rebaixa patente.
+  Quem está abaixo do piso é promovido a Cabo usando `personnel_actions`, `career_notifications` e
+  `RANK_SYNC`; quem já está acima permanece inalterado.
+- Validação: 7 testes focados, 546 na suíte completa, Ruff, compileall, diff e check de inicialização.
+  Rollout com backup íntegro, migration 46, health 200, um Gateway e reinício sem duplicar 8 recursos
+  nem 6 mensagens persistentes.
