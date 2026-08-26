@@ -4375,6 +4375,93 @@ CREATE INDEX ix_course_panels_channel
 ON course_panel_messages(guild_id, channel_id, course_id);
 """
 
+MIGRATION_051 = """
+CREATE TABLE transfer_cases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    ticket_id INTEGER NOT NULL REFERENCES service_tickets(id) ON DELETE RESTRICT,
+    protocol TEXT NOT NULL,
+    requester_id INTEGER NOT NULL,
+    request_snapshot_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','APPROVED','REJECTED','APPLIED','CANCELLED','LEGACY_APPROVED')
+    ),
+    approved_rank_id INTEGER REFERENCES ranks(id) ON DELETE RESTRICT,
+    max_rank_level_snapshot INTEGER CHECK (
+        max_rank_level_snapshot IS NULL OR max_rank_level_snapshot >= 1
+    ),
+    member_application_id INTEGER REFERENCES member_applications(id) ON DELETE RESTRICT,
+    decided_by INTEGER,
+    decided_at INTEGER,
+    decision_reason TEXT,
+    applied_by INTEGER,
+    applied_at INTEGER,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, ticket_id),
+    UNIQUE(guild_id, protocol),
+    UNIQUE(member_application_id)
+);
+
+CREATE INDEX ix_transfer_cases_queue
+ON transfer_cases(guild_id, status, created_at, id);
+
+CREATE TABLE transfer_case_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    transfer_case_id INTEGER NOT NULL REFERENCES transfer_cases(id) ON DELETE RESTRICT,
+    event_type TEXT NOT NULL,
+    actor_id INTEGER,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_transfer_case_timeline
+ON transfer_case_events(guild_id, transfer_case_id, created_at, id);
+
+-- Tickets históricos são preservados sem reinterpretar aprovações antigas como
+-- autorização de patente. Apenas casos pendentes entram no novo ciclo.
+INSERT INTO transfer_cases(
+    guild_id, ticket_id, protocol, requester_id, request_snapshot_json, status,
+    member_application_id, decided_by, decided_at, decision_reason,
+    created_at, updated_at
+)
+SELECT
+    guild_id,
+    id,
+    printf('TRF-%d-%06d', guild_id, id),
+    discord_id,
+    payload_json,
+    CASE status
+        WHEN 'PENDING' THEN 'PENDING'
+        WHEN 'IN_REVIEW' THEN 'PENDING'
+        WHEN 'REJECTED' THEN 'REJECTED'
+        WHEN 'APPROVED' THEN 'LEGACY_APPROVED'
+        ELSE 'CANCELLED'
+    END,
+    member_application_id,
+    reviewed_by,
+    reviewed_at,
+    review_reason,
+    submitted_at,
+    updated_at
+FROM service_tickets
+WHERE ticket_type='TRANSFER';
+
+INSERT INTO transfer_case_events(
+    guild_id, transfer_case_id, event_type, actor_id, metadata_json, created_at
+)
+SELECT
+    transfer.guild_id,
+    transfer.id,
+    'MIGRATED',
+    transfer.decided_by,
+    json_object('source', 'service_tickets', 'status', transfer.status),
+    transfer.updated_at
+FROM transfer_cases AS transfer;
+"""
+
 MIGRATIONS = (
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -4426,6 +4513,7 @@ MIGRATIONS = (
     (48, MIGRATION_048),
     (49, MIGRATION_049),
     (50, MIGRATION_050),
+    (51, MIGRATION_051),
 )
 
 

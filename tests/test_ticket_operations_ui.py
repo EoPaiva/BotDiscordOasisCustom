@@ -38,10 +38,11 @@ async def test_ticket_close_requires_reason_and_literal_confirmation() -> None:
 @pytest.mark.asyncio
 async def test_ticket_configuration_uses_category_role_and_channel_selects() -> None:
     view = TicketConfigurationView()
-    assert len(view.children) == 4
-    assert [item.placeholder for item in view.children] == [
+    assert len(view.children) == 5
+    assert [item.placeholder for item in view.children if hasattr(item, "placeholder")] == [
         "Categoria de tickets ativos",
         "Categoria de tickets arquivados",
         "Cargo responsável por tickets",
         "Canal privado para transcrições",
     ]
+    assert any(item.label == "Teto de transferências" for item in view.children)

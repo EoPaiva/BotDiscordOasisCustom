@@ -68,7 +68,7 @@ class CommandCenterServices:
         training = TrainingService(database, audit)
         activity = ActivityService(database, settings, audit, shifts)
         requests = RequestService(database, audit)
-        tickets = TicketService(database, audit, members)
+        tickets = TicketService(database, settings, audit, members)
         rank_sync = RankSyncService(database, settings, audit)
         operations = OperationsService(database, settings, audit, shifts)
         recruitment_secret = (

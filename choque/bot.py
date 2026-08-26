@@ -102,7 +102,7 @@ class ChoqueBot(commands.Bot):
         training = TrainingService(database, audit, settings=settings)
         activity = ActivityService(database, settings, audit, shifts)
         requests = RequestService(database, audit, clock=utc_now_ms)
-        tickets = TicketService(database, audit, members)
+        tickets = TicketService(database, settings, audit, members)
         rank_sync = RankSyncService(database, settings, audit)
         operations = OperationsService(database, settings, audit, shifts)
         duty_patrols = DutyPatrolService(database, settings, audit, shifts, operations)

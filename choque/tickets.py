@@ -11,6 +11,7 @@ from .audit import AuditService
 from .database import Database
 from .errors import ConflictError, NotFoundError, ValidationError
 from .members import MemberService
+from .settings import SettingsService
 from .time_utils import utc_now_ms
 
 TICKET_TYPES = {"CANDIDACY", "TRANSFER", "REPORT", "OTHER"}
@@ -64,12 +65,14 @@ class TicketService:
     def __init__(
         self,
         database: Database,
+        settings: SettingsService,
         audit: AuditService,
         members: MemberService,
         *,
         clock: Callable[[], int] = utc_now_ms,
     ) -> None:
         self.database = database
+        self.settings = settings
         self.audit = audit
         self.members = members
         self.clock = clock
@@ -94,6 +97,34 @@ class TicketService:
             (
                 guild_id,
                 ticket_id,
+                event_type,
+                actor_id,
+                json.dumps(dict(metadata or {}), ensure_ascii=False, sort_keys=True),
+                created_at if created_at is not None else self.clock(),
+            ),
+        )
+
+    async def _transfer_event(
+        self,
+        connection: aiosqlite.Connection,
+        guild_id: int,
+        transfer_case_id: int,
+        event_type: str,
+        *,
+        actor_id: int | None,
+        metadata: Mapping[str, object] | None = None,
+        created_at: int | None = None,
+    ) -> None:
+        await connection.execute(
+            """
+            INSERT INTO transfer_case_events(
+                guild_id, transfer_case_id, event_type, actor_id,
+                metadata_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                guild_id,
+                transfer_case_id,
                 event_type,
                 actor_id,
                 json.dumps(dict(metadata or {}), ensure_ascii=False, sort_keys=True),
@@ -169,6 +200,47 @@ class TicketService:
                     f"Você já possui {TICKET_LABELS[normalized].lower()} pendente."
                 ) from exc
             ticket_id = int(cursor.lastrowid)
+            if normalized == "TRANSFER":
+                protocol = f"TRF-{guild_id}-{ticket_id:06d}"
+                transfer_cursor = await connection.execute(
+                    """
+                    INSERT INTO transfer_cases(
+                        guild_id, ticket_id, protocol, requester_id,
+                        request_snapshot_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        guild_id,
+                        ticket_id,
+                        protocol,
+                        discord_id,
+                        json.dumps(payload, ensure_ascii=False),
+                        now,
+                        now,
+                    ),
+                )
+                transfer_case_id = int(transfer_cursor.lastrowid)
+                await self._transfer_event(
+                    connection,
+                    guild_id,
+                    transfer_case_id,
+                    "SUBMITTED",
+                    actor_id=discord_id,
+                    metadata={"protocol": protocol, "ticket_id": ticket_id},
+                    created_at=now,
+                )
+                await self.audit.record(
+                    guild_id,
+                    "TRANSFER_SUBMITTED",
+                    actor_id=discord_id,
+                    target_id=discord_id,
+                    after={
+                        "protocol": protocol,
+                        "ticket_id": ticket_id,
+                        "transfer_case_id": transfer_case_id,
+                    },
+                    connection=connection,
+                )
             await self.audit.record(
                 guild_id,
                 "SERVICE_TICKET_SUBMITTED",
@@ -181,7 +253,17 @@ class TicketService:
 
     async def get(self, guild_id: int, ticket_id: int):
         row = await self.database.fetchone(
-            "SELECT * FROM service_tickets WHERE guild_id=? AND id=?",
+            """
+            SELECT ticket.*, transfer.protocol AS transfer_protocol,
+                   transfer.status AS transfer_case_status,
+                   transfer.approved_rank_id,
+                   rank.name AS approved_rank_name
+            FROM service_tickets AS ticket
+            LEFT JOIN transfer_cases AS transfer
+              ON transfer.guild_id=ticket.guild_id AND transfer.ticket_id=ticket.id
+            LEFT JOIN ranks AS rank ON rank.id=transfer.approved_rank_id
+            WHERE ticket.guild_id=? AND ticket.id=?
+            """,
             (guild_id, ticket_id),
         )
         if not row:
@@ -1003,6 +1085,220 @@ class TicketService:
         result.update({str(row["ticket_type"]): int(row["total"]) for row in rows})
         return result
 
+    async def transfer_case_for_ticket(self, guild_id: int, ticket_id: int):
+        row = await self.database.fetchone(
+            """
+            SELECT transfer.*, rank.name AS approved_rank_name,
+                   rank.level AS approved_rank_level
+            FROM transfer_cases AS transfer
+            LEFT JOIN ranks AS rank ON rank.id=transfer.approved_rank_id
+            WHERE transfer.guild_id=? AND transfer.ticket_id=?
+            """,
+            (guild_id, ticket_id),
+        )
+        if not row:
+            raise NotFoundError("Protocolo de transferência não encontrado.")
+        return row
+
+    async def transfer_history(self, guild_id: int, ticket_id: int, *, limit: int = 100):
+        transfer = await self.transfer_case_for_ticket(guild_id, ticket_id)
+        return await self.database.fetchall(
+            """
+            SELECT * FROM transfer_case_events
+            WHERE guild_id=? AND transfer_case_id=?
+            ORDER BY created_at, id LIMIT ?
+            """,
+            (guild_id, int(transfer["id"]), limit),
+        )
+
+    async def _transfer_max_rank_level(self, guild_id: int) -> int:
+        configured = await self.settings.get(guild_id, "transfer_max_rank_level")
+        if isinstance(configured, bool):
+            raise ValidationError("Configure um limite de patente válido para transferências.")
+        try:
+            level = int(configured)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(
+                "Configure um limite de patente válido para transferências."
+            ) from exc
+        if level < 1:
+            raise ValidationError("Configure um limite de patente válido para transferências.")
+        return level
+
+    async def transfer_rank_options(self, guild_id: int):
+        max_level = await self._transfer_max_rank_level(guild_id)
+        return await self.database.fetchall(
+            """
+            SELECT id, name, prefix, level, discord_role_id
+            FROM ranks
+            WHERE guild_id=? AND active=1 AND level<=?
+            ORDER BY level, id
+            """,
+            (guild_id, max_level),
+        )
+
+    async def decide_transfer(
+        self,
+        guild_id: int,
+        ticket_id: int,
+        reviewer_id: int,
+        *,
+        approved: bool,
+        reason: str,
+        approved_rank_id: int | None = None,
+    ):
+        normalized_reason = reason.strip()
+        if not normalized_reason:
+            raise ValidationError("Informe o motivo da decisão.")
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                "SELECT * FROM service_tickets WHERE guild_id=? AND id=?",
+                (guild_id, ticket_id),
+            )
+            ticket = await cursor.fetchone()
+            if not ticket:
+                raise NotFoundError("Atendimento não encontrado.")
+            if ticket["ticket_type"] != "TRANSFER":
+                raise ValidationError("Este atendimento não é uma transferência.")
+            if ticket["status"] not in {"PENDING", "IN_REVIEW"}:
+                raise ConflictError("Esta transferência já foi analisada.")
+            cursor = await connection.execute(
+                """
+                SELECT * FROM transfer_cases
+                WHERE guild_id=? AND ticket_id=?
+                """,
+                (guild_id, ticket_id),
+            )
+            transfer = await cursor.fetchone()
+            if not transfer:
+                raise NotFoundError("Protocolo de transferência não encontrado.")
+            if transfer["status"] != "PENDING":
+                raise ConflictError("Esta transferência já foi analisada.")
+
+            application_id = None
+            target_rank = None
+            max_rank_level = None
+            if approved:
+                if approved_rank_id is None:
+                    raise ValidationError("Selecione a patente autorizada para a transferência.")
+                max_rank_level = await self._transfer_max_rank_level(guild_id)
+                cursor = await connection.execute(
+                    """
+                    SELECT id, name, level FROM ranks
+                    WHERE guild_id=? AND id=? AND active=1
+                    """,
+                    (guild_id, approved_rank_id),
+                )
+                target_rank = await cursor.fetchone()
+                if not target_rank:
+                    raise NotFoundError("A patente selecionada não está ativa.")
+                if int(target_rank["level"]) > max_rank_level:
+                    raise ValidationError(
+                        "A patente selecionada excede o limite de patente para transferências."
+                    )
+                payload = json.loads(str(ticket["payload_json"]))
+                application_id = await self.members.submit_application(
+                    guild_id,
+                    int(ticket["discord_id"]),
+                    str(payload["mta_nick"]),
+                    str(payload.get("character_id") or "") or None,
+                    "BGR",
+                    f"Transferência {transfer['protocol']} • {reviewer_id}",
+                    connection,
+                )
+
+            status = "APPROVED" if approved else "REJECTED"
+            cursor = await connection.execute(
+                """
+                UPDATE service_tickets
+                SET status=?, reviewed_by=?, reviewed_at=?, review_reason=?,
+                    member_application_id=?, updated_at=?, version=version+1
+                WHERE guild_id=? AND id=? AND status IN ('PENDING','IN_REVIEW')
+                """,
+                (
+                    status,
+                    reviewer_id,
+                    now,
+                    normalized_reason,
+                    application_id,
+                    now,
+                    guild_id,
+                    ticket_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ConflictError("Esta transferência foi analisada por outra pessoa.")
+            cursor = await connection.execute(
+                """
+                UPDATE transfer_cases
+                SET status=?, approved_rank_id=?, max_rank_level_snapshot=?,
+                    member_application_id=?, decided_by=?, decided_at=?,
+                    decision_reason=?, updated_at=?, version=version+1
+                WHERE guild_id=? AND ticket_id=? AND status='PENDING'
+                """,
+                (
+                    status,
+                    int(target_rank["id"]) if target_rank else None,
+                    max_rank_level,
+                    application_id,
+                    reviewer_id,
+                    now,
+                    normalized_reason,
+                    now,
+                    guild_id,
+                    ticket_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ConflictError("Esta transferência foi analisada por outra pessoa.")
+            await self._transfer_event(
+                connection,
+                guild_id,
+                int(transfer["id"]),
+                status,
+                actor_id=reviewer_id,
+                metadata={
+                    "ticket_id": ticket_id,
+                    "approved_rank_id": int(target_rank["id"]) if target_rank else None,
+                    "approved_rank_name": str(target_rank["name"]) if target_rank else None,
+                    "member_application_id": application_id,
+                    "max_rank_level": max_rank_level,
+                },
+                created_at=now,
+            )
+            await self.audit.record(
+                guild_id,
+                "SERVICE_TICKET_APPROVED" if approved else "SERVICE_TICKET_REJECTED",
+                actor_id=reviewer_id,
+                target_id=int(ticket["discord_id"]),
+                before={"status": ticket["status"]},
+                after={
+                    "status": status,
+                    "ticket_id": ticket_id,
+                    "member_application_id": application_id,
+                },
+                reason=normalized_reason,
+                connection=connection,
+            )
+            await self.audit.record(
+                guild_id,
+                "TRANSFER_APPROVED" if approved else "TRANSFER_REJECTED",
+                actor_id=reviewer_id,
+                target_id=int(ticket["discord_id"]),
+                before={"status": transfer["status"]},
+                after={
+                    "status": status,
+                    "protocol": str(transfer["protocol"]),
+                    "approved_rank_id": int(target_rank["id"]) if target_rank else None,
+                    "member_application_id": application_id,
+                    "max_rank_level": max_rank_level,
+                },
+                reason=normalized_reason,
+                connection=connection,
+            )
+        return await self.get(guild_id, ticket_id)
+
     async def decide(
         self,
         guild_id: int,
@@ -1014,6 +1310,19 @@ class TicketService:
     ):
         if not reason.strip():
             raise ValidationError("Informe o motivo da decisão.")
+        existing = await self.get(guild_id, ticket_id)
+        if existing["ticket_type"] == "TRANSFER":
+            if approved:
+                raise ValidationError(
+                    "Transferências usam fluxo próprio com seleção de patente autorizada."
+                )
+            return await self.decide_transfer(
+                guild_id,
+                ticket_id,
+                reviewer_id,
+                approved=False,
+                reason=reason,
+            )
         now = self.clock()
         async with self.database.transaction() as connection:
             cursor = await connection.execute(

@@ -96,7 +96,12 @@ async def test_duplicate_open_ticket_is_rejected_and_history_is_preserved(servic
 async def test_concurrent_decisions_only_process_ticket_once(service_bundle):
     tickets = service_bundle["tickets"]
     database = service_bundle["database"]
-    ticket_id = await tickets.create(GUILD_ID, TRANSFER_ID, "TRANSFER", transfer_payload())
+    ticket_id = await tickets.create(
+        GUILD_ID,
+        OTHER_ID,
+        "OTHER",
+        {"subject": "Concorrência", "details": "Análise concorrente."},
+    )
 
     results = await asyncio.gather(
         tickets.decide(GUILD_ID, ticket_id, REVIEWER_ID, approved=True, reason="Aprovado."),

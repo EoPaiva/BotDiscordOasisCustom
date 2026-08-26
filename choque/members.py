@@ -424,6 +424,20 @@ class MemberService:
                 raise NotFoundError("Solicitação não encontrada.")
             if application["status"] != "PENDING":
                 raise ConflictError("Essa solicitação já foi analisada.")
+            transfer_cursor = await connection.execute(
+                """
+                SELECT * FROM transfer_cases
+                WHERE guild_id=? AND member_application_id=?
+                """,
+                (application["guild_id"], application_id),
+            )
+            transfer = await transfer_cursor.fetchone()
+            if transfer and transfer["status"] != "APPROVED":
+                raise ConflictError("O protocolo de transferência não está pronto para aplicação.")
+            if approved and transfer:
+                # A patente autorizada na primeira decisão é imutável nesta
+                # etapa. Cargos atuais do Discord não podem elevar o ingresso.
+                initial_rank_id = int(transfer["approved_rank_id"])
             status = "APPROVED" if approved else "REJECTED"
             cursor = await connection.execute(
                 """
@@ -510,6 +524,64 @@ class MemberService:
                             now,
                         ),
                     )
+            if transfer:
+                transfer_status = "APPLIED" if approved else "CANCELLED"
+                cursor = await connection.execute(
+                    """
+                    UPDATE transfer_cases
+                    SET status=?, applied_by=?, applied_at=?, updated_at=?, version=version+1
+                    WHERE id=? AND status='APPROVED'
+                    """,
+                    (
+                        transfer_status,
+                        reviewer_id if approved else None,
+                        now if approved else None,
+                        now,
+                        transfer["id"],
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ConflictError(
+                        "O protocolo de transferência foi aplicado por outra pessoa."
+                    )
+                await connection.execute(
+                    """
+                    INSERT INTO transfer_case_events(
+                        guild_id, transfer_case_id, event_type, actor_id,
+                        metadata_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        application["guild_id"],
+                        transfer["id"],
+                        "APPLIED" if approved else "REGISTRATION_REJECTED",
+                        reviewer_id,
+                        json.dumps(
+                            {
+                                "member_application_id": application_id,
+                                "rank_id": initial_rank_id if approved else None,
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        now,
+                    ),
+                )
+                await self.audit.record(
+                    int(application["guild_id"]),
+                    "TRANSFER_APPLIED" if approved else "TRANSFER_REGISTRATION_REJECTED",
+                    actor_id=reviewer_id,
+                    target_id=int(application["discord_id"]),
+                    before={"status": transfer["status"]},
+                    after={
+                        "status": transfer_status,
+                        "protocol": str(transfer["protocol"]),
+                        "rank_id": initial_rank_id if approved else None,
+                        "member_application_id": application_id,
+                    },
+                    reason=reason,
+                    connection=connection,
+                )
             await self.audit.record(
                 int(application["guild_id"]),
                 "MEMBER_APPLICATION_REVIEWED",

@@ -124,6 +124,10 @@ class SettingsService:
         "recruitment_notification_channel_id": None,
         "recruitment_public_url": None,
         "transfer_results_channel_id": None,
+        # Nível 3 corresponde ao teto conservador padrão da hierarquia inicial
+        # (normalmente Cabo). O valor é configurável por guild e sempre vira
+        # snapshot na decisão para que mudanças futuras não reescrevam história.
+        "transfer_max_rank_level": 3,
         "recruitment_approved_channel_id": None,
         "recruitment_rejected_channel_id": None,
         "recruitment_tag_setup_channel_id": None,

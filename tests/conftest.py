@@ -59,7 +59,7 @@ async def service_bundle(tmp_path):
     training = TrainingService(database, audit, clock=clock)
     activity = ActivityService(database, settings, audit, shifts, clock=clock)
     requests = RequestService(database, audit, clock=clock)
-    tickets = TicketService(database, audit, members, clock=clock)
+    tickets = TicketService(database, settings, audit, members, clock=clock)
     rank_sync = RankSyncService(database, settings, audit, clock=clock)
     operations = OperationsService(database, settings, audit, shifts, clock=clock)
     duty_patrols = DutyPatrolService(

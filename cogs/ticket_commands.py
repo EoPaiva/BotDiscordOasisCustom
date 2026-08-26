@@ -180,11 +180,15 @@ def ticket_detail_embed(bot: ChoqueBot, ticket) -> discord.Embed:
     lines = [
         f"**{labels.get(key, key)}:** {str(value)[:700]}" for key, value in payload.items() if value
     ]
+    protocol_line = ""
+    if ticket["ticket_type"] == "TRANSFER" and ticket["transfer_protocol"]:
+        protocol_line = f"**Protocolo:** `{ticket['transfer_protocol']}`\n"
     embed = branded_embed(
         bot.config.branding,
         title=f"🎫 #{ticket['id']} • {TICKET_LABELS[ticket['ticket_type']]}",
         description=(
             f"**Solicitante:** <@{ticket['discord_id']}>\n"
+            f"{protocol_line}"
             f"**Situação:** {STATUS_LABELS[ticket['status']]}\n"
             f"**Prioridade:** {TICKET_PRIORITY_LABELS.get(ticket['priority'], ticket['priority'])}\n"
             + (
@@ -868,7 +872,10 @@ class TicketQueueSelect(discord.ui.Select):
             content=None,
             embed=ticket_detail_embed(get_bot(interaction), ticket),
             view=TicketDecisionView(
-                int(ticket["id"]), permission=self.permission, module=self.module
+                int(ticket["id"]),
+                ticket_type=str(ticket["ticket_type"]),
+                permission=self.permission,
+                module=self.module,
             ),
         )
 
@@ -918,26 +925,40 @@ class TicketDecisionModal(ErrorModal, title="Decisão do atendimento"):
         ticket_id: int,
         approved: bool,
         *,
+        ticket_type: str,
         permission: str,
         module: str,
+        approved_rank_id: int | None = None,
     ) -> None:
         super().__init__()
         self.ticket_id = ticket_id
         self.approved = approved
+        self.ticket_type = ticket_type
         self.permission = permission
         self.module = module
+        self.approved_rank_id = approved_rank_id
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         actor = await require_reviewer(interaction, self.permission, self.module)
         bot = get_bot(interaction)
         await interaction.response.defer(ephemeral=True, thinking=True)
-        ticket = await bot.services.tickets.decide(
-            actor.guild.id,
-            self.ticket_id,
-            actor.id,
-            approved=self.approved,
-            reason=str(self.reason),
-        )
+        if self.ticket_type == "TRANSFER":
+            ticket = await bot.services.tickets.decide_transfer(
+                actor.guild.id,
+                self.ticket_id,
+                actor.id,
+                approved=self.approved,
+                reason=str(self.reason),
+                approved_rank_id=self.approved_rank_id,
+            )
+        else:
+            ticket = await bot.services.tickets.decide(
+                actor.guild.id,
+                self.ticket_id,
+                actor.id,
+                approved=self.approved,
+                reason=str(self.reason),
+            )
         cog = bot.get_cog("TicketCommands")
         if isinstance(cog, TicketCommands):
             await cog.after_decision(actor.guild, ticket)
@@ -948,10 +969,88 @@ class TicketDecisionModal(ErrorModal, title="Decisão do atendimento"):
         )
 
 
+class TransferRankSelect(discord.ui.Select):
+    def __init__(
+        self,
+        ticket_id: int,
+        ranks,
+        *,
+        permission: str,
+        module: str,
+    ) -> None:
+        self.ticket_id = ticket_id
+        self.permission = permission
+        self.module = module
+        super().__init__(
+            placeholder="Selecione a patente autorizada",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(
+                    label=str(rank["name"])[:100],
+                    description=f"Nível {rank['level']} • teto de transferência respeitado",
+                    value=str(rank["id"]),
+                )
+                for rank in ranks[:25]
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await require_reviewer(interaction, self.permission, self.module)
+        await interaction.response.send_modal(
+            TicketDecisionModal(
+                self.ticket_id,
+                True,
+                ticket_type="TRANSFER",
+                permission=self.permission,
+                module=self.module,
+                approved_rank_id=int(self.values[0]),
+            )
+        )
+
+
+class TransferRankDecisionView(ErrorView):
+    def __init__(
+        self,
+        ticket_id: int,
+        ranks,
+        *,
+        permission: str,
+        module: str,
+    ) -> None:
+        super().__init__(timeout=300)
+        self.permission = permission
+        self.module = module
+        self.add_item(
+            TransferRankSelect(
+                ticket_id,
+                ranks,
+                permission=permission,
+                module=module,
+            )
+        )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        try:
+            await require_reviewer(interaction, self.permission, self.module)
+        except Exception as exc:
+            await respond_error(interaction, exc)
+            return False
+        return True
+
+
 class TicketDecisionView(ErrorView):
-    def __init__(self, ticket_id: int, *, permission: str, module: str) -> None:
+    def __init__(
+        self,
+        ticket_id: int,
+        *,
+        ticket_type: str,
+        permission: str,
+        module: str,
+    ) -> None:
         super().__init__(timeout=300)
         self.ticket_id = ticket_id
+        self.ticket_type = ticket_type
         self.permission = permission
         self.module = module
 
@@ -965,10 +1064,31 @@ class TicketDecisionView(ErrorView):
 
     @discord.ui.button(label="Aprovar", emoji="✅", style=discord.ButtonStyle.success)
     async def approve(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        if self.ticket_type == "TRANSFER":
+            actor = await require_reviewer(interaction, self.permission, self.module)
+            ranks = await get_bot(interaction).services.tickets.transfer_rank_options(
+                actor.guild.id
+            )
+            if not ranks:
+                raise ValidationError(
+                    "Nenhuma patente ativa está dentro do teto de transferência."
+                )
+            await interaction.response.send_message(
+                "Selecione a patente máxima autorizada para este protocolo:",
+                view=TransferRankDecisionView(
+                    self.ticket_id,
+                    ranks,
+                    permission=self.permission,
+                    module=self.module,
+                ),
+                ephemeral=True,
+            )
+            return
         await interaction.response.send_modal(
             TicketDecisionModal(
                 self.ticket_id,
                 True,
+                ticket_type=self.ticket_type,
                 permission=self.permission,
                 module=self.module,
             )
@@ -980,6 +1100,7 @@ class TicketDecisionView(ErrorView):
             TicketDecisionModal(
                 self.ticket_id,
                 False,
+                ticket_type=self.ticket_type,
                 permission=self.permission,
                 module=self.module,
             )
@@ -1291,6 +1412,16 @@ async def build_ticket_configuration_embed(bot: ChoqueBot, guild: discord.Guild)
     archive = await bot.services.settings.get(guild.id, "ticket_archive_category_id")
     responsible = await bot.services.settings.get(guild.id, "ticket_responsible_role_id")
     transcript = await bot.services.settings.get(guild.id, "ticket_transcript_channel_id")
+    transfer_max_level = await bot.services.settings.get(
+        guild.id, "transfer_max_rank_level"
+    )
+    transfer_max_rank = await bot.services.database.fetchone(
+        """
+        SELECT name FROM ranks
+        WHERE guild_id=? AND level=? AND active=1
+        """,
+        (guild.id, int(transfer_max_level)),
+    )
     bot_member = guild.me
     role = guild.get_role(int(responsible)) if responsible else None
     hierarchy_ok = bool(bot_member and role and bot_member.top_role > role)
@@ -1302,6 +1433,8 @@ async def build_ticket_configuration_embed(bot: ChoqueBot, guild: discord.Guild)
             f"**Categoria de arquivo:** {f'<#{archive}>' if archive else 'não configurada'}\n"
             f"**Cargo responsável:** {f'<@&{responsible}>' if responsible else 'não configurado'}\n"
             f"**Canal de transcrições:** {f'<#{transcript}>' if transcript else 'somente na sala'}\n"
+            f"**Teto de transferência:** "
+            f"{str(transfer_max_rank['name']) if transfer_max_rank else f'nível {transfer_max_level}'}\n"
             f"**Hierarquia do bot:** {'✅ válida' if hierarchy_ok else '⚠️ revisar'}\n\n"
             "As categorias são persistidas por ID. O painel público e os históricos não são recriados."
         ),
@@ -1387,6 +1520,70 @@ class TicketTranscriptChannelSelect(discord.ui.ChannelSelect):
         )
 
 
+class TransferCapRankSelect(discord.ui.Select):
+    def __init__(self, ranks) -> None:
+        super().__init__(
+            placeholder="Selecione o teto de patente das transferências",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(
+                    label=str(rank["name"])[:100],
+                    description=f"Nível {rank['level']}",
+                    value=str(rank["id"]),
+                )
+                for rank in ranks[:25]
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        actor = await require_reviewer(interaction, "ticket.manage", "TICKETS")
+        bot = get_bot(interaction)
+        rank = await bot.services.database.fetchone(
+            """
+            SELECT id, name, level FROM ranks
+            WHERE guild_id=? AND id=? AND active=1
+            """,
+            (actor.guild.id, int(self.values[0])),
+        )
+        if not rank:
+            raise ValidationError("A patente selecionada não está mais ativa.")
+        await bot.services.settings.set(
+            actor.guild.id,
+            "transfer_max_rank_level",
+            int(rank["level"]),
+            actor.id,
+        )
+        await bot.services.audit.record(
+            actor.guild.id,
+            "TRANSFER_RANK_CAP_CHANGED",
+            actor_id=actor.id,
+            after={
+                "rank_id": int(rank["id"]),
+                "rank_name": str(rank["name"]),
+                "max_rank_level": int(rank["level"]),
+            },
+        )
+        await interaction.response.edit_message(
+            content=f"✅ Teto de transferência definido como **{rank['name']}**.",
+            view=None,
+        )
+
+
+class TransferCapRankView(ErrorView):
+    def __init__(self, ranks) -> None:
+        super().__init__(timeout=300)
+        self.add_item(TransferCapRankSelect(ranks))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        try:
+            await require_reviewer(interaction, "ticket.manage", "TICKETS")
+        except Exception as exc:
+            await respond_error(interaction, exc)
+            return False
+        return True
+
+
 class TicketConfigurationView(ErrorView):
     def __init__(self) -> None:
         super().__init__(timeout=300)
@@ -1398,6 +1595,26 @@ class TicketConfigurationView(ErrorView):
         )
         self.add_item(TicketResponsibleRoleSelect())
         self.add_item(TicketTranscriptChannelSelect())
+
+    @discord.ui.button(label="Teto de transferências", emoji="🔒")
+    async def transfer_rank_cap(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        actor = await require_reviewer(interaction, "ticket.manage", "TICKETS")
+        ranks = await get_bot(interaction).services.database.fetchall(
+            """
+            SELECT id, name, level FROM ranks
+            WHERE guild_id=? AND active=1 ORDER BY level, id LIMIT 25
+            """,
+            (actor.guild.id,),
+        )
+        if not ranks:
+            raise ValidationError("Cadastre ao menos uma patente ativa antes de definir o teto.")
+        await interaction.response.send_message(
+            "Selecione a maior patente permitida para novos ingressos por transferência:",
+            view=TransferCapRankView(ranks),
+            ephemeral=True,
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         try:

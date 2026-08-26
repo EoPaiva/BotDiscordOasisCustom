@@ -509,7 +509,7 @@ async def test_identity_schema_rejects_cross_guild_projections(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_migration_nine_preserves_existing_tickets_and_allows_other_subject(tmp_path):
+async def test_migrations_preserve_tickets_backfill_transfers_and_allow_other_subject(tmp_path):
     target = tmp_path / "choque_bgr.db"
     connection = sqlite3.connect(target)
     connection.executescript(
@@ -621,6 +621,13 @@ async def test_migration_nine_preserves_existing_tickets_and_allows_other_subjec
         INSERT INTO service_tickets(
             guild_id, discord_id, ticket_type, payload_json, submitted_at, updated_at
         ) VALUES (1, 2, 'REPORT', '{"details":"legado"}', 3, 3);
+        INSERT INTO service_tickets(
+            guild_id, discord_id, ticket_type, payload_json, submitted_at, updated_at
+        ) VALUES (
+            1, 4, 'TRANSFER',
+            '{"mta_nick":"Legado","origin_organization":"PM","origin_rank":"Cabo","motivation":"Ingresso"}',
+            4, 4
+        );
         """
     )
     connection.commit()
@@ -631,6 +638,16 @@ async def test_migration_nine_preserves_existing_tickets_and_allows_other_subjec
     try:
         version = await database.fetchone("SELECT MAX(version) AS version FROM schema_migrations")
         preserved = await database.fetchone("SELECT * FROM service_tickets WHERE id=1")
+        migrated_transfer = await database.fetchone(
+            "SELECT * FROM transfer_cases WHERE guild_id=1 AND ticket_id=2"
+        )
+        migrated_event = await database.fetchone(
+            """
+            SELECT event_type FROM transfer_case_events
+            WHERE guild_id=1 AND transfer_case_id=?
+            """,
+            (migrated_transfer["id"],),
+        )
         new_id = await database.execute(
             """
             INSERT INTO service_tickets(
@@ -642,6 +659,9 @@ async def test_migration_nine_preserves_existing_tickets_and_allows_other_subjec
         assert version["version"] == database_module.MIGRATIONS[-1][0]
         assert preserved["ticket_type"] == "REPORT"
         assert json.loads(preserved["payload_json"])["details"] == "legado"
+        assert migrated_transfer["protocol"] == "TRF-1-000002"
+        assert migrated_transfer["status"] == "PENDING"
+        assert migrated_event["event_type"] == "MIGRATED"
         assert new_id > int(preserved["id"])
     finally:
         await database.close()
