@@ -468,6 +468,225 @@ async def test_submission_assignment_and_human_approval_are_atomic_and_idempoten
 
 
 @pytest.mark.asyncio
+async def test_rec_approval_imports_registration_into_canonical_guild(
+    recruitment_bundle,
+) -> None:
+    service = recruitment_bundle["service"]
+    database = recruitment_bundle["database"]
+    settings = SettingsService(database)
+    service.audit.settings = settings
+    canonical_guild_id = GUILD_ID + 1
+    canonical_rank_id = await database.execute(
+        """
+        INSERT INTO ranks(guild_id, name, prefix, level, rbac_profile, created_at)
+        VALUES (?, 'Recruta', 'REC', 1, 'MEMBRO', ?)
+        """,
+        (canonical_guild_id, recruitment_bundle["clock"]()),
+    )
+    await settings.set(GUILD_ID, "identity_source_guild_id", canonical_guild_id, ADMIN_ID)
+
+    application = await _start(service)
+    await database.execute(
+        """
+        UPDATE recruitment_application_questions
+        SET status='SUBMITTED', final_answer_json='"Resposta de teste"', submitted_at=?
+        WHERE application_id=?
+        """,
+        (recruitment_bundle["clock"](), application["id"]),
+    )
+    await service.submit_application(GUILD_ID, CANDIDATE_ID, int(application["id"]), 1)
+    assigned = await service.assign(GUILD_ID, int(application["id"]), ADMIN_ID, 2)
+    await service.decide(
+        GUILD_ID,
+        int(application["id"]),
+        ADMIN_ID,
+        int(assigned["version"]),
+        approved=True,
+        internal_reason="Requisitos conferidos",
+        candidate_message="Aprovado.",
+    )
+
+    member = await database.fetchone(
+        "SELECT * FROM members WHERE guild_id=? AND discord_id=?",
+        (canonical_guild_id, CANDIDATE_ID),
+    )
+    registration = await database.fetchone(
+        "SELECT * FROM registration_gate_records WHERE guild_id=? AND discord_id=?",
+        (canonical_guild_id, CANDIDATE_ID),
+    )
+    syncs = await database.fetchall(
+        """
+        SELECT guild_id, correlation_id FROM web_action_outbox
+        WHERE target_discord_id=? ORDER BY guild_id
+        """,
+        (CANDIDATE_ID,),
+    )
+    assert int(member["rank_id"]) == canonical_rank_id
+    assert member["mta_nick"] == f"Candidato_{CANDIDATE_ID}"
+    assert member["character_id"] == "1842"
+    assert member["status"] == "ACTIVE"
+    assert registration["status"] == "REGISTERED"
+    assert registration["access_tier"] == "RECRUIT"
+    assert int(registration["member_id"]) == int(member["id"])
+    assert registration["source"] == "ADMIN_APPROVAL"
+    assert [int(row["guild_id"]) for row in syncs] == [GUILD_ID, canonical_guild_id]
+    assert str(syncs[1]["correlation_id"]) == (
+        f"rec-source-member-sync:{GUILD_ID}:{int(application['id'])}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_member_join_backfill_imports_previously_approved_rec_identity(
+    recruitment_bundle,
+) -> None:
+    service = recruitment_bundle["service"]
+    database = recruitment_bundle["database"]
+    settings = SettingsService(database)
+    service.audit.settings = settings
+    canonical_guild_id = GUILD_ID + 1
+    await database.execute(
+        """
+        INSERT INTO ranks(guild_id, name, prefix, level, rbac_profile, created_at)
+        VALUES (?, 'Recruta', 'REC', 1, 'MEMBRO', ?)
+        """,
+        (canonical_guild_id, recruitment_bundle["clock"]()),
+    )
+
+    application = await _start(service)
+    await database.execute(
+        """
+        UPDATE recruitment_application_questions
+        SET status='SUBMITTED', final_answer_json='"Resposta de teste"', submitted_at=?
+        WHERE application_id=?
+        """,
+        (recruitment_bundle["clock"](), application["id"]),
+    )
+    await service.submit_application(GUILD_ID, CANDIDATE_ID, int(application["id"]), 1)
+    assigned = await service.assign(GUILD_ID, int(application["id"]), ADMIN_ID, 2)
+    await service.decide(
+        GUILD_ID,
+        int(application["id"]),
+        ADMIN_ID,
+        int(assigned["version"]),
+        approved=True,
+        internal_reason="Requisitos conferidos",
+        candidate_message="Aprovado.",
+    )
+    now = recruitment_bundle["clock"]()
+    await database.execute(
+        """
+        INSERT INTO registration_gate_records(
+            guild_id, discord_id, status, access_tier, source, sync_status,
+            created_at, updated_at
+        ) VALUES (?, ?, 'UNREGISTERED', 'CANDIDATE', 'REJOIN', 'SYNCED', ?, ?)
+        """,
+        (canonical_guild_id, CANDIDATE_ID, now, now),
+    )
+    await settings.set(GUILD_ID, "identity_source_guild_id", canonical_guild_id, ADMIN_ID)
+
+    imported = await service.import_approved_identity_to_source(
+        canonical_guild_id,
+        CANDIDATE_ID,
+        actor_id=ADMIN_ID,
+    )
+    repeated = await service.import_approved_identity_to_source(
+        canonical_guild_id,
+        CANDIDATE_ID,
+        actor_id=ADMIN_ID,
+    )
+
+    assert imported is not None
+    assert repeated is not None
+    assert int(imported["guild_id"]) == canonical_guild_id
+    totals = await database.fetchone(
+        """
+        SELECT
+          (SELECT COUNT(*) FROM members WHERE guild_id=? AND discord_id=?) AS members,
+          (SELECT COUNT(*) FROM registration_gate_records
+           WHERE guild_id=? AND discord_id=?) AS registrations,
+          (SELECT COUNT(*) FROM web_action_outbox
+           WHERE correlation_id=?) AS syncs
+        """,
+        (
+            canonical_guild_id,
+            CANDIDATE_ID,
+            canonical_guild_id,
+            CANDIDATE_ID,
+            f"rec-source-member-sync:{GUILD_ID}:{int(application['id'])}",
+        ),
+    )
+    assert dict(totals) == {"members": 1, "registrations": 1, "syncs": 1}
+
+
+@pytest.mark.asyncio
+async def test_rec_import_routes_existing_bgr_owner_to_review_without_overwrite(
+    recruitment_bundle,
+) -> None:
+    service = recruitment_bundle["service"]
+    database = recruitment_bundle["database"]
+    settings = SettingsService(database)
+    service.audit.settings = settings
+    canonical_guild_id = GUILD_ID + 1
+    canonical_rank_id = await database.execute(
+        """
+        INSERT INTO ranks(guild_id, name, prefix, level, rbac_profile, created_at)
+        VALUES (?, 'Recruta', 'REC', 1, 'MEMBRO', ?)
+        """,
+        (canonical_guild_id, recruitment_bundle["clock"]()),
+    )
+    await database.execute(
+        """
+        INSERT INTO members(
+            guild_id, discord_id, discord_nick, mta_nick, character_id, rank_id,
+            unit, status, joined_at, created_at, updated_at
+        ) VALUES (?, ?, 'owner', 'Dono_ID', '1842', ?, 'BGR', 'ACTIVE', ?, ?, ?)
+        """,
+        (
+            canonical_guild_id,
+            CANDIDATE_ID + 99,
+            canonical_rank_id,
+            recruitment_bundle["clock"](),
+            recruitment_bundle["clock"](),
+            recruitment_bundle["clock"](),
+        ),
+    )
+    await settings.set(GUILD_ID, "identity_source_guild_id", canonical_guild_id, ADMIN_ID)
+
+    application = await _start(service)
+    await database.execute(
+        """
+        UPDATE recruitment_application_questions
+        SET status='SUBMITTED', final_answer_json='"Resposta de teste"', submitted_at=?
+        WHERE application_id=?
+        """,
+        (recruitment_bundle["clock"](), application["id"]),
+    )
+    await service.submit_application(GUILD_ID, CANDIDATE_ID, int(application["id"]), 1)
+    assigned = await service.assign(GUILD_ID, int(application["id"]), ADMIN_ID, 2)
+    await service.decide(
+        GUILD_ID,
+        int(application["id"]),
+        ADMIN_ID,
+        int(assigned["version"]),
+        approved=True,
+        internal_reason="Requisitos conferidos",
+        candidate_message="Aprovado.",
+    )
+
+    imported_member = await database.fetchone(
+        "SELECT * FROM members WHERE guild_id=? AND discord_id=?",
+        (canonical_guild_id, CANDIDATE_ID),
+    )
+    registration = await database.fetchone(
+        "SELECT * FROM registration_gate_records WHERE guild_id=? AND discord_id=?",
+        (canonical_guild_id, CANDIDATE_ID),
+    )
+    assert imported_member is None
+    assert registration["status"] == "REQUIRES_REVIEW"
+    assert registration["conflict_code"] == "CROSS_GUILD_IDENTITY_CONFLICT"
+
+
+@pytest.mark.asyncio
 async def test_approved_recruit_can_start_one_portaria_registration_without_duplicate_member(
     recruitment_bundle,
 ) -> None:

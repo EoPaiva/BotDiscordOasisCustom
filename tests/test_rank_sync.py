@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import discord
 import pytest
@@ -653,3 +654,27 @@ async def test_satellite_guild_mirrors_canonical_identity_and_allowlisted_roles(
     assert mirrored["character_id"] == "77"
     assert mirrored["rank_level"] == 1
     assert [role.id for role in target_member.roles] == [target_role.id]
+
+
+@pytest.mark.asyncio
+async def test_canonical_join_imports_previously_approved_satellite_identity(
+    service_bundle,
+):
+    guild = FakeGuild([], guild_id=GUILD_ID)
+    member = FakeMember(guild, DISCORD_ID + 77, [], nick="Novo recruta")
+    importer = AsyncMock(return_value={"id": 91, "guild_id": GUILD_ID})
+    services = SimpleNamespace(
+        **service_bundle,
+        recruitment=SimpleNamespace(import_approved_identity_to_source=importer),
+    )
+    bot = FakeBot(services)
+    bot.user = SimpleNamespace(id=123_456)
+    cog = RankSyncSystem(bot)
+
+    await cog.on_member_join(member)
+
+    importer.assert_awaited_once_with(
+        GUILD_ID,
+        member.id,
+        actor_id=123_456,
+    )

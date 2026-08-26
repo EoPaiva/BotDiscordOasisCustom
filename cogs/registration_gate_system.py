@@ -749,7 +749,21 @@ class RegistrationGateSystem(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
-        if self.bot.check_mode or await self._protected(member):
+        if self.bot.check_mode:
+            return
+        recruitment = getattr(self.services, "recruitment", None)
+        importer = getattr(recruitment, "import_approved_identity_to_source", None)
+        if callable(importer):
+            try:
+                actor_id = self.bot.user.id if self.bot.user else member.id
+                await importer(member.guild.id, member.id, actor_id=actor_id)
+            except Exception:
+                LOGGER.exception(
+                    "Falha ao importar aprovação REC do membro %s na guild %s",
+                    member.id,
+                    member.guild.id,
+                )
+        if await self._protected(member):
             return
         record = await self.reconcile_member(member, source="REJOIN")
         if record and record["status"] != "REGISTERED":

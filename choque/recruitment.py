@@ -2042,7 +2042,413 @@ class RecruitmentService:
             },
             connection=connection,
         )
+        await self._import_approved_member_to_source(
+            connection,
+            application=application,
+            satellite_rank_id=int(rank_id),
+            actor_id=actor_id,
+            now=now,
+        )
         return member_id
+
+    async def _import_approved_member_to_source(
+        self,
+        connection: aiosqlite.Connection,
+        *,
+        application: Mapping[str, object],
+        satellite_rank_id: int,
+        actor_id: int,
+        now: int,
+    ) -> int | None:
+        """Project an approved REC identity into its canonical guild.
+
+        The satellite keeps its own row and Discord roles.  The canonical guild
+        receives a separate member/Portaria row mapped by rank level.  Existing
+        higher ranks are preserved and a conflicting BGR identity is routed to
+        human review instead of being overwritten.
+        """
+        satellite_guild_id = int(application["guild_id"])
+        cursor = await connection.execute(
+            """
+            SELECT value_json FROM guild_settings
+            WHERE guild_id=? AND setting_key='identity_source_guild_id'
+            """,
+            (satellite_guild_id,),
+        )
+        setting = await cursor.fetchone()
+        if not setting:
+            return None
+        try:
+            source_guild_id = int(json.loads(str(setting["value_json"])))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if source_guild_id == satellite_guild_id:
+            return None
+
+        cursor = await connection.execute(
+            "SELECT level FROM ranks WHERE id=? AND guild_id=? AND active=1",
+            (satellite_rank_id, satellite_guild_id),
+        )
+        satellite_rank = await cursor.fetchone()
+        if not satellite_rank:
+            return None
+        cursor = await connection.execute(
+            """
+            SELECT id, level FROM ranks
+            WHERE guild_id=? AND level=? AND active=1
+            ORDER BY id LIMIT 1
+            """,
+            (source_guild_id, int(satellite_rank["level"])),
+        )
+        source_rank = await cursor.fetchone()
+        if not source_rank:
+            return None
+
+        discord_id = int(application["discord_id"])
+        bgr_id = str(application["bgr_id"] or "").strip()
+        mta_nick = str(application["candidate_nick"] or "").strip()
+        cursor = await connection.execute(
+            "SELECT * FROM members WHERE guild_id=? AND discord_id=?",
+            (source_guild_id, discord_id),
+        )
+        current_member = await cursor.fetchone()
+        cursor = await connection.execute(
+            """
+            SELECT * FROM members
+            WHERE guild_id=? AND lower(trim(COALESCE(character_id,'')))=lower(trim(?))
+            ORDER BY id LIMIT 1
+            """,
+            (source_guild_id, bgr_id),
+        )
+        bgr_owner = await cursor.fetchone()
+        discord_identity_conflict = bool(
+            current_member
+            and str(current_member["character_id"] or "").strip()
+            and str(current_member["character_id"]).strip().casefold() != bgr_id.casefold()
+        )
+        bgr_identity_conflict = bool(
+            bgr_owner and int(bgr_owner["discord_id"]) != discord_id
+        )
+        if discord_identity_conflict or bgr_identity_conflict:
+            conflict_member_id = int(
+                (bgr_owner or current_member)["id"]
+            )
+            await connection.execute(
+                """
+                INSERT INTO registration_gate_records(
+                    guild_id, discord_id, status, access_tier, mta_nick, bgr_id,
+                    recruitment_application_id, source, conflict_code,
+                    conflict_member_id, sync_status, idempotency_key, submitted_at,
+                    reviewed_at, reviewed_by, review_reason, created_at, updated_at
+                ) VALUES (?, ?, 'REQUIRES_REVIEW', 'CANDIDATE', ?, ?, ?,
+                          'ADMIN_APPROVAL', 'CROSS_GUILD_IDENTITY_CONFLICT', ?,
+                          'NOT_REQUIRED', ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(guild_id, discord_id) DO UPDATE SET
+                    status='REQUIRES_REVIEW', access_tier='CANDIDATE',
+                    mta_nick=excluded.mta_nick, bgr_id=excluded.bgr_id,
+                    recruitment_application_id=excluded.recruitment_application_id,
+                    source='ADMIN_APPROVAL', conflict_code=excluded.conflict_code,
+                    conflict_member_id=excluded.conflict_member_id,
+                    sync_status='NOT_REQUIRED', sync_error=NULL,
+                    submitted_at=excluded.submitted_at, reviewed_at=excluded.reviewed_at,
+                    reviewed_by=excluded.reviewed_by, review_reason=excluded.review_reason,
+                    version=registration_gate_records.version+1,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    source_guild_id,
+                    discord_id,
+                    mta_nick,
+                    bgr_id,
+                    int(application["id"]),
+                    conflict_member_id,
+                    f"rec-source-review:{satellite_guild_id}:{int(application['id'])}",
+                    now,
+                    now,
+                    actor_id,
+                    "Identidade aprovada no REC diverge do cadastro canônico.",
+                    now,
+                    now,
+                ),
+            )
+            await connection.execute(
+                """
+                INSERT OR IGNORE INTO audit_logs(
+                    correlation_id, guild_id, action, actor_id, target_id,
+                    after_json, reason, created_at
+                ) VALUES (?, ?, 'CROSS_GUILD_IDENTITY_REVIEW_REQUIRED', ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"rec-source-review:{satellite_guild_id}:{int(application['id'])}",
+                    source_guild_id,
+                    actor_id,
+                    discord_id,
+                    json.dumps(
+                        {
+                            "satellite_guild_id": satellite_guild_id,
+                            "application_id": int(application["id"]),
+                            "conflict_member_id": conflict_member_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "Importação automática bloqueada para impedir identidade duplicada.",
+                    now,
+                ),
+            )
+            return None
+
+        selected_rank_id = int(source_rank["id"])
+        selected_rank_level = int(source_rank["level"])
+        if current_member and current_member["rank_id"] is not None:
+            cursor = await connection.execute(
+                "SELECT level FROM ranks WHERE id=? AND guild_id=?",
+                (int(current_member["rank_id"]), source_guild_id),
+            )
+            current_rank = await cursor.fetchone()
+            if current_rank and int(current_rank["level"]) > selected_rank_level:
+                selected_rank_id = int(current_member["rank_id"])
+                selected_rank_level = int(current_rank["level"])
+
+        cursor = await connection.execute(
+            """
+            SELECT r.*, m.id AS linked_member_id
+            FROM registration_gate_records r
+            LEFT JOIN members m ON m.id=r.member_id
+            WHERE r.guild_id=? AND r.discord_id=?
+            """,
+            (source_guild_id, discord_id),
+        )
+        current_registration = await cursor.fetchone()
+        await connection.execute(
+            """
+            INSERT INTO members(
+                guild_id, discord_id, discord_nick, mta_nick, character_id, rank_id,
+                unit, status, joined_at, last_activity_at, created_at, updated_at,
+                origin_recruitment_application_id
+            ) VALUES (?, ?, ?, ?, ?, ?, 'BGR', 'ACTIVE', ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, discord_id) DO UPDATE SET
+                discord_nick=excluded.discord_nick,
+                mta_nick=excluded.mta_nick,
+                character_id=excluded.character_id,
+                rank_id=excluded.rank_id,
+                unit='BGR', status='ACTIVE', updated_at=excluded.updated_at,
+                origin_recruitment_application_id=excluded.origin_recruitment_application_id
+            """,
+            (
+                source_guild_id,
+                discord_id,
+                str(application["discord_username"] or ""),
+                mta_nick,
+                bgr_id,
+                selected_rank_id,
+                now,
+                now,
+                now,
+                now,
+                int(application["id"]),
+            ),
+        )
+        cursor = await connection.execute(
+            "SELECT id FROM members WHERE guild_id=? AND discord_id=?",
+            (source_guild_id, discord_id),
+        )
+        source_member_id = int((await cursor.fetchone())["id"])
+        cursor = await connection.execute(
+            "SELECT MIN(level) AS minimum_level FROM ranks WHERE guild_id=? AND active=1",
+            (source_guild_id,),
+        )
+        minimum_rank = await cursor.fetchone()
+        access_tier = (
+            "RECRUIT"
+            if minimum_rank and selected_rank_level == int(minimum_rank["minimum_level"])
+            else "MEMBER"
+        )
+        await connection.execute(
+            """
+            INSERT INTO registration_gate_records(
+                guild_id, discord_id, status, access_tier, mta_nick, bgr_id,
+                member_id, recruitment_application_id, source, sync_status,
+                idempotency_key, submitted_at, completed_at, reviewed_at,
+                reviewed_by, review_reason, last_attempt_at, created_at, updated_at
+            ) VALUES (?, ?, 'REGISTERED', ?, ?, ?, ?, ?, 'ADMIN_APPROVAL',
+                      'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, discord_id) DO UPDATE SET
+                status='REGISTERED', access_tier=excluded.access_tier,
+                mta_nick=excluded.mta_nick, bgr_id=excluded.bgr_id,
+                member_id=excluded.member_id,
+                recruitment_application_id=excluded.recruitment_application_id,
+                source='ADMIN_APPROVAL', conflict_code=NULL, conflict_member_id=NULL,
+                sync_status='PENDING', sync_error=NULL,
+                idempotency_key=COALESCE(registration_gate_records.idempotency_key,
+                                         excluded.idempotency_key),
+                completed_at=excluded.completed_at, reviewed_at=excluded.reviewed_at,
+                reviewed_by=excluded.reviewed_by, review_reason=excluded.review_reason,
+                last_attempt_at=excluded.last_attempt_at,
+                version=registration_gate_records.version+1,
+                updated_at=excluded.updated_at
+            """,
+            (
+                source_guild_id,
+                discord_id,
+                access_tier,
+                mta_nick,
+                bgr_id,
+                source_member_id,
+                int(application["id"]),
+                f"rec-source-import:{satellite_guild_id}:{int(application['id'])}",
+                now,
+                now,
+                now,
+                actor_id,
+                "Candidatura aprovada no servidor de recrutamento.",
+                now,
+                now,
+                now,
+            ),
+        )
+        cursor = await connection.execute(
+            """
+            SELECT id FROM registration_gate_records
+            WHERE guild_id=? AND discord_id=?
+            """,
+            (source_guild_id, discord_id),
+        )
+        registration_id = int((await cursor.fetchone())["id"])
+        state_changed = not current_registration or (
+            str(current_registration["status"]) != "REGISTERED"
+            or current_registration["linked_member_id"] is None
+        )
+        if state_changed:
+            await connection.execute(
+                """
+                INSERT INTO registration_gate_events(
+                    guild_id, registration_id, event_type, actor_id, source,
+                    metadata_json, created_at
+                ) VALUES (?, ?, 'REGISTRATION_COMPLETED', ?, 'REC_APPROVAL_IMPORT', ?, ?)
+                """,
+                (
+                    source_guild_id,
+                    registration_id,
+                    actor_id,
+                    json.dumps(
+                        {
+                            "satellite_guild_id": satellite_guild_id,
+                            "application_id": int(application["id"]),
+                            "member_id": source_member_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    now,
+                ),
+            )
+        await connection.execute(
+            """
+            INSERT INTO web_action_outbox(
+                guild_id, action_type, target_discord_id, payload_json,
+                requested_by, correlation_id, available_at, created_at
+            ) VALUES (?, 'MEMBER_SYNC', ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(correlation_id) DO UPDATE SET
+                status='PENDING', attempts=0, available_at=excluded.available_at,
+                processed_at=NULL, last_error=NULL
+            """,
+            (
+                source_guild_id,
+                discord_id,
+                json.dumps(
+                    {
+                        "source": "REC_APPROVAL_IMPORT",
+                        "satellite_guild_id": satellite_guild_id,
+                        "origin_application_id": int(application["id"]),
+                    },
+                    ensure_ascii=False,
+                ),
+                actor_id,
+                f"rec-source-member-sync:{satellite_guild_id}:{int(application['id'])}",
+                now,
+                now,
+            ),
+        )
+        if state_changed:
+            await connection.execute(
+                """
+                INSERT OR IGNORE INTO audit_logs(
+                    correlation_id, guild_id, action, actor_id, target_id,
+                    after_json, reason, created_at
+                ) VALUES (?, ?, 'REC_APPROVAL_IMPORTED_TO_CANONICAL_GUILD', ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"rec-source-import:{satellite_guild_id}:{int(application['id'])}",
+                    source_guild_id,
+                    actor_id,
+                    discord_id,
+                    json.dumps(
+                        {
+                            "satellite_guild_id": satellite_guild_id,
+                            "application_id": int(application["id"]),
+                            "member_id": source_member_id,
+                            "rank_level": selected_rank_level,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "Cadastro aprovado no REC importado para o efetivo canônico.",
+                    now,
+                ),
+            )
+        return source_member_id
+
+    async def import_approved_identity_to_source(
+        self,
+        source_guild_id: int,
+        discord_id: int,
+        *,
+        actor_id: int,
+    ) -> dict[str, object] | None:
+        """Backfill an approved satellite recruit when they join the source guild."""
+        linked_settings = await self.database.fetchall(
+            """
+            SELECT guild_id, value_json FROM guild_settings
+            WHERE setting_key='identity_source_guild_id'
+            """
+        )
+        satellite_guild_ids: list[int] = []
+        for setting in linked_settings:
+            try:
+                configured_source = int(json.loads(str(setting["value_json"])))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if configured_source == int(source_guild_id):
+                satellite_guild_ids.append(int(setting["guild_id"]))
+        for satellite_guild_id in satellite_guild_ids:
+            application = await self.database.fetchone(
+                """
+                SELECT a.*, m.rank_id AS satellite_rank_id
+                FROM recruitment_applications a
+                JOIN members m
+                  ON m.guild_id=a.guild_id AND m.discord_id=a.discord_id
+                WHERE a.guild_id=? AND a.discord_id=? AND a.status='APPROVED'
+                  AND m.status='ACTIVE'
+                ORDER BY COALESCE(a.decided_at, a.updated_at) DESC, a.id DESC
+                LIMIT 1
+                """,
+                (satellite_guild_id, discord_id),
+            )
+            if not application or application["satellite_rank_id"] is None:
+                continue
+            async with self.database.transaction() as connection:
+                member_id = await self._import_approved_member_to_source(
+                    connection,
+                    application=application,
+                    satellite_rank_id=int(application["satellite_rank_id"]),
+                    actor_id=actor_id,
+                    now=self.clock(),
+                )
+            if member_id is not None:
+                row = await self.database.fetchone(
+                    "SELECT * FROM members WHERE id=? AND guild_id=?",
+                    (member_id, source_guild_id),
+                )
+                return dict(row) if row else None
+        return None
 
     async def add_note(
         self, guild_id: int, application_id: int, author_id: int, note: str

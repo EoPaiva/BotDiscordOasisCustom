@@ -293,6 +293,16 @@ class RankSyncSystem(commands.Cog):
             )
         return True
 
+    async def _import_satellite_approval(self, member: discord.Member) -> bool:
+        """Import a REC approval when the recruit reaches the canonical guild."""
+        recruitment = getattr(self.services, "recruitment", None)
+        importer = getattr(recruitment, "import_approved_identity_to_source", None)
+        if not callable(importer):
+            return False
+        actor_id = self.bot.user.id if self.bot.user else member.id
+        imported = await importer(member.guild.id, member.id, actor_id=actor_id)
+        return imported is not None
+
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
         if after.bot:
@@ -344,6 +354,7 @@ class RankSyncSystem(commands.Cog):
         if member.bot:
             return
         try:
+            await self._import_satellite_approval(member)
             await self._mirror_source_identity(member)
         except Exception:
             LOGGER.exception(
@@ -477,6 +488,7 @@ class RankSyncSystem(commands.Cog):
                 try:
                     for member in guild.members:
                         if not member.bot:
+                            await self._import_satellite_approval(member)
                             await self._mirror_source_identity(member)
                     await self._recover_recent_member_audits(guild)
                     summary = await self.services.rank_sync.reconcile_guild(
