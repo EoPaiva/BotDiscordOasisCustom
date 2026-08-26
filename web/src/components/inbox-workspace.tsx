@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 import { decideInboxItem } from "@/app/(command)/actions";
 import { Status } from "@/components/ui";
@@ -21,6 +21,8 @@ export function InboxWorkspace({ items }: { items: InboxItem[] }) {
     () => items.find((item) => `${item.type}:${item.id}` === selectedId) ?? items[0],
     [items, selectedId],
   );
+  const decisionPanelId = useId();
+  const decisionTitleId = useId();
   if (!selected) return <div className="empty-state"><span>—</span><div><strong>Caixa regular</strong><p>Nenhuma decisão aguarda análise.</p></div></div>;
   return (
     <div className="inbox-workspace">
@@ -28,7 +30,7 @@ export function InboxWorkspace({ items }: { items: InboxItem[] }) {
         {items.map((item) => {
           const active = `${item.type}:${item.id}` === `${selected.type}:${selected.id}`;
           return <li key={`${item.type}:${item.id}`}>
-            <button aria-current={active ? "true" : undefined} className={clsx(active && "active")} onClick={() => setSelectedId(`${item.type}:${item.id}`)}>
+            <button aria-controls={decisionPanelId} aria-current={active ? "true" : undefined} className={clsx(active && "active")} onClick={() => setSelectedId(`${item.type}:${item.id}`)}>
               <code>#{item.type.slice(0, 3)}-{String(item.id).padStart(4, "0")}</code>
               <strong>{label(item.type)}</strong>
               <span>{String(item.data.mta_nick ?? item.data.discord_id ?? "Solicitante")}</span>
@@ -37,8 +39,8 @@ export function InboxWorkspace({ items }: { items: InboxItem[] }) {
           </li>;
         })}
       </ul>
-      <article className="decision-panel">
-        <header><div><span className="technical-index">PROCESSO / {selected.id}</span><h2>{label(selected.type)}</h2></div><Status value={selected.data.status ?? "PENDING"} /></header>
+      <article aria-labelledby={decisionTitleId} className="decision-panel" id={decisionPanelId}>
+        <header><div><span className="technical-index">PROCESSO / {selected.id}</span><h2 id={decisionTitleId}>{label(selected.type)}</h2></div><Status value={selected.data.status ?? "PENDING"} /></header>
         <dl className="decision-fields">{visibleFields(selected.data).map(([key, value]) => <div key={key}><dt>{label(key)}</dt><dd>{typeof value === "number" && /_at$/.test(key) ? dateTime(value) : String(value)}</dd></div>)}</dl>
         {selected.type === "RECRUITMENT_APPLICATION" ? <div className="decision-form"><p>A candidatura exige leitura do dossiê, integridade, entrevista e confirmação humana separada.</p><Link className="button button-primary" href={`/recruitment/${selected.id}`}>Abrir dossiê de recrutamento</Link></div> : <form action={decideInboxItem} className="decision-form">
           <input type="hidden" name="itemId" value={selected.id} /><input type="hidden" name="itemType" value={selected.type} />
