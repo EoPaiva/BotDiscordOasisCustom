@@ -1261,3 +1261,13 @@ Fora do escopo atual: eventos, API e integração MTA.
 - TDD: `b52379c` registra o contrato RED e `d0681c6` entrega o GREEN.
 - Gate consolidado do portal: 10 testes focados, **62 testes web**, `npm audit` sem vulnerabilidades,
   typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
+
+# Site CHOQUE — briefing de mudanças semântico pronto localmente em 2026-08-26
+
+- O briefing dos últimos sete dias agora usa `<ul>` com nome acessível e um `<li>` por contagem,
+  tornando explícita a coleção quando `view_changes` está ativo.
+- Chaves, valores, limite de seis entradas, ordem, ícones e estado sem alterações foram preservados;
+  o CSS neutraliza somente os estilos nativos da lista.
+- TDD: `6de2297` registra o contrato RED e `b3db98c` entrega o GREEN.
+- Gate consolidado do portal: 11 testes focados, **63 testes web**, `npm audit` sem vulnerabilidades,
+  typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
