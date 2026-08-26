@@ -12,12 +12,13 @@ describe("recruitment guild routing", () => {
     cookieGet.mockReset();
     process.env.DEFAULT_GUILD_ID = "1146622062895579186";
     delete process.env.RECRUITMENT_GUILD_IDS;
+    delete process.env.RECRUITMENT_DEFAULT_GUILD_ID;
   });
 
-  it("keeps the primary guild without an explicit context", async () => {
+  it("routes new recruitment traffic to REC without an explicit context", async () => {
     cookieGet.mockReturnValue(undefined);
     const { getRecruitmentGuildId } = await import("./recruitment-guild");
-    await expect(getRecruitmentGuildId()).resolves.toBe("1146622062895579186");
+    await expect(getRecruitmentGuildId()).resolves.toBe("1541908574463070311");
   });
 
   it("routes the REC context to the secondary guild", async () => {
@@ -26,9 +27,15 @@ describe("recruitment guild routing", () => {
     await expect(getRecruitmentGuildId()).resolves.toBe("1541908574463070311");
   });
 
-  it("ignores an untrusted guild cookie", async () => {
-    cookieGet.mockReturnValue({ value: "999999999999999999" });
+  it("keeps the primary guild when its context is explicit", async () => {
+    cookieGet.mockReturnValue({ value: "1146622062895579186" });
     const { getRecruitmentGuildId } = await import("./recruitment-guild");
     await expect(getRecruitmentGuildId()).resolves.toBe("1146622062895579186");
+  });
+
+  it("ignores an untrusted guild cookie and falls back to REC", async () => {
+    cookieGet.mockReturnValue({ value: "999999999999999999" });
+    const { getRecruitmentGuildId } = await import("./recruitment-guild");
+    await expect(getRecruitmentGuildId()).resolves.toBe("1541908574463070311");
   });
 });
