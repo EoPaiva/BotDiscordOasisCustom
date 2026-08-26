@@ -1271,3 +1271,13 @@ Fora do escopo atual: eventos, API e integração MTA.
 - TDD: `6de2297` registra o contrato RED e `b3db98c` entrega o GREEN.
 - Gate consolidado do portal: 11 testes focados, **63 testes web**, `npm audit` sem vulnerabilidades,
   typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
+
+# Site CHOQUE — patrulhas ativas semânticas prontas localmente em 2026-08-26
+
+- A coleção de patrulhas ativas do dashboard agora usa `<ul>` com nome acessível e um `<li>` por
+  operação; cada ficha permanece um `<article>` independente dentro do item.
+- Identificador, status, call, efetivo, comandante, duração, ordem e dados foram preservados; o CSS
+  apenas neutraliza estilos nativos da lista.
+- TDD: `c38d050` registra o contrato RED e `2fab9ce` entrega o GREEN.
+- Gate consolidado do portal: 12 testes focados, **64 testes web**, `npm audit` sem vulnerabilidades,
+  typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.

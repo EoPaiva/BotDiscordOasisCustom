@@ -810,9 +810,11 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     e `ff86f4e` entrega o GREEN. O quinto corte expôs as pendências administrativas recentes como
     `<ul>` nomeada, com links preservados dentro de itens `<li>`; `b52379c` registra o RED e `d0681c6`
     entrega o GREEN. O sexto corte expôs o briefing de mudanças como `<ul>` nomeada e um `<li>` por
-    contagem, incluindo o estado vazio; `6de2297` registra o RED e `b3db98c` entrega o GREEN. Gate
-    atual: 11 testes focados, 63 testes web, `npm audit` sem vulnerabilidades, typecheck, lint e build.
-    Os cortes permanecem somente locais e não publicados.
+    contagem, incluindo o estado vazio; `6de2297` registra o RED e `b3db98c` entrega o GREEN. O sétimo
+    corte expôs patrulhas ativas como `<ul>` nomeada com um `<li>` por operação, preservando
+    cada registro `<article>`; `c38d050` registra o RED e `2fab9ce` entrega o GREEN. Gate atual: 12
+    testes focados, 64 testes web, `npm audit` sem vulnerabilidades, typecheck, lint e build. Os cortes
+    permanecem somente locais e não publicados.
 
 58. ⏳ **Prompt Master — Identidade Visual / Design System CHOQUE — registrado na fila.**
     Fonte recebida: `C:\Users\mpaii\.codex\attachments\8f7db861-0f81-4655-a0fc-b3fc90133b12\pasted-text.txt`,
