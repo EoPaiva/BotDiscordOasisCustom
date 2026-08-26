@@ -797,7 +797,11 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     metadados oficiais, brasão otimizado, recrutamento, avaliação acessível, acompanhamento humano e
     status com fonte real. Gates: 57 testes web, lint, typecheck e build. Permanecem ativos o Centro
     de Comando, telas administrativas, mobile/acessibilidade e consolidação visual completa, sem
-    alterar contratos, URLs, RBAC ou regras de negócio existentes.
+    alterar contratos, URLs, RBAC ou regras de negócio existentes. O primeiro corte local do Centro
+    de Comando tornou o drawer móvel modal e acessível: estado expandido explícito, foco contido,
+    fechamento por `Escape` e retorno do foco ao acionador. TDD preservado nos commits `2ca8770`
+    (RED) e `20d4153` (GREEN); 3 testes focados, 58 testes web, typecheck, lint e build passaram. O
+    corte permanece somente local e não foi publicado.
 
 58. ⏳ **Prompt Master — Identidade Visual / Design System CHOQUE — registrado na fila.**
     Fonte recebida: `C:\Users\mpaii\.codex\attachments\8f7db861-0f81-4655-a0fc-b3fc90133b12\pasted-text.txt`,

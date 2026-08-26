@@ -5,12 +5,12 @@
 
 ## Handoff
 
-**Última atualização:** 2026-08-26 13:16 -03:00
+**Última atualização:** 2026-08-26 13:38 -03:00
 
 **Branch atual:** `codex/phase-b-transfers`
 
-**Commit funcional de base:**
-`447ce5ec9676601a20bd8157cb27419d559b275f` — `docs: capture final transfer invariants`
+**Último commit funcional:**
+`20d4153` — `fix: make command drawer keyboard accessible`
 
 **Commit do protocolo:** este arquivo pertence ao commit de documentação imediatamente posterior;
 confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferência impossível.
@@ -23,7 +23,9 @@ confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferên
 
 Na máquina principal, auditar os blocos locais ADV, Cursos e Transferências contra o checkout que
 opera o projeto, validar migrations 49–51 numa cópia do banco e preparar um rollout controlado. A
-implementação local de Transferências já está concluída; não há código parcial neste computador.
+implementação local de Transferências está concluída. Enquanto essa etapa externa permanece
+bloqueada, a Fase 57 pode avançar localmente em cortes pequenos e fecháveis; o primeiro corte do
+Centro de Comando está concluído e não há código parcial neste computador.
 
 ### Critério de conclusão
 
@@ -38,14 +40,15 @@ implementação local de Transferências já está concluída; não há código 
 
 ### Última ação concluída
 
-O protocolo de continuidade foi instalado na raiz. `PROJECT_STATE.md` foi reconstruído a partir do
-README, manifests, ADRs, segurança, fila, ledger, relatório, Git e estrutura real. Este handoff
-compacta o checkpoint final de Transferências sem apagar `PROJECT_HANDOFF.md`.
+O protocolo de continuidade foi instalado na raiz. Depois, a Fase 57 avançou no menu móvel do Centro
+de Comando: `2ca8770` preserva o teste RED e `20d4153` implementa drawer modal, `aria-expanded`, foco
+inicial/contido, fechamento por `Escape` e retorno do foco ao acionador. Nenhum contrato, URL, RBAC,
+API ou regra de negócio foi alterado.
 
 ### Ação em andamento
 
-Nenhuma alteração funcional. A fase local de Transferências terminou em ponto seguro e aguarda a
-troca para a máquina principal.
+Nenhuma alteração está em andamento. Transferências e o corte acessível da Fase 57 terminaram em
+pontos seguros e commitados.
 
 ### PRÓXIMA AÇÃO EXATA
 
@@ -153,6 +156,13 @@ aprovados são `LEGACY_APPROVED` e não recebem patente inferida ou retroativa.
 Esses resultados pertencem ao checkpoint local anterior; devem ser repetidos na máquina principal
 antes de qualquer rollout.
 
+### Gate do corte local da Fase 57
+
+- 3 testes focados de `app-shell` passaram.
+- 58 testes Web passaram.
+- Typecheck, ESLint e build Next.js passaram.
+- `git diff --check` passou antes dos commits.
+
 ### Validação deste checkpoint documental
 
 - Confirmar que os três arquivos existem na raiz e não contêm placeholders de template.
@@ -197,7 +207,9 @@ npm run build
 
 - [ ] Com gates verdes e autorização nova, executar merge/push/deploy controlado, validar health,
   migration, Gateway único, duas decisões, outbox e rollback.
-- [ ] Retomar a Fase 57, Reformulação Completa do Site, preservando contratos, URLs, RBAC e funções.
+- [ ] Continuar a Fase 57 em outro corte local: abrir
+  `web/src/app/(command)/dashboard/page.tsx`, inventariar a apresentação atual contra o contrato
+  tático e escrever primeiro um teste focado para a menor melhoria acessível, sem dados simulados.
 - [ ] Consolidar a Fase 58, Design System, sem inventar o trecho ausente do prompt original.
 - [ ] Continuar os blocos restantes do Prompt Master do ecossistema pela ordem da fila oficial.
 
@@ -223,6 +235,8 @@ o rollout depende de gates verdes e de um novo “pode publicar” explícito.
   `9a71063`, `0c3a989`, `305888c`, `fab9bbb`, `447ce5e`.
 - A branch estava limpa antes da criação destes três documentos.
 - Nenhuma variável local foi lida, impressa ou copiada.
+- O protocolo e o corte da Fase 57 acrescentaram `4a5faba`, `2ca8770` e `20d4153`; confirmar o hash
+  do commit documental final com `git log -1 --oneline`.
 
 ## 12. Não fazer
 

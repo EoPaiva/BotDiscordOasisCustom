@@ -1210,3 +1210,13 @@ Fora do escopo atual: eventos, API e integração MTA.
 - Gates locais: 68 testes focados, **569 testes Python**, scanner de segredos, `pip-audit`, Ruff,
   compileall, `main.py --check`, diff, `npm audit`, typecheck, lint, **57 testes web** e build.
   Nenhuma ação de produção foi executada.
+
+# Site CHOQUE — drawer móvel acessível pronto localmente em 2026-08-26
+
+- O primeiro corte do Centro de Comando na Fase 57 preserva navegação, URLs, dados e RBAC e corrige
+  somente o comportamento acessível do menu móvel.
+- O acionador expõe `aria-controls`/`aria-expanded`; o drawer só entra na árvore quando aberto, usa
+  semântica modal, recebe e contém o foco, fecha com `Escape` e devolve o foco ao acionador.
+- TDD: `2ca8770` registra o contrato RED e `20d4153` entrega o GREEN.
+- Gates locais: 3 testes focados, **58 testes web**, typecheck, ESLint e build Next.js. Nenhuma ação
+  de produção foi executada.
