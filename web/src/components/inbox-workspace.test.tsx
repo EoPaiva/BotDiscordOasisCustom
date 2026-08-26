@@ -31,4 +31,18 @@ describe("administrative inbox workspace", () => {
     expect(screen.getByRole("heading", { name: "SHIFT REVIEW" })).toBeInTheDocument();
     expect(screen.getByRole("article", { name: "SHIFT REVIEW" })).toBe(panel);
   });
+
+  it("exposes valid inbox times in a machine-readable format", () => {
+    const inboxTime = Date.parse("2026-08-26T15:30:00.000Z");
+    const view = render(<InboxWorkspace items={[
+      { type: "TRANSFER", id: 3, data: { inbox_time: inboxTime, status: "PENDING" } },
+      { type: "SHIFT_REVIEW", id: 4, data: { status: "PENDING" } },
+    ]} />);
+
+    const times = within(view.container).getByRole("list", { name: "Pendências administrativas" }).querySelectorAll("time");
+
+    expect(times).toHaveLength(2);
+    expect(times[0]).toHaveAttribute("dateTime", "2026-08-26T15:30:00.000Z");
+    expect(times[1]).not.toHaveAttribute("dateTime");
+  });
 });
