@@ -230,3 +230,42 @@ async def test_concurrent_transfer_decisions_create_only_one_application(service
         (GUILD_ID, REQUESTER_ID),
     )
     assert applications["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_transfer_close_and_reopen_keep_protocol_state_consistent(service_bundle):
+    tickets = service_bundle["tickets"]
+    ticket_id = await tickets.create(
+        GUILD_ID,
+        REQUESTER_ID,
+        "TRANSFER",
+        transfer_payload(),
+    )
+    await tickets.bind_room(GUILD_ID, ticket_id, 81_200)
+
+    await tickets.close_by_request(
+        GUILD_ID,
+        ticket_id,
+        REQUESTER_ID,
+        "Solicitante desistiu.",
+    )
+    cancelled = await tickets.transfer_case_for_ticket(GUILD_ID, ticket_id)
+    assert cancelled["status"] == "CANCELLED"
+
+    await tickets.mark_room_archived(GUILD_ID, ticket_id, REVIEWER_ID)
+    reopened_ticket = await tickets.reopen(
+        GUILD_ID,
+        ticket_id,
+        REVIEWER_ID,
+        "Solicitante apresentou nova documentação.",
+    )
+    reopened = await tickets.transfer_case_for_ticket(GUILD_ID, ticket_id)
+    history = await tickets.transfer_history(GUILD_ID, ticket_id)
+
+    assert reopened_ticket["status"] == "IN_REVIEW"
+    assert reopened["status"] == "PENDING"
+    assert [row["event_type"] for row in history] == [
+        "SUBMITTED",
+        "CANCELLED",
+        "REOPENED",
+    ]
