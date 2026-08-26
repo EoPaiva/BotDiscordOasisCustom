@@ -424,11 +424,13 @@ class PartnershipModal(ErrorModal, title="Solicitação de parceria"):
 async def send_my_tickets(interaction: discord.Interaction) -> None:
     actor = await require_guild_user(interaction)
     rows = await get_bot(interaction).services.tickets.mine(actor.guild.id, actor.id)
-    lines = [
-        f"**#{row['id']} • {TICKET_LABELS[row['ticket_type']]}**\n"
-        f"└ {STATUS_LABELS[row['status']]} • {discord_timestamp(row['submitted_at'], 'R')}"
-        for row in rows
-    ]
+    lines = []
+    for row in rows:
+        protocol = f" • `{row['transfer_protocol']}`" if row["transfer_protocol"] else ""
+        lines.append(
+            f"**#{row['id']} • {TICKET_LABELS[row['ticket_type']]}{protocol}**\n"
+            f"└ {STATUS_LABELS[row['status']]} • {discord_timestamp(row['submitted_at'], 'R')}"
+        )
     await interaction.response.send_message(
         embed=branded_embed(
             get_bot(interaction).config.branding,

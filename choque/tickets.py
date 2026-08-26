@@ -1147,9 +1147,12 @@ class TicketService:
     async def mine(self, guild_id: int, discord_id: int, *, limit: int = 10):
         return await self.database.fetchall(
             """
-            SELECT * FROM service_tickets
-            WHERE guild_id=? AND discord_id=?
-            ORDER BY submitted_at DESC, id DESC LIMIT ?
+            SELECT ticket.*, transfer.protocol AS transfer_protocol
+            FROM service_tickets AS ticket
+            LEFT JOIN transfer_cases AS transfer
+              ON transfer.guild_id=ticket.guild_id AND transfer.ticket_id=ticket.id
+            WHERE ticket.guild_id=? AND ticket.discord_id=?
+            ORDER BY ticket.submitted_at DESC, ticket.id DESC LIMIT ?
             """,
             (guild_id, discord_id, limit),
         )
