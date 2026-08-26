@@ -97,12 +97,12 @@ export default async function DashboardPage() {
         </section>
         {data.capabilities.view_changes && <section className="command-section briefing-sector">
           <SectionHeader index="05" title="Briefing de mudanças" meta="Últimos 7 dias" />
-          <div className="briefing-lines">
+          <ul aria-label="Resumo de mudanças dos últimos 7 dias" className="briefing-lines">
             {Object.entries(changeCounts).slice(0, 6).map(([key, value]) => (
-              <div key={key}><Activity size={14} aria-hidden="true" /><span>{label(key)}</span><strong>{String(value)}</strong></div>
+              <li key={key}><Activity size={14} aria-hidden="true" /><span>{label(key)}</span><strong>{String(value)}</strong></li>
             ))}
-            {!Object.keys(changeCounts).length && <div><ShieldAlert size={14} /><span>Sem alterações registradas</span></div>}
-          </div>
+            {!Object.keys(changeCounts).length && <li><ShieldAlert size={14} aria-hidden="true" /><span>Sem alterações registradas</span></li>}
+          </ul>
         </section>}
       </div>
     </>
