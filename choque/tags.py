@@ -1184,6 +1184,121 @@ class TagService:
             )
             return self._row(completed)
 
+    async def complete_from_set_role_observation(
+        self, guild_id: int, discord_id: int
+    ) -> dict[str, object] | None:
+        """Close a waiting-role case when Discord already shows TAG SETADA.
+
+        A manual Discord role change has no reliable actor identity. The
+        transition preserves any claimed responsibility, clears unknown set
+        and confirmation actors, records the observation as a system event,
+        and makes the durable aggregate converge before the listener removes
+        AGUARDANDO SET.
+        """
+        now = self.clock()
+        active_statuses = tuple(sorted(self.ACTIVE_STATUSES))
+        placeholders = ",".join("?" for _ in active_statuses)
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                f"""
+                SELECT * FROM tag_requests
+                WHERE guild_id=? AND discord_id=?
+                  AND intake_source='WAITING_ROLE_SCAN'
+                  AND status IN ({placeholders})
+                ORDER BY requested_at DESC, id DESC LIMIT 1
+                """,
+                (guild_id, discord_id, *active_statuses),
+            )
+            request = await cursor.fetchone()
+            if request is None:
+                return None
+
+            previous_status = str(request["status"])
+            cursor = await connection.execute(
+                f"""
+                UPDATE tag_requests
+                SET status='CONCLUIDO', set_by=NULL, set_at=?,
+                    set_character_id=character_id_snapshot,
+                    confirmed_by=NULL, confirmed_at=?,
+                    version=version+1, updated_at=?
+                WHERE id=? AND version=? AND intake_source='WAITING_ROLE_SCAN'
+                  AND status IN ({placeholders})
+                """,
+                (
+                    now,
+                    now,
+                    now,
+                    int(request["id"]),
+                    int(request["version"]),
+                    *active_statuses,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ConflictError("A solicitação de tag mudou durante a reconciliação.")
+
+            cursor = await connection.execute(
+                "SELECT * FROM tag_requests WHERE id=?", (int(request["id"]),)
+            )
+            completed = await cursor.fetchone()
+            assert completed is not None
+            correlation_id = str(uuid.uuid4())
+            await connection.execute(
+                """
+                INSERT INTO tag_request_events(
+                    tag_request_id, guild_id, event_type, previous_status,
+                    next_status, actor_id, metadata_json, correlation_id, occurred_at
+                ) VALUES (?, ?, 'TAG_SET_ROLE_OBSERVED', ?, 'CONCLUIDO', NULL, ?, ?, ?)
+                """,
+                (
+                    int(request["id"]),
+                    guild_id,
+                    previous_status,
+                    json.dumps(
+                        {"source": "DISCORD_ROLE", "role_state": "TAG_SETADA"},
+                        sort_keys=True,
+                    ),
+                    correlation_id,
+                    now,
+                ),
+            )
+            await connection.execute(
+                """
+                UPDATE tag_role_sync_state SET requested_version=?, updated_at=?
+                WHERE tag_request_id=?
+                """,
+                (int(completed["version"]), now, int(request["id"])),
+            )
+            await connection.execute(
+                """
+                UPDATE members
+                SET tag_status='CONCLUIDO', tag_completed_at=?,
+                    tag_set_by=?, tag_last_confirmed_at=?, updated_at=?
+                WHERE id=?
+                """,
+                (
+                    now,
+                    completed["set_by"],
+                    now,
+                    now,
+                    int(request["member_id"]),
+                ),
+            )
+            await self.audit.record(
+                guild_id,
+                "TAG_SET_ROLE_OBSERVED",
+                target_id=discord_id,
+                before={"status": previous_status},
+                after={
+                    "tag_request_id": int(request["id"]),
+                    "status": "CONCLUIDO",
+                    "source": "DISCORD_ROLE",
+                },
+                connection=connection,
+                correlation_id=correlation_id,
+            )
+            await self._enqueue_role_sync(connection, completed, requested_by=0, now=now)
+            return self._row(completed)
+
     async def pending_confirmation_notifications(
         self, guild_id: int, *, limit: int = 50
     ) -> list[dict[str, object]]:

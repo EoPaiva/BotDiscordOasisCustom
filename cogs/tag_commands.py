@@ -2038,6 +2038,9 @@ class TagCommands(commands.Cog):
         )
         set_added = int(set_role_id) not in before_roles and int(set_role_id) in after_roles
         if set_added and int(waiting_role_id) in after_roles:
+            completed = await self.services.tags.complete_from_set_role_observation(
+                after.guild.id, after.id
+            )
             waiting_role = after.guild.get_role(int(waiting_role_id))
             if waiting_role is not None:
                 await after.remove_roles(
@@ -2050,6 +2053,9 @@ class TagCommands(commands.Cog):
                     target_id=after.id,
                     after={"set_role_id": int(set_role_id)},
                 )
+            if completed is not None:
+                await self.refresh_request_card(after.guild, completed)
+                await self.refresh_admin_panel(after.guild)
             return
         if waiting_added and int(set_role_id) not in after_roles:
             try:

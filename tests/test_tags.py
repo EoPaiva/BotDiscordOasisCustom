@@ -359,6 +359,79 @@ async def test_waiting_role_claim_notifies_member_and_responsible_finishes_atomi
 
 
 @pytest.mark.asyncio
+async def test_external_set_role_closes_waiting_role_request_durably(service_bundle):
+    service = TagService(
+        service_bundle["database"],
+        service_bundle["audit"],
+        clock=service_bundle["clock"],
+    )
+    prompt = await service.request_tag_from_waiting_role(GUILD_ID, DISCORD_ID)
+    waiting = await service.report_waiting_role_missing(
+        int(prompt["id"]),
+        discord_id=DISCORD_ID,
+        expected_version=int(prompt["version"]),
+    )
+    waiting = await service.claim_request(
+        int(waiting["id"]),
+        responsible_id=701,
+        expected_version=int(waiting["version"]),
+    )
+
+    completed = await service.complete_from_set_role_observation(GUILD_ID, DISCORD_ID)
+    repeated = await service.complete_from_set_role_observation(GUILD_ID, DISCORD_ID)
+
+    assert completed is not None
+    assert completed["id"] == waiting["id"]
+    assert completed["status"] == "CONCLUIDO"
+    assert completed["claimed_by"] == 701
+    assert completed["set_by"] is None
+    assert completed["confirmed_by"] is None
+    assert repeated is None
+    member = await service_bundle["database"].fetchone(
+        "SELECT tag_status, tag_completed_at, tag_set_by FROM members WHERE guild_id=? AND discord_id=?",
+        (GUILD_ID, DISCORD_ID),
+    )
+    assert member["tag_status"] == "CONCLUIDO"
+    assert member["tag_completed_at"] is not None
+    assert member["tag_set_by"] is None
+    assert (await service.timeline(int(waiting["id"])))[-1]["event_type"] == (
+        "TAG_SET_ROLE_OBSERVED"
+    )
+    sync_state = await service_bundle["database"].fetchone(
+        "SELECT requested_version FROM tag_role_sync_state WHERE tag_request_id=?",
+        (int(waiting["id"]),),
+    )
+    assert sync_state["requested_version"] == completed["version"]
+    role_sync = await service_bundle["database"].fetchone(
+        """
+        SELECT payload_json, requested_by, status FROM web_action_outbox
+        WHERE correlation_id=?
+        """,
+        (f"tag-role-sync:{completed['id']}:v{completed['version']}",),
+    )
+    assert json.loads(role_sync["payload_json"]) == {
+        "request_id": completed["id"],
+        "request_version": completed["version"],
+    }
+    assert role_sync["requested_by"] == 0
+    assert role_sync["status"] == "PENDING"
+    audit = await service_bundle["database"].fetchone(
+        """
+        SELECT action, actor_id, target_id, before_json, after_json FROM audit_logs
+        WHERE action='TAG_SET_ROLE_OBSERVED' ORDER BY id DESC LIMIT 1
+        """
+    )
+    assert audit["actor_id"] is None
+    assert audit["target_id"] == DISCORD_ID
+    assert json.loads(audit["before_json"]) == {"status": "ATENDIMENTO_ASSUMIDO"}
+    assert json.loads(audit["after_json"]) == {
+        "tag_request_id": completed["id"],
+        "status": "CONCLUIDO",
+        "source": "DISCORD_ROLE",
+    }
+
+
+@pytest.mark.asyncio
 async def test_departed_waiting_role_member_is_archived_without_erasing_history(service_bundle):
     service = TagService(
         service_bundle["database"],
@@ -435,6 +508,57 @@ async def test_tag_cog_archives_member_request_when_the_member_leaves() -> None:
 
     tags.archive_departed_member.assert_awaited_once_with(GUILD_ID, DISCORD_ID)
     cog.refresh_request_card.assert_awaited_once_with(guild, archived)
+    cog.refresh_admin_panel.assert_awaited_once_with(guild)
+
+
+@pytest.mark.asyncio
+async def test_tag_cog_persists_external_set_role_before_removing_waiting_role() -> None:
+    waiting_role = _TagRole(101)
+    set_role = _TagRole(202)
+    guild = _TagGuild(_TagMember(DISCORD_ID), [waiting_role, set_role])
+    call_order: list[str] = []
+
+    async def complete_observation(*_args: object) -> dict[str, object]:
+        call_order.append("persist")
+        return completed
+
+    async def remove_waiting_role(*_args: object, **_kwargs: object) -> None:
+        call_order.append("remove")
+
+    before = SimpleNamespace(id=DISCORD_ID, guild=guild, bot=False, roles=[waiting_role])
+    after = SimpleNamespace(
+        id=DISCORD_ID,
+        guild=guild,
+        bot=False,
+        roles=[waiting_role, set_role],
+        remove_roles=AsyncMock(side_effect=remove_waiting_role),
+    )
+    completed = {
+        "id": 42,
+        "guild_id": GUILD_ID,
+        "discord_id": DISCORD_ID,
+        "status": "CONCLUIDO",
+        "version": 3,
+    }
+    settings = SimpleNamespace(get=AsyncMock(side_effect=[waiting_role.id, set_role.id]))
+    tags = SimpleNamespace(
+        complete_from_set_role_observation=AsyncMock(side_effect=complete_observation)
+    )
+    audit = SimpleNamespace(record=AsyncMock())
+    cog = object.__new__(TagCommands)
+    cog.services = SimpleNamespace(settings=settings, tags=tags, audit=audit)
+    cog.refresh_request_card = AsyncMock(return_value=True)
+    cog.refresh_admin_panel = AsyncMock()
+
+    await cog.on_member_update(before, after)
+
+    assert call_order == ["persist", "remove"]
+    tags.complete_from_set_role_observation.assert_awaited_once_with(GUILD_ID, DISCORD_ID)
+    after.remove_roles.assert_awaited_once_with(
+        waiting_role,
+        reason="CHOQUE - BGR • TAG SETADA remove AGUARDANDO SET",
+    )
+    cog.refresh_request_card.assert_awaited_once_with(guild, completed)
     cog.refresh_admin_panel.assert_awaited_once_with(guild)
 
 
