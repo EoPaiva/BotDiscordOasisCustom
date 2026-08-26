@@ -8,12 +8,24 @@ from cogs.member_commands import MemberCommands
 from cogs.ticket_commands import TicketCommands
 from scripts.migrate_rec_choque import (
     CHANNELS,
+    RECRUITMENT_URL,
     _copy_data,
     _permission_overwrites,
     _preserve_member_overwrites,
     _recruitment_position_rows,
     run,
 )
+
+
+def test_rec_recruitment_button_uses_the_public_portal_root() -> None:
+    assert RECRUITMENT_URL == "https://choquebgr.online/recrutamento/"
+    assert "/servidor" not in RECRUITMENT_URL
+
+
+def test_rec_inactivity_channel_is_private_and_administrative() -> None:
+    spec = next(item for item in CHANNELS if item.key == "recruitment.inactivity")
+    assert spec.category == "recruitment_admin"
+    assert spec.private is True
 
 
 def test_recruitment_results_are_public_in_recruitment_category() -> None:

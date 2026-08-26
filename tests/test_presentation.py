@@ -8,6 +8,7 @@ import pytest
 from choque.bot import COGS
 from choque.config import Branding
 from choque.web_urls import recruitment_portal_url, recruitment_status_url
+from cogs.activity_commands import AbsenceAlertView
 from cogs.medals_system import MEDALS, MedalsPanelView, build_medals_embed
 from cogs.member_commands import (
     RegistrationModal,
@@ -33,6 +34,23 @@ def bot_stub():
 
 def custom_ids(view) -> set[str]:
     return {str(item.custom_id) for item in view.children if item.custom_id}
+
+
+def test_rec_absence_alert_keeps_source_identity_in_all_persistent_actions() -> None:
+    view = AbsenceAlertView(1146622062895579186, 321)
+    buttons = [item.item for item in view.children]
+
+    assert view.timeout is None
+    assert [button.label for button in buttons] == [
+        "Desativar alertas",
+        "Registrar ausência justificada",
+        "Desligar por inatividade",
+    ]
+    assert {str(button.custom_id) for button in buttons} == {
+        "choque:activity:absence:1146622062895579186:321:disable:v2",
+        "choque:activity:absence:1146622062895579186:321:justify:v2",
+        "choque:activity:absence:1146622062895579186:321:dismiss:v1",
+    }
 
 
 class SettingsStub:

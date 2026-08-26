@@ -4252,6 +4252,37 @@ CREATE INDEX ix_recruitment_entry_method
 ON recruitment_applications(guild_id, entry_method, status, submitted_at, id);
 """
 
+MIGRATION_048 = """
+-- O desligamento originado por um alerta de inatividade precisa sobreviver a
+-- reinicios e cliques repetidos. O registro abaixo liga a decisao humana ao
+-- alerta original e impede a criacao de duas punicoes para o mesmo aviso.
+CREATE TABLE activity_absence_dismissals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    alert_id INTEGER NOT NULL UNIQUE
+        REFERENCES activity_absence_alerts(id) ON DELETE RESTRICT,
+    source_guild_id INTEGER NOT NULL,
+    interaction_guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    punishment_id INTEGER NOT NULL REFERENCES punishments(id) ON DELETE RESTRICT,
+    actor_id INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_activity_absence_dismissals_member
+ON activity_absence_dismissals(source_guild_id, member_id, created_at DESC);
+
+-- Remove a rota intermediaria aposentada que gerava 404 no painel do REC.
+UPDATE guild_settings
+SET value_json='"https://choquebgr.online/recrutamento/"'
+WHERE setting_key='recruitment_public_url'
+  AND value_json IN (
+    '"https://choquebgr.online/recrutamento/servidor?guild=rec"',
+    '"https://choquebgr.online/recrutamento/servidor/recrutamento?guild=rec"'
+  );
+"""
+
 MIGRATIONS = (
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -4300,6 +4331,7 @@ MIGRATIONS = (
     (45, MIGRATION_045),
     (46, MIGRATION_046),
     (47, MIGRATION_047),
+    (48, MIGRATION_048),
 )
 
 

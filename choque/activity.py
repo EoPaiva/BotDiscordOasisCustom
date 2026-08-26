@@ -10,6 +10,7 @@ import aiosqlite
 from .audit import AuditService
 from .database import Database
 from .errors import ConflictError, NotFoundError, ValidationError
+from .models import MemberStatus, PunishmentType
 from .settings import SettingsService
 from .shift_validation import countable_shift_clause
 from .shifts import ShiftService
@@ -540,6 +541,230 @@ class ActivityService:
             "unit_code": alert["unit_code"],
             "disabled_by": actor_id,
             "disabled_at": now,
+        }
+
+    async def dismiss_member_for_absence_alert(
+        self,
+        source_guild_id: int,
+        interaction_guild_id: int,
+        alert_id: int,
+        actor_id: int,
+        reason: str,
+    ) -> dict[str, object]:
+        """Dismiss the canonical member and its REC mirror exactly once."""
+        normalized_reason = reason.strip()
+        if len(normalized_reason) < 3:
+            raise ValidationError("Informe um motivo com pelo menos 3 caracteres.")
+        if interaction_guild_id != source_guild_id:
+            configured_source = await self.settings.get(
+                interaction_guild_id, "identity_source_guild_id"
+            )
+            if not configured_source or int(configured_source) != source_guild_id:
+                raise ValidationError(
+                    "Este servidor não está vinculado à autoridade de pessoal informada."
+                )
+
+        # Recover a decision that committed before its shift cleanup without
+        # holding the database transaction while ShiftService acquires its own
+        # member lock.  Keeping the cleanup inside the transaction creates an
+        # ABBA deadlock when two button clicks race: one task owns the shift
+        # lock and waits for the database while the other owns the database and
+        # waits for the shift lock.
+        completed = await self.database.fetchone(
+            """
+            SELECT * FROM activity_absence_dismissals
+            WHERE alert_id=? AND source_guild_id=?
+            """,
+            (alert_id, source_guild_id),
+        )
+        if completed is not None:
+            await self.shifts.finalize_role_loss(
+                source_guild_id,
+                int(completed["discord_id"]),
+                reason="INACTIVITY_DISMISSAL_RECOVERY",
+            )
+            if interaction_guild_id != source_guild_id:
+                await self.shifts.finalize_role_loss(
+                    interaction_guild_id,
+                    int(completed["discord_id"]),
+                    reason="INACTIVITY_DISMISSAL_MIRROR_RECOVERY",
+                )
+            return {
+                "alert_id": alert_id,
+                "member_id": int(completed["member_id"]),
+                "discord_id": int(completed["discord_id"]),
+                "punishment_id": int(completed["punishment_id"]),
+                "source_guild_id": source_guild_id,
+                "interaction_guild_id": int(completed["interaction_guild_id"]),
+                "already_completed": True,
+            }
+
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT * FROM activity_absence_dismissals
+                WHERE alert_id=? AND source_guild_id=?
+                """,
+                (alert_id, source_guild_id),
+            )
+            completed = await cursor.fetchone()
+            if completed is not None:
+                # A competing click committed while this task waited for the
+                # database.  The winning task owns post-commit cleanup, so this
+                # path must return without acquiring ShiftService locks.
+                return {
+                    "alert_id": alert_id,
+                    "member_id": int(completed["member_id"]),
+                    "discord_id": int(completed["discord_id"]),
+                    "punishment_id": int(completed["punishment_id"]),
+                    "source_guild_id": source_guild_id,
+                    "interaction_guild_id": int(completed["interaction_guild_id"]),
+                    "already_completed": True,
+                }
+
+            cursor = await connection.execute(
+                """
+                SELECT aa.*, m.status AS member_status
+                FROM activity_absence_alerts aa
+                JOIN members m ON m.id=aa.member_id AND m.guild_id=aa.guild_id
+                WHERE aa.guild_id=? AND aa.id=?
+                """,
+                (source_guild_id, alert_id),
+            )
+            alert = await cursor.fetchone()
+            if alert is None:
+                raise NotFoundError("Alerta de inatividade não encontrado.")
+            if str(alert["member_status"]) == MemberStatus.DISMISSED.value:
+                raise ConflictError("O membro já está desligado do efetivo.")
+
+            cursor = await connection.execute(
+                """
+                SELECT id FROM punishments
+                WHERE guild_id=? AND member_id=? AND punishment_type='DISMISSAL'
+                  AND status IN ('SCHEDULED','ACTIVE')
+                """,
+                (source_guild_id, int(alert["member_id"])),
+            )
+            if await cursor.fetchone() is not None:
+                raise ConflictError("O membro já possui um desligamento ativo.")
+
+            cursor = await connection.execute(
+                """
+                INSERT INTO punishments(
+                    guild_id, member_id, discord_id, punishment_type, reason,
+                    previous_member_status, starts_at, ends_at, created_by, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                """,
+                (
+                    source_guild_id,
+                    int(alert["member_id"]),
+                    int(alert["discord_id"]),
+                    PunishmentType.DISMISSAL.value,
+                    normalized_reason,
+                    str(alert["member_status"]),
+                    now,
+                    actor_id,
+                    now,
+                ),
+            )
+            punishment_id = int(cursor.lastrowid)
+            await connection.execute(
+                "UPDATE members SET status='DISMISSED', updated_at=? WHERE id=?",
+                (now, int(alert["member_id"])),
+            )
+
+            mirrored = False
+            if interaction_guild_id != source_guild_id:
+                cursor = await connection.execute(
+                    "SELECT id, status FROM members WHERE guild_id=? AND discord_id=?",
+                    (interaction_guild_id, int(alert["discord_id"])),
+                )
+                mirror = await cursor.fetchone()
+                if mirror is not None and str(mirror["status"]) != MemberStatus.DISMISSED.value:
+                    await connection.execute(
+                        "UPDATE members SET status='DISMISSED', updated_at=? WHERE id=?",
+                        (now, int(mirror["id"])),
+                    )
+                    mirrored = True
+                    await self.audit.record(
+                        interaction_guild_id,
+                        "MEMBER_STATUS_CHANGED",
+                        actor_id=actor_id,
+                        target_id=int(alert["discord_id"]),
+                        before={"status": str(mirror["status"])},
+                        after={
+                            "status": MemberStatus.DISMISSED.value,
+                            "source_guild_id": source_guild_id,
+                            "source_alert_id": alert_id,
+                        },
+                        reason=normalized_reason,
+                        connection=connection,
+                    )
+
+            await connection.execute(
+                """
+                UPDATE activity_absence_alerts
+                SET status='DISABLED', updated_at=?
+                WHERE guild_id=? AND member_id=? AND status='PENDING'
+                """,
+                (now, source_guild_id, int(alert["member_id"])),
+            )
+            await connection.execute(
+                """
+                INSERT INTO activity_absence_dismissals(
+                    alert_id, source_guild_id, interaction_guild_id, member_id,
+                    discord_id, punishment_id, actor_id, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    alert_id,
+                    source_guild_id,
+                    interaction_guild_id,
+                    int(alert["member_id"]),
+                    int(alert["discord_id"]),
+                    punishment_id,
+                    actor_id,
+                    normalized_reason,
+                    now,
+                ),
+            )
+            await self.audit.record(
+                source_guild_id,
+                "ACTIVITY_ABSENCE_MEMBER_DISMISSED",
+                actor_id=actor_id,
+                target_id=int(alert["discord_id"]),
+                before={"status": str(alert["member_status"])},
+                after={
+                    "status": MemberStatus.DISMISSED.value,
+                    "alert_id": alert_id,
+                    "punishment_id": punishment_id,
+                    "interaction_guild_id": interaction_guild_id,
+                    "mirror_updated": mirrored,
+                },
+                reason=normalized_reason,
+                connection=connection,
+            )
+
+        await self.shifts.finalize_role_loss(
+            source_guild_id,
+            int(alert["discord_id"]),
+            reason="INACTIVITY_DISMISSAL",
+        )
+        if interaction_guild_id != source_guild_id:
+            await self.shifts.finalize_role_loss(
+                interaction_guild_id,
+                int(alert["discord_id"]),
+                reason="INACTIVITY_DISMISSAL_MIRROR",
+            )
+        return {
+            "alert_id": alert_id,
+            "member_id": int(alert["member_id"]),
+            "discord_id": int(alert["discord_id"]),
+            "punishment_id": punishment_id,
+            "source_guild_id": source_guild_id,
+            "interaction_guild_id": interaction_guild_id,
+            "already_completed": False,
         }
 
     async def set_rules(

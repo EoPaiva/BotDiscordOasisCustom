@@ -29,7 +29,7 @@ from choque.training import TrainingService  # noqa: E402
 API_BASE = "https://discord.com/api/v10"
 DEFAULT_SOURCE_GUILD_ID = 1146622062895579186
 DEFAULT_TARGET_GUILD_ID = 1541908574463070311
-RECRUITMENT_URL = "https://choquebgr.online/recrutamento/servidor?guild=rec"
+RECRUITMENT_URL = "https://choquebgr.online/recrutamento/"
 MAIN_SERVER_URL = "https://choquebgr.online/discord"
 REASON = "CHOQUE - BGR • migração controlada de Recrutamento e Cursos para REC CHOQUE"
 
@@ -53,6 +53,13 @@ CHANNELS = (
         "recruitment_admin",
         "Mesa de Análise",
         "🛡️",
+        private=True,
+    ),
+    ChannelSpec(
+        "recruitment.inactivity",
+        "recruitment_admin",
+        "Avisos de Inatividade",
+        "⚠️",
         private=True,
     ),
     ChannelSpec(
@@ -766,6 +773,7 @@ async def _copy_data(
         "recruitment_panel_channel_id": channel_map["recruitment.panel"],
         "recruitment_public_status_channel_id": channel_map["recruitment.public_status"],
         "recruitment_review_channel_id": channel_map["recruitment.review"],
+        "activity_absence_alert_channel_id": channel_map["recruitment.inactivity"],
         "recruitment_notification_channel_id": channel_map["recruitment.review"],
         "recruitment_queue_channel_id": channel_map["recruitment.review"],
         "recruitment_approved_channel_id": channel_map["recruitment.approved"],

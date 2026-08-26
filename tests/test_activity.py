@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 
 import pytest
@@ -292,6 +293,101 @@ async def test_linked_recruitment_guild_never_emits_personnel_absence_alerts(
         (GUILD_ID,),
     )
     assert alert["status"] == "DISABLED"
+
+
+@pytest.mark.asyncio
+async def test_inactivity_dismissal_from_rec_updates_canonical_and_mirror_once(
+    service_bundle,
+) -> None:
+    activity = service_bundle["activity"]
+    settings = service_bundle["settings"]
+    members = service_bundle["members"]
+    database = service_bundle["database"]
+    clock = service_bundle["clock"]
+    rec_guild_id = GUILD_ID + 1
+    actor_id = 999
+
+    await settings.set(rec_guild_id, "identity_source_guild_id", GUILD_ID, actor_id)
+    await members.create_or_update(
+        rec_guild_id,
+        DISCORD_ID,
+        discord_nick="Discord User",
+        mta_nick="Choque_User",
+        character_id="77",
+        unit="BGR",
+        rank_id=None,
+        actor_id=actor_id,
+    )
+    await database.execute(
+        "UPDATE members SET last_activity_at=? WHERE guild_id=? AND discord_id=?",
+        (clock.value - 10 * DAY_MS, GUILD_ID, DISCORD_ID),
+    )
+    alerts = await activity.scan_absence_alerts(GUILD_ID)
+    alert_id = int(alerts[-1]["id"])
+
+    first, repeated = await asyncio.gather(
+        activity.dismiss_member_for_absence_alert(
+            GUILD_ID,
+            rec_guild_id,
+            alert_id,
+            actor_id,
+            "Desligamento por inatividade prolongada.",
+        ),
+        activity.dismiss_member_for_absence_alert(
+            GUILD_ID,
+            rec_guild_id,
+            alert_id,
+            actor_id,
+            "Desligamento por inatividade prolongada.",
+        ),
+    )
+
+    assert {first["already_completed"], repeated["already_completed"]} == {False, True}
+    statuses = await database.fetchall(
+        "SELECT guild_id, status FROM members WHERE discord_id=? ORDER BY guild_id",
+        (DISCORD_ID,),
+    )
+    assert [(row["guild_id"], row["status"]) for row in statuses] == [
+        (GUILD_ID, "DISMISSED"),
+        (rec_guild_id, "DISMISSED"),
+    ]
+    punishment = await database.fetchone(
+        "SELECT COUNT(*) AS total FROM punishments WHERE punishment_type='DISMISSAL'"
+    )
+    decision = await database.fetchone(
+        "SELECT COUNT(*) AS total FROM activity_absence_dismissals WHERE alert_id=?",
+        (alert_id,),
+    )
+    audit = await database.fetchone(
+        """
+        SELECT COUNT(*) AS total FROM audit_logs
+        WHERE guild_id=? AND action='ACTIVITY_ABSENCE_MEMBER_DISMISSED'
+        """,
+        (GUILD_ID,),
+    )
+    assert punishment["total"] == decision["total"] == audit["total"] == 1
+    assert await activity.scan_absence_alerts(GUILD_ID) == []
+
+
+@pytest.mark.asyncio
+async def test_inactivity_dismissal_rejects_unlinked_guild(service_bundle) -> None:
+    activity = service_bundle["activity"]
+    database = service_bundle["database"]
+    clock = service_bundle["clock"]
+    await database.execute(
+        "UPDATE members SET last_activity_at=? WHERE guild_id=? AND discord_id=?",
+        (clock.value - 10 * DAY_MS, GUILD_ID, DISCORD_ID),
+    )
+    alerts = await activity.scan_absence_alerts(GUILD_ID)
+
+    with pytest.raises(ValidationError):
+        await activity.dismiss_member_for_absence_alert(
+            GUILD_ID,
+            GUILD_ID + 99,
+            int(alerts[-1]["id"]),
+            999,
+            "Desligamento por inatividade prolongada.",
+        )
 
 
 @pytest.mark.asyncio
