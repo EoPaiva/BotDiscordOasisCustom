@@ -297,6 +297,7 @@ async def test_tag_cog_uses_exact_outreach_template_for_preview_and_bulk(
     cog = object.__new__(TagCommands)
     cog.bot = SimpleNamespace(config=SimpleNamespace(branding=SimpleNamespace(footer="CHOQUE")))
     cog.services = SimpleNamespace(tags=tags, settings=settings, audit=audit)
+    cog._find_member_outreach_message = AsyncMock(return_value=None)
     embed = SimpleNamespace(set_footer=Mock())
     monkeypatch.setattr(tag_commands, "build_member_panel_embed", AsyncMock(return_value=embed))
 
@@ -317,6 +318,12 @@ async def test_tag_cog_uses_exact_outreach_template_for_preview_and_bulk(
     embed.set_footer.assert_called_once_with(
         text="CHOQUE • Aviso da Central de Tags • central-tags-v1"
     )
+    if is_preview:
+        cog._find_member_outreach_message.assert_awaited_once_with(
+            member, TagService.MEMBER_OUTREACH_CAMPAIGN
+        )
+    else:
+        cog._find_member_outreach_message.assert_not_awaited()
     tags.mark_member_outreach_delivered.assert_awaited_once_with(81, delivery_message_id=901)
     audit.record.assert_awaited_once()
 

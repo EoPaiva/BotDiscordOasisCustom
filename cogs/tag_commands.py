@@ -2025,7 +2025,9 @@ class TagCommands(commands.Cog):
                         raise
                     member = await self.bot.fetch_user(target_id)
             existing = None
-            if int(outreach.get("attempts") or 0) > 1:
+            if int(outreach.get("is_preview") or 0) == 1 or int(
+                outreach.get("attempts") or 0
+            ) > 1:
                 existing = await self._find_member_outreach_message(member, campaign_key)
             if existing is not None:
                 message = existing
