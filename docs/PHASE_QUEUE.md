@@ -861,3 +861,13 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     DM; a visão `Todos` já inclui esses casos. Gates: **586 testes Python**, 1 pulado, Ruff, compileall,
     `main.py --check`, scanner de segredos, diff e revisão independente. Nenhum Discord real, push,
     merge ou deploy foi executado.
+
+61. ✅ **Aviso privado da Central de Tags — concluído localmente, sem rollout.**
+    A migration 54 cria uma campanha durável e idempotente para membros CHOQUE aprovados. A fila
+    envia no máximo uma DM a cada cinco segundos, com retry exponencial, bloqueio terminal para DM
+    proibida/membro ausente, recuperação após reinício e auditoria. O Discord ID
+    `395061579101503491` é a prévia obrigatória e usa exatamente a mesma mensagem do lote. A fila
+    geral não é criada antes da entrega dessa prévia e permanece bloqueada por
+    `tag_outreach_rollout_approved=false` até nova autorização explícita. Gates: **595 testes
+    Python**, 1 pulado, Ruff, compileall, `main.py --check` em migration 54, scanner de segredos e
+    diff. Nenhuma DM real, push, merge ou produção foi alterada.

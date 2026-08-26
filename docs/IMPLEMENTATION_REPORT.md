@@ -1364,3 +1364,21 @@ Fora do escopo atual: eventos, API e integração MTA.
 - Gates locais: **586 testes Python passaram**, 1 foi pulado, 21 avisos conhecidos de depreciação;
   Ruff, compileall, `main.py --check` em migration 53, scanner de segredos, diff e revisão
   independente passaram. Nenhum Discord real, push, merge ou deploy foi executado.
+
+# Central de Tags — aviso privado em fila auditado localmente em 2026-08-26
+
+- A migration 54 adiciona `tag_member_outreach`, separada de `tag_requests`, com chave única por
+  guild, membro e campanha. Receber o informativo não cria pedido nem aplica cargo.
+- O público elegível é composto por vínculos CHOQUE aprovados nos estados `ACTIVE`, `AWAY`,
+  `RESERVE` e `SUSPENDED`. Candidatos `PENDING` e membros `DISMISSED` não entram na campanha.
+- O worker durável processa no máximo uma DM a cada cinco segundos. Falhas transitórias voltam com
+  espera exponencial limitada; DM proibida e membro ausente são terminais para evitar repetição de
+  requisições inválidas; claims antigos são recuperados após reinício.
+- Toda DM reutiliza o embed oficial da Central de Tags e um botão de link para o painel persistido,
+  sem menções. Uma marca estável permite reconhecer entrega anterior antes de repetir um retry.
+- O Discord ID `395061579101503491` recebe primeiro a prévia exata. O lote só pode ser criado depois
+  que essa prévia estiver `DELIVERED`; mesmo então, `tag_outreach_rollout_approved=false` mantém o
+  envio geral parado até autorização explícita do proprietário.
+- Gates locais: **595 testes Python passaram**, 1 foi pulado; Ruff, compileall, `main.py --check` em
+  migration 54, scanner de segredos e `git diff --check` passaram. Nenhuma DM real, push, merge,
+  deploy ou alteração de produção foi executada.

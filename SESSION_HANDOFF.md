@@ -3,7 +3,35 @@
 > Checkpoint operacional atual. O código e o estado real do repositório prevalecem.
 > Estado estrutural permanente: `PROJECT_STATE.md`.
 
-## 0. Checkpoint emergencial mais recente — Controle de Tags
+## 0. Checkpoint mais recente — aviso privado da Central de Tags
+
+O proprietário pediu que todos os membros CHOQUE já aprovados no cadastro recebam o mesmo aviso
+privado da Central de Tags, em fila lenta. Antes da fila geral, o Discord ID
+`395061579101503491` precisa receber uma prévia exatamente igual e o proprietário precisa liberar a
+continuação.
+
+**Concluído localmente:** migration 54; fila durável e idempotente por campanha; seleção de membros
+`ACTIVE`, `AWAY`, `RESERVE` e `SUSPENDED`; exclusão de candidatos `PENDING` e desligados
+`DISMISSED`; envio de no máximo uma DM a cada cinco segundos; retry exponencial de falhas
+transitórias; bloqueio terminal para DM proibida ou membro ausente; recuperação de claim após
+reinício; auditoria; link para o painel oficial; e ausência de menções coletivas. O aviso não cria
+solicitação de tag nem concede cargo.
+
+**Trava de segurança:** `tag_outreach_preview_discord_id=395061579101503491` e
+`tag_outreach_rollout_approved=false`. A fila geral não é sequer criada antes de a prévia ficar
+marcada como entregue e a segunda trava receber aprovação explícita. Prévia e lote usam o mesmo
+conteúdo, embed, rodapé e botão.
+
+**Validação concluída:** 595 testes Python verdes, 1 pulado e avisos de depreciação conhecidos;
+Ruff, compileall, `main.py --check` com migration 54, scanner de segredos e `git diff --check`
+verdes. A suíte foi executada integralmente em cinco blocos temporários no disco D devido ao espaço
+insuficiente no disco C.
+
+**Estado externo:** nenhuma DM real foi enviada; nenhum push, merge, deploy ou reinício de produção
+foi executado. O primeiro rollout ainda exige backup, migration em cópia e autorização explícita.
+Depois da prévia real, o lote continua pausado até nova confirmação do proprietário.
+
+## 0.1 Checkpoint anterior — Controle de Tags
 
 Esta seção supersede temporariamente a missão e a próxima ação antigas abaixo. O proprietário pediu
 pausa imediata para trocar de computador; por isso o corte foi fechado em commits locais, sem push,
@@ -37,7 +65,7 @@ nova autorização explícita. Até isso acontecer, a tarefa `AGORA` abaixo perm
 
 ## Handoff
 
-**Última atualização:** 2026-08-26 18:55 -03:00
+**Última atualização:** 2026-08-26 19:28 -03:00
 
 **Branch atual:** `codex/phase-b-transfers`
 

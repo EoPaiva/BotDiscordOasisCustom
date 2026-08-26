@@ -38,6 +38,15 @@ Atualizado em 2026-08-26.
 | Lista administrativa de quem ainda não respondeu à DM | DECISÃO CONFIRMADA | `Faltam setar` continua restrita a `AGUARDANDO_SET`; quem aguarda resposta inicial não é fila acionável. A visão `Todos` permanece sem filtro e inclui esses casos. |
 | Gates | APROVADOS LOCALMENTE | 586 testes Python passaram, 1 foi pulado e 21 avisos de depreciação conhecidos permaneceram; Ruff, compileall, `main.py --check`, scanner de segredos, diff e revisão independente passaram. |
 
+## Aviso privado da Central de Tags aos cadastrados — concluído localmente em 2026-08-26
+
+| Pedido | Estado | Garantia de escopo |
+|---|---|---|
+| Avisar todos os membros CHOQUE cadastrados | CONCLUÍDO LOCALMENTE, SEM ROLLOUT | Migration 54 cria fila durável por campanha para vínculos aprovados `ACTIVE`, `AWAY`, `RESERVE` e `SUSPENDED`; `PENDING` e `DISMISSED` não entram. O aviso não abre solicitação nem altera cargos. |
+| Ritmo seguro e recuperação | CONCLUÍDO LOCALMENTE, SEM ROLLOUT | O worker processa no máximo uma DM a cada cinco segundos, respeita o controle de rate limit do cliente Discord, aplica retry exponencial somente a falhas transitórias, encerra 403/404 e recupera claims abandonados. |
+| Prévia obrigatória ao proprietário | TRAVA ATIVA | O Discord ID `395061579101503491` recebe primeiro a mesma mensagem, embed e link do lote. `tag_outreach_rollout_approved=false` impede criar ou enviar o lote até a prévia ser entregue e o proprietário autorizar explicitamente a continuação. |
+| Gates | APROVADOS LOCALMENTE | 595 testes Python passaram e 1 foi pulado; Ruff, compileall, `main.py --check` em migration 54, scanner de segredos e diff passaram. Nenhuma DM real, push, merge ou produção foi alterada. |
+
 ## Notificação automática de promoções e rebaixamentos — futuro
 
 | Pedido | Estado | Garantia de escopo |
