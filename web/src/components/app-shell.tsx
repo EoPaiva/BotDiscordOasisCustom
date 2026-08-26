@@ -166,8 +166,53 @@ export function AppShell({ context, children }: { context: AccessContext; childr
   const [accessRevoked, setAccessRevoked] = useState(false);
   const contextRef = useRef(context);
   const requestRunning = useRef(false);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const drawerWasOpenRef = useRef(false);
   const pathname = usePathname();
   const router = useRouter();
+
+  useEffect(() => {
+    if (!open) {
+      if (drawerWasOpenRef.current) {
+        menuTriggerRef.current?.focus();
+        drawerWasOpenRef.current = false;
+      }
+      return;
+    }
+
+    drawerWasOpenRef.current = true;
+    drawerCloseRef.current?.focus();
+
+    const handleDrawerKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(
+        drawerRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleDrawerKeyDown);
+    return () => document.removeEventListener("keydown", handleDrawerKeyDown);
+  }, [open]);
 
   useEffect(() => {
     let disposed = false;
@@ -250,14 +295,45 @@ export function AppShell({ context, children }: { context: AccessContext; childr
   return (
     <div className="app-shell">
       <aside className="sidebar"><Sidebar context={liveContext} /></aside>
-      <div className={clsx("mobile-drawer", open && "open")} aria-hidden={!open}>
-        <button className="drawer-close" onClick={() => setOpen(false)} aria-label="Fechar menu"><X /></button>
-        <Sidebar context={liveContext} close={() => setOpen(false)} />
-      </div>
-      {open && <button className="drawer-scrim" onClick={() => setOpen(false)} aria-label="Fechar menu" />}
+      {open && (
+        <>
+          <div
+            aria-label="Menu de navegação"
+            aria-modal="true"
+            className="mobile-drawer open"
+            id="command-navigation-drawer"
+            ref={drawerRef}
+            role="dialog"
+          >
+            <button
+              aria-label="Fechar menu"
+              className="drawer-close"
+              onClick={() => setOpen(false)}
+              ref={drawerCloseRef}
+            >
+              <X />
+            </button>
+            <Sidebar context={liveContext} close={() => setOpen(false)} />
+          </div>
+          <button
+            aria-label="Fechar menu ao tocar fora"
+            className="drawer-scrim"
+            onClick={() => setOpen(false)}
+          />
+        </>
+      )}
       <div className="work-area">
         <header className="topbar">
-          <button className="menu-trigger" onClick={() => setOpen(true)} aria-label="Abrir menu"><Menu /></button>
+          <button
+            aria-controls="command-navigation-drawer"
+            aria-expanded={open}
+            aria-label="Abrir menu"
+            className="menu-trigger"
+            onClick={() => setOpen(true)}
+            ref={menuTriggerRef}
+          >
+            <Menu />
+          </button>
           <div className="system-state">
             <span><i className="state-dot operational" /> SISTEMA OPERACIONAL</span>
             <span>
