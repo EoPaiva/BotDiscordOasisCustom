@@ -474,7 +474,7 @@ async def test_phase_four_and_five_panels_are_persistent_and_have_stable_custom_
         RecruitmentAdminPanelView(),
     ]
     assert [len(view.children) for view in persistent_views] == [
-        5,
+        6,
         3,
         8,
         4,
@@ -514,6 +514,7 @@ async def test_personnel_admin_is_grouped_without_hiding_existing_areas():
         "Disciplina",
         "Processos",
         "Serviço e operações",
+        "Tags",
         "Atualizar resumo",
     }
     submenu_labels = {

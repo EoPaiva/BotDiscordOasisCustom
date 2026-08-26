@@ -222,6 +222,223 @@ async def test_request_tag_snapshots_registered_identity_and_is_idempotent(servi
 
 
 @pytest.mark.asyncio
+async def test_waiting_role_scan_creates_one_private_confirmation_without_opening_admin_queue(
+    service_bundle,
+):
+    service = TagService(
+        service_bundle["database"],
+        service_bundle["audit"],
+        clock=service_bundle["clock"],
+    )
+
+    created = await service.request_tag_from_waiting_role(GUILD_ID, DISCORD_ID)
+    repeated = await service.request_tag_from_waiting_role(GUILD_ID, DISCORD_ID)
+
+    assert repeated["id"] == created["id"]
+    assert created["status"] == "AGUARDANDO_CONFIRMACAO"
+    assert created["intake_source"] == "WAITING_ROLE_SCAN"
+    assert created["confirmation_delivery_status"] == "PENDING"
+    assert created["responsible_notification_status"] == "NOT_REQUESTED"
+    assert await service.pending_responsible_notifications(GUILD_ID) == []
+    assert [item["event_type"] for item in await service.timeline(int(created["id"]))] == [
+        "TAG_WAITING_ROLE_DETECTED"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_waiting_role_member_can_request_command_support(service_bundle):
+    service = TagService(
+        service_bundle["database"],
+        service_bundle["audit"],
+        clock=service_bundle["clock"],
+    )
+    confirmation = await service.request_tag_from_waiting_role(GUILD_ID, DISCORD_ID)
+
+    waiting = await service.report_waiting_role_missing(
+        int(confirmation["id"]),
+        discord_id=DISCORD_ID,
+        expected_version=int(confirmation["version"]),
+    )
+
+    assert waiting["status"] == "AGUARDANDO_SET"
+    assert waiting["responsible_notification_status"] == "PENDING"
+    assert [item["event_type"] for item in await service.timeline(int(waiting["id"]))] == [
+        "TAG_WAITING_ROLE_DETECTED",
+        "TAG_WAITING_ROLE_REQUIRES_SET",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_waiting_role_self_confirmation_completes_and_queues_role_reconciliation(
+    service_bundle,
+):
+    service = TagService(
+        service_bundle["database"],
+        service_bundle["audit"],
+        clock=service_bundle["clock"],
+    )
+    request = await service.request_tag_from_waiting_role(GUILD_ID, DISCORD_ID)
+
+    completed = await service.confirm_tag(
+        int(request["id"]),
+        discord_id=DISCORD_ID,
+        expected_version=int(request["version"]),
+    )
+
+    assert completed["status"] == "CONCLUIDO"
+    member = await service_bundle["database"].fetchone(
+        "SELECT tag_status, tag_set_by FROM members WHERE guild_id=? AND discord_id=?",
+        (GUILD_ID, DISCORD_ID),
+    )
+    assert member["tag_status"] == "CONCLUIDO"
+    assert member["tag_set_by"] == DISCORD_ID
+    outbox = await service_bundle["database"].fetchall(
+        "SELECT * FROM web_action_outbox WHERE action_type='TAG_ROLE_SYNC' ORDER BY id"
+    )
+    assert len(outbox) == 2
+
+
+@pytest.mark.asyncio
+async def test_blocked_waiting_role_dm_is_escalated_for_manual_contact(service_bundle):
+    service = TagService(
+        service_bundle["database"],
+        service_bundle["audit"],
+        clock=service_bundle["clock"],
+    )
+    request = await service.request_tag_from_waiting_role(GUILD_ID, DISCORD_ID)
+    claimed = await service.claim_confirmation_notification(int(request["id"]))
+    assert claimed is not None
+
+    escalated = await service.escalate_waiting_role_dm_failure(
+        int(request["id"]), error="Privado bloqueado"
+    )
+
+    assert escalated["status"] == "AGUARDANDO_SET"
+    assert escalated["confirmation_delivery_status"] == "FAILED"
+    assert escalated["confirmation_delivery_error"] == "Privado bloqueado"
+    assert escalated["responsible_notification_status"] == "PENDING"
+    assert (await service.timeline(int(request["id"])))[-1]["event_type"] == (
+        "TAG_WAITING_ROLE_DM_UNAVAILABLE"
+    )
+
+
+@pytest.mark.asyncio
+async def test_waiting_role_claim_notifies_member_and_responsible_finishes_atomically(
+    service_bundle,
+):
+    service = TagService(
+        service_bundle["database"],
+        service_bundle["audit"],
+        clock=service_bundle["clock"],
+    )
+    prompt = await service.request_tag_from_waiting_role(GUILD_ID, DISCORD_ID)
+    waiting = await service.report_waiting_role_missing(
+        int(prompt["id"]),
+        discord_id=DISCORD_ID,
+        expected_version=int(prompt["version"]),
+    )
+    claimed = await service.claim_request(
+        int(waiting["id"]), responsible_id=701, expected_version=int(waiting["version"])
+    )
+
+    assert claimed["assignment_delivery_status"] == "PENDING"
+    assert [item["id"] for item in await service.pending_assignment_notifications(GUILD_ID)] == [
+        claimed["id"]
+    ]
+
+    completed = await service.complete_waiting_role_set(
+        int(claimed["id"]),
+        responsible_id=701,
+        expected_version=int(claimed["version"]),
+    )
+
+    assert completed["status"] == "CONCLUIDO"
+    assert completed["set_by"] == 701
+    assert completed["confirmed_by"] == 701
+    assert await service.pending_assignment_notifications(GUILD_ID) == []
+
+
+@pytest.mark.asyncio
+async def test_departed_waiting_role_member_is_archived_without_erasing_history(service_bundle):
+    service = TagService(
+        service_bundle["database"],
+        service_bundle["audit"],
+        clock=service_bundle["clock"],
+    )
+    request = await service.request_tag_from_waiting_role(GUILD_ID, DISCORD_ID)
+
+    archived = await service.archive_departed_member(GUILD_ID, DISCORD_ID)
+
+    assert archived is not None
+    assert archived["id"] == request["id"]
+    assert archived["status"] == "CANCELADO"
+    assert archived["terminal_reason"] == "Membro saiu do servidor."
+    assert (await service.timeline(int(request["id"])))[-1]["event_type"] == (
+        "TAG_REQUEST_MEMBER_LEFT"
+    )
+
+
+@pytest.mark.asyncio
+async def test_tag_cog_scans_only_waiting_members_without_the_set_role() -> None:
+    waiting = _TagRole(101)
+    set_role = _TagRole(202)
+    pending_member = SimpleNamespace(id=456, bot=False, roles=[waiting])
+    completed_member = SimpleNamespace(id=457, bot=False, roles=[waiting, set_role])
+    bot_member = SimpleNamespace(id=458, bot=True, roles=[waiting])
+    guild = SimpleNamespace(
+        id=GUILD_ID,
+        members=[pending_member, completed_member, bot_member],
+    )
+    request = {
+        "id": 42,
+        "guild_id": GUILD_ID,
+        "discord_id": pending_member.id,
+        "status": "AGUARDANDO_CONFIRMACAO",
+        "version": 1,
+        "intake_source": "WAITING_ROLE_SCAN",
+    }
+    settings = SimpleNamespace(
+        get=AsyncMock(side_effect=[waiting.id, set_role.id])
+    )
+    tags = SimpleNamespace(
+        request_tag_from_waiting_role=AsyncMock(return_value=request)
+    )
+    cog = object.__new__(TagCommands)
+    cog.services = SimpleNamespace(settings=settings, tags=tags)
+    cog.deliver_confirmation_notification = AsyncMock(return_value=True)
+
+    detected = await cog.scan_waiting_role_members(guild)
+
+    assert detected == 1
+    tags.request_tag_from_waiting_role.assert_awaited_once_with(GUILD_ID, pending_member.id)
+    cog.deliver_confirmation_notification.assert_awaited_once_with(guild, request)
+
+
+@pytest.mark.asyncio
+async def test_tag_cog_archives_member_request_when_the_member_leaves() -> None:
+    archived = {
+        "id": 42,
+        "guild_id": GUILD_ID,
+        "discord_id": DISCORD_ID,
+        "status": "CANCELADO",
+        "version": 2,
+    }
+    guild = SimpleNamespace(id=GUILD_ID)
+    member = SimpleNamespace(id=DISCORD_ID, guild=guild)
+    tags = SimpleNamespace(archive_departed_member=AsyncMock(return_value=archived))
+    cog = object.__new__(TagCommands)
+    cog.services = SimpleNamespace(tags=tags)
+    cog.refresh_request_card = AsyncMock(return_value=True)
+    cog.refresh_admin_panel = AsyncMock()
+
+    await cog.on_member_remove(member)
+
+    tags.archive_departed_member.assert_awaited_once_with(GUILD_ID, DISCORD_ID)
+    cog.refresh_request_card.assert_awaited_once_with(guild, archived)
+    cog.refresh_admin_panel.assert_awaited_once_with(guild)
+
+
+@pytest.mark.asyncio
 async def test_existing_tag_declaration_requires_responsible_validation(service_bundle):
     """A member claim is queued for review and must never self-grant TAG SETADA."""
     service = TagService(

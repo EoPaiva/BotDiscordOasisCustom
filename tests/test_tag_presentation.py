@@ -59,6 +59,22 @@ async def test_tag_confirmation_view_has_request_scoped_persistent_controls() ->
 
 
 @pytest.mark.asyncio
+async def test_waiting_role_confirmation_uses_the_requested_plain_language_actions() -> None:
+    view = TagMemberRequestView(
+        42,
+        3,
+        "AGUARDANDO_CONFIRMACAO",
+        intake_source="WAITING_ROLE_SCAN",
+    )
+
+    assert [item.label for item in view.children] == [
+        "Já estou com a tag setada",
+        "Ainda não tenho a tag setada",
+    ]
+    assert view.is_persistent()
+
+
+@pytest.mark.asyncio
 async def test_tag_configuration_exposes_role_channel_and_operational_time_settings() -> None:
     view = TagConfigurationView()
 
@@ -143,6 +159,33 @@ async def test_existing_tag_card_uses_validation_wording() -> None:
     assert [item.label for item in view.children] == [
         "Chamar para DP",
         "Validar tag existente",
+        "Mais ações",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_waiting_role_card_exposes_claim_notice_finish_and_details_actions() -> None:
+    waiting = TagRequestCardView(
+        {
+            "id": 42,
+            "status": "AGUARDANDO_SET",
+            "request_origin": "SET_REQUEST",
+            "intake_source": "WAITING_ROLE_SCAN",
+        }
+    )
+    claimed = TagRequestCardView(
+        {
+            "id": 42,
+            "status": "ATENDIMENTO_ASSUMIDO",
+            "request_origin": "SET_REQUEST",
+            "intake_source": "WAITING_ROLE_SCAN",
+        }
+    )
+
+    assert [item.label for item in waiting.children] == ["Assumir Set", "Ver detalhes"]
+    assert [item.label for item in claimed.children] == [
+        "Enviar aviso",
+        "Finalizar Set",
         "Mais ações",
     ]
 
