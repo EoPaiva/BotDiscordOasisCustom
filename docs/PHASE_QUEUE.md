@@ -836,3 +836,16 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     função. O arquivo recebido termina incompleto na seção 65, após `Status com:`; esse limite foi
     registrado sem inventar conteúdo. A execução visual entra depois dos blocos funcionais locais em
     andamento e continua proibida de rollout na Discloud sem autorização explícita.
+
+59. ✅ **Registro militar automático de desligamentos — concluído localmente, sem rollout.**
+    Fonte integral preservada em `docs/source-prompts/17-dismissal-records-original.md`, SHA-256
+    `B626412356E33510440E4D2E4262008C3CAF36BCE717064B752F21016B6CB46B`. A migration 52 amplia o
+    outbox de carreira sem perder mensagens anteriores. Punição/exoneração, solicitação aprovada,
+    alerta de inatividade e alteração direta de status gravam o boletim na mesma transação. O motivo
+    público nunca aceita texto do operador: perfil canônico `ALTO_COMANDO` usa a frase específica;
+    demais responsáveis usam a frase administrativa fixa. O layout declara o canal privado
+    `superiors.dismissals` e o configura por ID somente quando o remodelador for futuramente aplicado.
+    TDD: `25c593c` e `8d7a323` registram os contratos RED; `1526e03` entrega o GREEN. Gates locais:
+    sete testes do módulo, **575 testes Python**, Ruff, compileall e `main.py --check` em migration 52.
+    Nenhum Discord real, push, merge ou deploy foi executado. Rollout exige máquina principal,
+    backup, migration em cópia, smoke humano e nova autorização explícita.

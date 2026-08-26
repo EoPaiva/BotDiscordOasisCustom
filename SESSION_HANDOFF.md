@@ -5,12 +5,12 @@
 
 ## Handoff
 
-**Última atualização:** 2026-08-26 16:42 -03:00
+**Última atualização:** 2026-08-26 17:05 -03:00
 
 **Branch atual:** `codex/phase-b-transfers`
 
 **Último commit funcional:**
-`88dde3a` — `fix: expose machine-readable dashboard inbox times`
+`1526e03` — `feat: add durable dismissal records`
 
 **Commit do protocolo:** este arquivo pertence ao commit de documentação imediatamente posterior;
 confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferência impossível.
@@ -21,9 +21,9 @@ confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferên
 
 ### Objetivo imediato
 
-Na máquina principal, auditar os blocos locais ADV, Cursos e Transferências contra o checkout que
-opera o projeto, validar migrations 49–51 numa cópia do banco e preparar um rollout controlado. A
-implementação local de Transferências está concluída. Enquanto essa etapa externa permanece
+Na máquina principal, auditar os blocos locais ADV, Cursos, Transferências e Registro de
+Desligamentos contra o checkout que opera o projeto, validar migrations 49–52 numa cópia do banco e
+preparar um rollout controlado. As implementações locais estão concluídas. Enquanto essa etapa externa permanece
 bloqueada, a Fase 57 pode avançar localmente em cortes pequenos e fecháveis; doze cortes do Centro
 de Comando estão concluídos e não há código parcial neste computador.
 
@@ -32,7 +32,7 @@ de Comando estão concluídos e não há código parcial neste computador.
 - [ ] O checkout da máquina principal contém exatamente os commits locais esperados.
 - [ ] O teto de patente de transferência foi confirmado explicitamente para cada guild aplicável.
 - [ ] Backup íntegro foi criado e validado com `quick_check` e foreign keys antes da migration.
-- [ ] Migrations 49–51 e gates completos passaram primeiro numa cópia do banco.
+- [ ] Migrations 49–52 e gates completos passaram primeiro numa cópia do banco.
 - [ ] Smoke humano validou protocolo, duas decisões, outbox, recuperação e rollback.
 - [ ] O proprietário concedeu nova autorização explícita antes de merge, push ou deploy.
 
@@ -56,10 +56,15 @@ formatam também os campos detalhados `_at`/`_time` em `<time dateTime>` e elimi
 `c5f7e2c`/`88dde3a` aplicam o mesmo contrato temporal às pendências recentes do dashboard e extraem
 o formatador ISO seguro compartilhado. Nenhum contrato, URL, RBAC, API ou regra de negócio foi alterado.
 
+Em seguida, o Registro de Desligamento de Efetivo foi concluído localmente. `25c593c` e `8d7a323`
+preservam os contratos RED; `1526e03` entrega migration 52, política fechada pelo perfil
+`ALTO_COMANDO`, quatro origens transacionais, outbox durável, embed formal e canal privado
+declarativo. Nenhum Discord real ou produção foi tocado.
+
 ### Ação em andamento
 
-Nenhuma alteração está em andamento. Transferências e os doze cortes acessíveis da Fase 57
-terminaram em pontos seguros e commitados.
+Nenhuma alteração está em andamento. Transferências, os doze cortes acessíveis da Fase 57 e o
+Registro de Desligamentos terminaram em pontos seguros e commitados.
 
 ### PRÓXIMA AÇÃO EXATA
 
@@ -73,14 +78,18 @@ git log -1 --oneline
 git log --oneline main..codex/phase-b-transfers
 ```
 
-Comparar a lista obtida com os 13 commits de Transferências registrados abaixo e confirmar que não
+Comparar a lista obtida com os commits locais registrados abaixo e confirmar que não
 há mudanças locais desconhecidas. Em seguida, reler somente:
 
-- `choque/database.py`, migrations 49–51;
+- `choque/database.py`, migrations 49–52;
 - `choque/tickets.py` e `choque/members.py`, fluxo de Transferências;
 - `cogs/ticket_commands.py`, alcançabilidade visual;
 - `tests/test_transfer_lifecycle.py`;
 - `docs/testing/phase-b-transfers-tdd.md`;
+- `choque/dismissals.py`, `choque/personnel.py`, `choque/requests.py` e `choque/activity.py`;
+- `cogs/career_commands.py`, `scripts/remodel_discord_layout.py` e
+  `tests/test_dismissal_notifications.py`;
+- `docs/DISMISSAL_RECORDS_SPEC.md`;
 - runbooks de backup/deploy pertinentes.
 
 Não ler nem imprimir valores de ambiente durante essa auditoria. Antes de qualquer mutação, parar e
@@ -101,6 +110,8 @@ com documentação antiga.
 - `BOOTSTRAP_PROMPT.md`: protocolo permanente de inicialização e migração de sessão.
 - `PROJECT_STATE.md`: estado estrutural consolidado.
 - `SESSION_HANDOFF.md`: checkpoint operacional atual.
+- `choque/dismissals.py`: política e persistência do boletim público.
+- `docs/DISMISSAL_RECORDS_SPEC.md` e `docs/source-prompts/17-dismissal-records-original.md`.
 
 ### Modificado neste checkpoint
 
@@ -109,7 +120,8 @@ com documentação antiga.
 
 ### Código funcional alterado neste checkpoint
 
-Nenhum.
+Migration 52, política de motivo, quatro integrações transacionais, entrega do embed, configuração do
+canal privado e auditoria de exposição pública. Ver commits `25c593c`, `8d7a323` e `1526e03`.
 
 ### Arquivos que não devem ser alterados nesta etapa
 
@@ -120,7 +132,8 @@ Nenhum.
 
 ## 4. Alterações não finalizadas
 
-Não existe implementação parcial na branch. O trabalho pendente é operacional e depende da máquina
+Não existe implementação parcial na branch. O canal de desligamentos existe somente no layout
+declarativo; sua criação real é parte do rollout controlado. O trabalho pendente depende da máquina
 principal: validar o delta contra o banco/runtime oficial e, depois de autorização, publicar.
 
 ## 5. Decisões que afetam a continuação
@@ -145,6 +158,11 @@ patente autorizada e enfileira `MEMBER_SYNC`. Não reativar/criar vínculo na pr
 `transfer_max_rank_level` tem padrão 3, mas deve ser confirmado na máquina principal. Casos legados
 aprovados são `LEGACY_APPROVED` e não recebem patente inferida ou retroativa.
 
+### S005 — Motivo público de desligamento não é entrada humana
+
+Texto livre permanece privado na auditoria/decisão. O boletim usa somente as duas frases fixas,
+selecionadas pelo snapshot canônico `ALTO_COMANDO`; não adicionar seletor ou campo de motivo público.
+
 ## 6. Bugs e problemas abertos
 
 - Nenhum bug funcional conhecido no corte de Transferências após os gates finais.
@@ -154,15 +172,12 @@ aprovados são `LEGACY_APPROVED` e não recebem patente inferida ou retroativa.
 
 ## 7. Testes
 
-### Último gate funcional registrado, antes deste checkpoint documental
+### Gate funcional do Registro de Desligamentos
 
-- 68 testes focados de Transferências passaram.
-- 569 testes Python passaram.
-- `SECRET_SCAN_OK`.
-- `pip-audit` sem vulnerabilidades conhecidas.
+- 7 testes focados do novo módulo passaram.
+- 575 testes Python passaram; 21 avisos conhecidos de depreciação, sem falha.
 - Ruff, compileall, `python main.py --check` e `git diff --check` passaram.
-- Web: `npm audit`, typecheck, lint, 57 testes Vitest e build passaram.
-- `main.py --check` confirmou migration 51, 20 cogs, 46 comandos internos e 34 views persistentes.
+- `main.py --check` confirmou migration 52, 20 cogs, 46 comandos internos e 34 views persistentes.
 
 Esses resultados pertencem ao checkpoint local anterior; devem ser repetidos na máquina principal
 antes de qualquer rollout.
@@ -213,7 +228,7 @@ npm run build
 
 ### AGORA — auditoria na máquina principal
 
-- [ ] Validar branch, commits, banco em cópia, teto de patente, gates e smoke das migrations 49–51,
+- [ ] Validar branch, commits, banco em cópia, teto de patente, gates e smoke das migrations 49–52,
   sem mutar produção.
 
 ### DEPOIS
@@ -254,11 +269,14 @@ o rollout depende de gates verdes e de um novo “pode publicar” explícito.
 - Um cache antigo de build foi movido para `web/.next-stale-20260826-1542`. A exclusão autorizada
   removeu seu conteúdo comum, mas o Windows/OneDrive reteve cinco diretórios vazios/reparse por ACL;
   eles não aparecem no Git e não afetam build. Não alterar ACL do workspace para removê-los.
+- O Registro de Desligamentos acrescentou `25c593c`, `8d7a323` e `1526e03`. O canal ainda não existe
+  no Discord real; criar somente no rollout autorizado da máquina principal.
 
 ## 12. Não fazer
 
 - Não recomeçar Transferências nem criar outro sistema de tickets/cadastro.
-- Não aplicar migration diretamente no banco oficial antes do teste em cópia e backup íntegro.
+- Não aplicar migrations, inclusive a 52, diretamente no banco oficial antes do teste em cópia e
+  backup íntegro.
 - Não iniciar uma segunda instância do bot contra o mesmo SQLite.
 - Não inferir patente por cargo Discord, nome ou dado legado.
 - Não avançar para produção por considerar “deploy” implícito na troca de máquina.

@@ -2231,3 +2231,23 @@ Programa Web. Tudo continua na ordem de
   gates e smoke humano;
   só então, com nova autorização explícita, fazer merge/push/deploy e validar health, migration,
   Gateway único, protocolo, duas decisões, outbox e rollback.
+
+# Checkpoint local — Registro de Desligamento de Efetivo — 2026-08-26
+
+- Fonte integral: `docs/source-prompts/17-dismissal-records-original.md`. Especificação operacional:
+  `docs/DISMISSAL_RECORDS_SPEC.md`.
+- Migration 52 amplia `career_notifications` com `DISMISSAL` preservando registros antigos. Os quatro
+  caminhos canônicos — punição/exoneração, solicitação aprovada, alerta de inatividade e status
+  direto — persistem o boletim na mesma transação.
+- O motivo interno nunca é copiado ao payload público. `ALTO_COMANDO` é resolvido pelas projeções
+  canônicas e seleciona uma das duas frases fixas. O renderizador também recalcula a frase pelo
+  snapshot booleano, impedindo motivo livre na apresentação.
+- O canal `superiors.dismissals` existe apenas no layout declarativo local; aplicar o remodelador no
+  Discord real continua proibido neste computador. O destino futuro é salvo por ID em
+  `dismissal_log_channel_id` e auditado como canal sensível.
+- TDD: `25c593c`, `8d7a323`, `1526e03`. Gates: sete testes focados, **575 pytest**, Ruff, compileall,
+  `main.py --check` com migration 52 e `git diff --check`. Nenhum push, merge, deploy, Discord real ou
+  variável de `C:\Users\mateu\OneDrive\Imagens\env` foi acessada.
+- Na máquina principal: revisar os três commits, testar migration 52 em cópia íntegra do banco,
+  confirmar o cargo Alto Comando projetado, aplicar o layout somente com autorização, validar canal
+  privado, quatro origens, frases, retry/idempotência e rollback antes de produção.

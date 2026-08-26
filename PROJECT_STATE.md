@@ -17,7 +17,7 @@ continuam humanas; toda mutação relevante é autorizada no backend, persistida
 sincronizada com o Discord de forma recuperável.
 
 **Status geral:** sistema amplo já operado em produção, com evolução local incremental. O código
-local possui migrations até a versão 51. O último estado de produção registrado na documentação do
+local possui migrations até a versão 52. O último estado de produção registrado na documentação do
 repositório é a migration 46; isso não foi revalidado ao vivo nesta inicialização.
 
 ## 2. Stack
@@ -185,7 +185,8 @@ handoff.
 
 - **Identidade e efetivo:** cadastro, patentes, cargos, apelidos, sincronização e Portaria.
 - **Ponto e operações:** sessões de voz, segmentos, viaturas, patrulhas e PTR.
-- **Solicitações, carreira e disciplina:** fluxos humanos, histórico e recuperação.
+- **Solicitações, carreira e disciplina:** fluxos humanos, histórico, recuperação e boletim durável
+  de desligamento com motivo público fechado pelo perfil canônico do responsável.
 - **Treinamentos e cursos:** catálogo, inscrições, resultados, requisitos e qualificações.
 - **Recrutamento e análise:** candidatura versionada, OAuth e análise somente consultiva.
 - **Tickets e transferências:** salas privadas, fila, protocolo, timeline e integração ao cadastro.
@@ -231,8 +232,8 @@ handoff.
 - Núcleo modular, migrations, RBAC, auditoria, outboxes, backup e recuperação.
 - Operação visual Discord e Centro de Comando Web com os principais domínios.
 - Unidades Especiais até a migration 46, documentadas como publicadas.
-- Blocos locais ADV (migration 49), Cursos (migration 50) e Transferências (migration 51), sem
-  rollout segundo o último checkpoint.
+- Blocos locais ADV (migration 49), Cursos (migration 50), Transferências (migration 51) e Registro
+  de Desligamentos (migration 52), sem rollout segundo o último checkpoint.
 
 ### Em desenvolvimento / validação
 

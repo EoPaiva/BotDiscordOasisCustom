@@ -1320,6 +1320,22 @@ Fora do escopo atual: eventos, API e integração MTA.
 - Gate consolidado do portal: 15 testes focados, **67 testes web em 17 arquivos**, `npm audit` sem
   vulnerabilidades, typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
 
+# Registro de Desligamento de Efetivo — concluído localmente em 2026-08-26
+
+- `choque/dismissals.py` concentra as duas frases públicas imutáveis e resolve `ALTO_COMANDO` pelas
+  projeções canônicas de identidade. Nenhum chamador fornece o motivo mostrado no boletim.
+- Os quatro caminhos reais para `DISMISSED` gravam uma notificação `DISMISSAL` no outbox existente,
+  dentro da mesma transação. Motivos livres continuam somente nos registros privados de auditoria,
+  punição ou decisão.
+- Migration 52 preserva todas as notificações anteriores e amplia o `CHECK` do outbox. A entrega não
+  envia DM; usa somente `dismissal_log_channel_id`, com retry/idempotência já existentes.
+- O embed militar informa membro, responsável, situação, instante persistido e motivo automático.
+  `superiors.dismissals` foi declarado como canal privado; o auditor de segurança acusa exposição
+  pública como crítica.
+- TDD: RED `25c593c`, RED complementar `8d7a323`, GREEN `1526e03`. Gates: sete testes focados,
+  **575 testes Python**, Ruff, compileall e `main.py --check` em migration 52. Nenhum canal real,
+  push, merge, deploy ou produção foi alterado.
+
 # Site CHOQUE — datas recentes do dashboard legíveis por máquina em 2026-08-26
 
 - Cada pendência administrativa recente mantém o texto humano e agora usa `<time dateTime="ISO">`.
