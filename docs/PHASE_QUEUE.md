@@ -850,7 +850,7 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     Nenhum Discord real, push, merge ou deploy foi executado. Rollout exige máquina principal,
     backup, migration em cópia, smoke humano e nova autorização explícita.
 
-60. ✅ **Controle proativo do cargo AGUARDANDO SET — concluído localmente, sem rollout.**
+60. ✅ **Controle proativo do cargo AGUARDANDO SET — publicado em produção em 2026-08-26; smoke humano pendente.**
     Fonte integral preservada em `docs/source-prompts/18-central-tags-set-identity-original.md`,
     SHA-256 `6330CC70FE7920C2BA0DA5B4F85A9A29310F935530BDC837475DD8F81A8978B1`. Os commits
     `8757005`/`c29a726` entregam migration 53, detecção, DM idempotente, fallback humano, assunção,
@@ -859,10 +859,10 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     `2a6db1d` agora conclui o estado durável antes de remover `AGUARDANDO SET`, sem inventar o ator da
     alteração e com retry versionado. A fila acionável continua excluindo quem ainda não respondeu à
     DM; a visão `Todos` já inclui esses casos. Gates: **586 testes Python**, 1 pulado, Ruff, compileall,
-    `main.py --check`, scanner de segredos, diff e revisão independente. Nenhum Discord real, push,
-    merge ou deploy foi executado.
+    `main.py --check`, scanner de segredos, diff e revisão independente. O rollout técnico foi
+    consolidado no item 62; o smoke humano permanece pendente.
 
-61. ✅ **Aviso privado da Central de Tags — concluído localmente, sem rollout.**
+61. ✅ **Aviso privado da Central de Tags — publicado com o lote bloqueado em 2026-08-26.**
     A migration 54 cria uma campanha durável e idempotente para membros CHOQUE aprovados. A fila
     envia no máximo uma DM a cada cinco segundos, com retry exponencial, bloqueio terminal para DM
     proibida/membro ausente, recuperação após reinício e auditoria. O Discord ID
@@ -871,5 +871,16 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     `tag_outreach_rollout_approved=false` até nova autorização explícita. Gates: **595 testes
     Python**, 1 pulado, Ruff, compileall, `main.py --check` em migration 54, scanner de segredos e
     diff. A prévia real foi enviada somente ao proprietário via REST, sem segundo Gateway, e
-    verificada como mensagem `1542302969305890930`; o lote permanece desligado. Nenhum push, merge,
-    deploy ou reinício de produção foi executado.
+    verificada como mensagem `1542302969305890930`; o lote permanece desligado. O rollout técnico
+    foi consolidado no item 62, sem liberar o lote.
+
+62. ✅ **Rollout consolidado das migrations 49–54 — publicado em 2026-08-26.**
+    O app único `choque-bgr-api` foi parado para backup frio, recebeu o stage validado e voltou
+    online com `CHECK_OK`, migration 54, health 200 e um Gateway; o standalone legado continuou
+    Offline. O ensaio v48→v54 e o banco pós-corte passaram `quick_check=ok` e FK=0, preservando 171
+    membros e 22 solicitações de tag abertas. A prévia privada foi reconhecida sem duplicação como
+    `DELIVERED`; não existe fila de lote e `tag_outreach_rollout_approved=false`. Os commits foram
+    enviados à branch privada `codex/phase-b-transfers`, sem merge na `main`. Smokes humanos de ADV,
+    Cursos, Transferências, Desligamentos e `AGUARDANDO SET` permanecem pendentes. O startup também
+    revelou um alerta independente: `COMANDO • ROCAM` possui permissões globais indevidas e impede
+    apenas o provisionamento automático de Unidades Especiais; o fonte é idêntico ao pré-deploy.

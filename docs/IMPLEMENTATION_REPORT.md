@@ -1385,3 +1385,24 @@ Fora do escopo atual: eventos, API e integração MTA.
 - Gates locais: **595 testes Python passaram**, 1 foi pulado; Ruff, compileall, `main.py --check` em
   migration 54, scanner de segredos e `git diff --check` passaram. Nenhuma DM real, push, merge,
   deploy ou alteração de produção foi executada.
+
+# Rollout consolidado ADV/Cursos/Transferências/Desligamentos/Tags em 2026-08-26
+
+- O backup remoto online v48 passou `quick_check=ok` e FK=0. Uma cópia consistente recebeu as
+  migrations 49–54 e preservou 171 membros e 22 solicitações de tag abertas antes da janela.
+- O app combinado `choque-bgr-api` foi parado e um segundo backup frio v48 foi validado antes do
+  commit do stage. Bancos, WAL/SHM, `.env`, logs, backups e artefatos ficaram fora do pacote.
+- Produção iniciou com `CHECK_OK`, migration 54, 20 cogs, 46 comandos internos, 34 views
+  persistentes, health 200 e um Gateway. `1787438463932` permaneceu Offline.
+- O backup pós-corte passou `quick_check=ok` e FK=0. Contagens de membros e solicitações abertas
+  permaneceram 171 e 22. Os hashes de `database.py`, `tags.py`, `tag_commands.py` e `settings.py`
+  coincidem com o checkout publicado.
+- A única linha de `tag_member_outreach` é a prévia do proprietário, `DELIVERED` com a mensagem
+  `1542302969305890930`. Não existe override de `tag_outreach_rollout_approved`; o padrão `false`
+  mantém o lote vazio e nenhum outro membro foi contatado.
+- O startup revelou falha separada no provisionamento de Unidades Especiais: o cargo
+  `COMANDO • ROCAM` possui permissões globais indevidas. O arquivo responsável tem o mesmo SHA-256
+  antes e depois do corte; não houve alteração automática das permissões. App, API e Gateway seguem
+  online, mas esse provisionamento precisa de decisão específica do proprietário.
+- Smokes humanos de ADV, Cursos, Transferências, Desligamentos e `AGUARDANDO SET` permanecem
+  pendentes; publicação técnica não substitui aceite humano desses fluxos.

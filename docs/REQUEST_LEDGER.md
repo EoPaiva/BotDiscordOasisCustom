@@ -7,9 +7,9 @@ Atualizado em 2026-08-26.
 | Pedido | Estado | Fonte e garantia de escopo |
 |---|---|---|
 | Evolução Completa do Ecossistema CHOQUE | EM EXECUÇÃO POR FASES | Fonte integral preservada na fase 56, SHA-256 `797967256032CBA953CC3493D745E4706AD5EDC506EAF2D2AE68444B170B44A6`; 65 seções consolidadas sem duplicar sistemas existentes. |
-| Cursos por canal, requisitos e qualificação | CONCLUÍDO LOCALMENTE, SEM ROLLOUT | Migration 50, painel persistente individual por curso, requisitos completos e sincronização idempotente do cargo após aprovação. Gates: 68 testes focados, 561 testes completos, Ruff, compileall e `main.py --check`. |
-| Transferências com protocolo e teto de patente | CONCLUÍDO LOCALMENTE, SEM ROLLOUT | Migration 51 reutiliza tickets, cadastro, RBAC e auditoria; adiciona protocolo estável, timeline, teto configurável por guild e duas decisões humanas antes do vínculo. Gates: 68 testes focados, 569 testes completos, scanner de segredos, `pip-audit`, Ruff, compileall, `main.py --check` e todos os gates web. |
-| Registro militar automático de desligamentos | CONCLUÍDO LOCALMENTE, SEM ROLLOUT | Fonte preservada em `source-prompts/17-*`; migration 52, outbox durável, quatro caminhos canônicos, motivo público fechado pelo perfil `ALTO_COMANDO`, canal privado declarativo e 575 testes Python verdes. O motivo interno nunca entra no boletim. |
+| Cursos por canal, requisitos e qualificação | PUBLICADO EM PRODUÇÃO; SMOKE HUMANO PENDENTE | Migration 50, painel persistente individual por curso, requisitos completos e sincronização idempotente do cargo após aprovação. Publicado no corte v49–v54 com banco íntegro e Gateway único. |
+| Transferências com protocolo e teto de patente | PUBLICADO EM PRODUÇÃO; SMOKE HUMANO PENDENTE | Migration 51 reutiliza tickets, cadastro, RBAC e auditoria; adiciona protocolo estável, timeline, teto configurável por guild e duas decisões humanas antes do vínculo. Publicado no corte v49–v54; as duas decisões reais ainda exigem smoke humano. |
+| Registro militar automático de desligamentos | PUBLICADO EM PRODUÇÃO; SMOKE HUMANO PENDENTE | Fonte preservada em `source-prompts/17-*`; migration 52, outbox durável, quatro caminhos canônicos, motivo público fechado pelo perfil `ALTO_COMANDO` e canal privado declarativo. O motivo interno nunca entra no boletim. |
 | Reformulação Completa do Site CHOQUE | FASE VISUAL ATIVA | Fonte integral preservada na fase 57, SHA-256 `808436337D493D5548FF12696DEC465A2DC6BF6B6A983FF191861D6AD25D3B45`; primeira entrega publicada e referência visual tática definida como contrato das telas restantes. Doze cortes locais do Centro de Comando concluídos: drawer móvel acessível, timestamp factual, métricas semânticas, coleções nomeadas, seletor administrativo nativo associado ao painel e horários legíveis por máquina na caixa e no dashboard; 67 testes Web, audit, typecheck, lint e build; sem rollout. |
 | Identidade Visual / Design System CHOQUE | REGISTRADO NA FILA | Fonte recebida na fase 58, SHA-256 `78C71E32434F0B6B1DC711B51E2BC872A5406B47E043817BD7624038ADFA5221`, com a imagem tática como referência obrigatória. O arquivo termina no meio da seção 65 (`Status com:`); o trecho ausente não será inferido. |
 
@@ -29,23 +29,23 @@ Atualizado em 2026-08-26.
 | UX contextual enxuta | CONCLUÍDO EM PRODUÇÃO | Pedido novo mostra `Assumir` e `Ver detalhes`; após assumir, a própria ficha oferece `Chamar para DP`, `Tag aplicada`/validação e `Mais ações`. Fichas encerradas permanecem no histórico, em cinza e sem controles. |
 | Notificação, recovery e concorrência | CONCLUÍDO EM PRODUÇÃO | A migration 43 versiona a projeção da ficha. O reinício controlado preservou as treze fichas, sem reenvio ou duplicação, com Gateway único; 58 testes focados e 507 testes da suíte completa passaram. |
 
-## Controle proativo do cargo AGUARDANDO SET — concluído localmente em 2026-08-26
+## Controle proativo do cargo AGUARDANDO SET — publicado em produção em 2026-08-26
 
 | Pedido | Estado | Fonte e garantia de escopo |
 |---|---|---|
-| Detectar membros com `AGUARDANDO SET` fora do fluxo normal | CONCLUÍDO LOCALMENTE, SEM ROLLOUT | Fonte integral preservada em `docs/source-prompts/18-central-tags-set-identity-original.md`, SHA-256 `6330CC70FE7920C2BA0DA5B4F85A9A29310F935530BDC837475DD8F81A8978B1`; migration 53, DM persistente, fallback humano, fila, auditoria e cargos por outbox estão nos commits `8757005`/`c29a726`. |
-| `TAG SETADA` adicionada externamente | CORRIGIDO LOCALMENTE, SEM ROLLOUT | `2a6db1d` conclui primeiro o agregado durável `WAITING_ROLE_SCAN`, sem atribuir ator inexistente, registra evento/auditoria, versiona a sincronização e só depois remove `AGUARDANDO SET`. A repetição é idempotente. |
+| Detectar membros com `AGUARDANDO SET` fora do fluxo normal | PUBLICADO EM PRODUÇÃO; SMOKE HUMANO PENDENTE | Fonte integral preservada em `docs/source-prompts/18-central-tags-set-identity-original.md`, SHA-256 `6330CC70FE7920C2BA0DA5B4F85A9A29310F935530BDC837475DD8F81A8978B1`; migration 53, DM persistente, fallback humano, fila, auditoria e cargos por outbox estão ativos no runtime v54. |
+| `TAG SETADA` adicionada externamente | PUBLICADO EM PRODUÇÃO; SMOKE HUMANO PENDENTE | `2a6db1d` conclui primeiro o agregado durável `WAITING_ROLE_SCAN`, sem atribuir ator inexistente, registra evento/auditoria, versiona a sincronização e só depois remove `AGUARDANDO SET`. A repetição é idempotente. |
 | Lista administrativa de quem ainda não respondeu à DM | DECISÃO CONFIRMADA | `Faltam setar` continua restrita a `AGUARDANDO_SET`; quem aguarda resposta inicial não é fila acionável. A visão `Todos` permanece sem filtro e inclui esses casos. |
 | Gates | APROVADOS LOCALMENTE | 586 testes Python passaram, 1 foi pulado e 21 avisos de depreciação conhecidos permaneceram; Ruff, compileall, `main.py --check`, scanner de segredos, diff e revisão independente passaram. |
 
-## Aviso privado da Central de Tags aos cadastrados — concluído localmente em 2026-08-26
+## Aviso privado da Central de Tags aos cadastrados — publicado com lote bloqueado em 2026-08-26
 
 | Pedido | Estado | Garantia de escopo |
 |---|---|---|
-| Avisar todos os membros CHOQUE cadastrados | CONCLUÍDO LOCALMENTE, SEM ROLLOUT | Migration 54 cria fila durável por campanha para vínculos aprovados `ACTIVE`, `AWAY`, `RESERVE` e `SUSPENDED`; `PENDING` e `DISMISSED` não entram. O aviso não abre solicitação nem altera cargos. |
-| Ritmo seguro e recuperação | CONCLUÍDO LOCALMENTE, SEM ROLLOUT | O worker processa no máximo uma DM a cada cinco segundos, respeita o controle de rate limit do cliente Discord, aplica retry exponencial somente a falhas transitórias, encerra 403/404 e recupera claims abandonados. |
+| Avisar todos os membros CHOQUE cadastrados | PUBLICADO, MAS LOTE BLOQUEADO | Migration 54 cria fila durável por campanha para vínculos aprovados `ACTIVE`, `AWAY`, `RESERVE` e `SUSPENDED`; `PENDING` e `DISMISSED` não entram. O aviso não abre solicitação nem altera cargos. Nenhum destinatário geral foi enfileirado. |
+| Ritmo seguro e recuperação | PUBLICADO EM PRODUÇÃO | O worker processa no máximo uma DM a cada cinco segundos, respeita o controle de rate limit do cliente Discord, aplica retry exponencial somente a falhas transitórias, encerra 403/404 e recupera claims abandonados. |
 | Prévia obrigatória ao proprietário | ENVIADA E VERIFICADA | O Discord ID `395061579101503491` recebeu primeiro a mensagem `1542302969305890930`, com o mesmo conteúdo, embed e link do lote. O envio usou REST sem segundo Gateway. `tag_outreach_rollout_approved=false` continua impedindo criar ou enviar o lote até nova autorização explícita. |
-| Gates | APROVADOS LOCALMENTE | 595 testes Python passaram e 1 foi pulado; Ruff, compileall, `main.py --check` em migration 54, scanner de segredos e diff passaram. Nenhuma DM real, push, merge ou produção foi alterada. |
+| Gates | APROVADOS E ROLLOUT VERIFICADO | 595 testes Python passaram e 1 foi pulado; dependências de produção sem vulnerabilidades conhecidas, scanner de segredos e lint verdes. Backup frio v48, ensaio v48→v54, health 200, banco pós-v54 íntegro, hashes de fontes iguais e Gateway único confirmados. |
 
 ## Notificação automática de promoções e rebaixamentos — futuro
 

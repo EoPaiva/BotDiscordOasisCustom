@@ -27,12 +27,22 @@ Ruff, compileall, `main.py --check` com migration 54, scanner de segredos e `git
 verdes. A suíte foi executada integralmente em cinco blocos temporários no disco D devido ao espaço
 insuficiente no disco C.
 
-**Estado externo:** a prévia real foi enviada somente ao Discord ID `395061579101503491` em
-2026-08-26 19:41 -03:00, mensagem `1542302969305890930`, usando REST para não abrir um segundo
-Gateway. Conteúdo, embed, rodapé e link oficial foram verificados. Nenhum outro membro recebeu DM;
-nenhum push, merge, deploy ou reinício de produção foi executado. O código reconhece essa prévia
-preexistente quando for publicado, evitando duplicá-la. O lote continua pausado até nova confirmação
-explícita do proprietário.
+**Estado externo:** os blocos ADV, Cursos, Transferências, Registro de Desligamentos, controle de
+`AGUARDANDO SET` e aviso privado foram publicados no app único `choque-bgr-api` em 2026-08-26
+19:49 -03:00. O runtime aplicou migrations 49–54, terminou `CHECK_OK`, respondeu health 200 e
+conectou um Gateway; o standalone `1787438463932` permanece Offline. O banco pós-corte passou
+`quick_check=ok` e FK=0, preservando 171 membros e 22 solicitações de tag abertas.
+
+A prévia `1542302969305890930` foi reconhecida sem duplicação e consta `DELIVERED`. A tabela possui
+somente essa linha; `tag_outreach_rollout_approved` não tem override e continua no padrão `false`,
+portanto nenhum outro membro recebeu o aviso. O backup frio v48 e o backup pós-v54 estão preservados
+em `artifacts/pre-tags-v54-production-cold-20260826T1951` e
+`artifacts/post-tags-v54-production-20260826T1953`.
+
+**Alerta operacional separado:** o startup registrou falha no provisionamento automático de
+Unidades Especiais porque o cargo `COMANDO • ROCAM` possui permissões globais indevidas. O arquivo
+responsável é byte a byte igual ao anterior ao deploy; o app, API, Gateway e demais módulos seguem
+online. Não alterar permissões do cargo sem autorização específica.
 
 ## 0.1 Checkpoint anterior — Controle de Tags
 
@@ -68,7 +78,7 @@ nova autorização explícita. Até isso acontecer, a tarefa `AGORA` abaixo perm
 
 ## Handoff
 
-**Última atualização:** 2026-08-26 19:41 -03:00
+**Última atualização:** 2026-08-26 19:53 -03:00
 
 **Branch atual:** `codex/phase-b-transfers`
 
