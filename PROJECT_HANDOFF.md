@@ -2203,6 +2203,8 @@ Programa Web. Tudo continua na ordem de
 - Branch local: `codex/phase-b-transfers`. Commits: `8c20229` contém somente o contrato de testes em
   RED; `422e213` contém a implementação que levou o mesmo contrato a GREEN. Não houve push, merge,
   deploy, chamada ao Discord, acesso ao banco remoto ou leitura/cópia do arquivo local de variáveis.
+  A revisão de alcançabilidade adicionou `d18e739` (RED) e `06ae652` (fix) para garantir que a ficha
+  criada pela transferência seja publicada no fluxo visual de revisão, sem depender de comando.
 - A migration 51 cria `transfer_cases` e `transfer_case_events`. `service_tickets` permanece como
   entrada, fila e sala privada; o agregado novo guarda somente protocolo, snapshot, decisão, patente
   autorizada, aplicação e timeline. Tickets antigos são migrados sem reinterpretar aprovação legada
@@ -2214,11 +2216,12 @@ Programa Web. Tudo continua na ordem de
   A análise posterior da ficha é a segunda decisão humana e aplica exatamente a patente aprovada,
   ignorando cargos Discord que pudessem elevar o ingresso; somente então a sincronização canônica é
   enfileirada. Concorrência e repetição são protegidas transacionalmente.
-- Gates locais: 65 testes focados e **566 testes Python**; `SECRET_SCAN_OK`; `pip-audit` sem
+- Gates locais: 66 testes focados e **567 testes Python**; `SECRET_SCAN_OK`; `pip-audit` sem
   vulnerabilidades; Ruff, compileall, `main.py --check` em migration 51 e `git diff --check`; portal
   com `npm audit` sem vulnerabilidades, typecheck, lint, **57 testes** e build Next.js verdes.
 - Este checkpoint está **somente local e não implantado**. Na máquina principal: reler este handoff e
-  o diff dos dois commits; confirmar a patente-teto; parar o escritor único; gerar e validar backup
-  (`quick_check` e foreign keys); aplicar a migration primeiro em cópia; repetir gates e smoke humano;
+  o diff dos quatro commits de teste/código; confirmar a patente-teto; parar o escritor único; gerar
+  e validar backup (`quick_check` e foreign keys); aplicar a migration primeiro em cópia; repetir
+  gates e smoke humano;
   só então, com nova autorização explícita, fazer merge/push/deploy e validar health, migration,
   Gateway único, protocolo, duas decisões, outbox e rollback.

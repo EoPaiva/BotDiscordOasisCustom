@@ -780,8 +780,8 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     continua sendo a entrada e a sala privada; o novo agregado cobre somente protocolo estável, snapshot,
     teto de patente por guild, timeline e aplicação. Aprovar o ticket cria uma ficha pendente e não altera
     vínculo; outra decisão humana aplica exatamente a patente autorizada e então usa a outbox canônica.
-    Migração de histórico não concede patente retroativamente. Gate consolidado: 65 testes focados,
-    **566 testes Python**, scanner de segredos, `pip-audit`, Ruff, compileall, `main.py --check`, 57 testes
+    Migração de histórico não concede patente retroativamente. Gate consolidado: 66 testes focados,
+    **567 testes Python**, scanner de segredos, `pip-audit`, Ruff, compileall, `main.py --check`, 57 testes
     web, `npm audit`, typecheck, lint e build. A sincronização multi-servidor existente não foi duplicada
     nem alterada neste corte. ADV, Cursos e Transferências ainda não foram publicados em produção.
 

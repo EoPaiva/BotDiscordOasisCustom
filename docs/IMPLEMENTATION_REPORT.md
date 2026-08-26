@@ -1201,7 +1201,9 @@ Fora do escopo atual: eventos, API e integração MTA.
 - Tickets históricos são migrados sem concessão retroativa. Casos pendentes podem seguir o ciclo
   novo; aprovações antigas ficam identificadas separadamente para revisão, sem patente inferida.
 - TDD: `8c20229` registra quatro falhas esperadas antes da implementação; `422e213` entrega o GREEN.
-  Evidência detalhada: `docs/testing/phase-b-transfers-tdd.md`.
-- Gates locais: 65 testes focados, **566 testes Python**, scanner de segredos, `pip-audit`, Ruff,
+  A revisão de alcançabilidade gerou outro RED em `d18e739`, corrigido por `06ae652`, para publicar a
+  ficha de transferência no painel de revisão existente. Evidência detalhada:
+  `docs/testing/phase-b-transfers-tdd.md`.
+- Gates locais: 66 testes focados, **567 testes Python**, scanner de segredos, `pip-audit`, Ruff,
   compileall, `main.py --check`, diff, `npm audit`, typecheck, lint, **57 testes web** e build.
   Nenhuma ação de produção foi executada.

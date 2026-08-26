@@ -1,6 +1,6 @@
 # Evidência TDD — Fase B — Transferências
 
-Data: 2026-08-26  
+Data: 2026-08-26
 Escopo: ciclo auditável de transferência, somente local, sem rollout.
 
 ## Contrato protegido
@@ -33,7 +33,7 @@ Commit exclusivo dos testes: `8c20229 test: define auditable transfer lifecycle`
 O mesmo arquivo terminou com `4 passed`. O conjunto direcionado ampliado terminou com:
 
 ```text
-65 passed, 2 warnings
+66 passed, 2 warnings
 ```
 
 As advertências são depreciações já conhecidas do `discord.py` em inspeções de labels; não são falhas
@@ -41,9 +41,16 @@ funcionais nem foram introduzidas no domínio de transferências.
 
 Commit da implementação: `422e213 feat: add auditable transfer protocols`.
 
+## RED/GREEN da revisão de alcançabilidade
+
+A revisão da branch identificou que a ficha pendente criada por uma transferência aprovada ainda não
+era publicada no painel visual de análise. O teste isolado falhou com `Awaited 0 times`, provando que
+o fluxo dependeria do comando administrativo legado. O commit `d18e739` preserva esse RED; o commit
+`06ae652` amplia o roteamento existente para `TRANSFER` e levou o mesmo teste a `1 passed`.
+
 ## Gate completo local
 
-- Python: `566 passed, 21 warnings` em 170,70 s;
+- Python: `567 passed, 21 warnings` em 162,75 s após a correção de alcançabilidade;
 - scanner de segredos: `SECRET_SCAN_OK`;
 - dependências Python: `No known vulnerabilities found`;
 - Ruff: sem achados;
