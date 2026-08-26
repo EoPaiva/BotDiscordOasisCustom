@@ -11,6 +11,7 @@ from scripts.migrate_rec_choque import (
     _copy_data,
     _permission_overwrites,
     _preserve_member_overwrites,
+    _recruitment_position_rows,
     run,
 )
 
@@ -25,6 +26,22 @@ def test_recruitment_results_are_public_in_recruitment_category() -> None:
     assert set(results) == {"recruitment.approved", "recruitment.rejected"}
     assert all(spec.category == "recruitment" for spec in results.values())
     assert all(not spec.private for spec in results.values())
+
+
+def test_rec_review_mentions_use_all_three_staff_positions() -> None:
+    rows = _recruitment_position_rows(
+        {
+            "Comando REC": 101,
+            "Responsável Recrutamento": 102,
+            "Auxiliar Recrutamento": 103,
+        }
+    )
+
+    assert rows == [
+        (101, "RECRUITMENT_LEAD", "Comando REC", 700, "ADMINISTRADOR"),
+        (102, "RECRUITMENT_LEAD", "Responsável Recrutamento", 600, "INSTRUTOR"),
+        (103, "RECRUITER", "Auxiliar Recrutamento", 500, "INSTRUTOR"),
+    ]
 
 
 def test_reprovision_preserves_only_member_specific_overwrites() -> None:

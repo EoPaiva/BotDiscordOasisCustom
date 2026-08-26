@@ -96,6 +96,101 @@ CORE_ROLE_NAMES = (
     "Comando REC",
 )
 
+REC_RECRUITMENT_POSITION_SPECS = (
+    ("Comando REC", "RECRUITMENT_LEAD", 700, "ADMINISTRADOR"),
+    ("Responsável Recrutamento", "RECRUITMENT_LEAD", 600, "INSTRUTOR"),
+    ("Auxiliar Recrutamento", "RECRUITER", 500, "INSTRUTOR"),
+)
+
+
+def _recruitment_position_rows(
+    role_ids_by_name: dict[str, int],
+) -> list[tuple[int, str, str, int, str]]:
+    missing = [
+        name for name, _, _, _ in REC_RECRUITMENT_POSITION_SPECS if name not in role_ids_by_name
+    ]
+    if missing:
+        raise RuntimeError("Cargos do REC ausentes: " + ", ".join(missing))
+    return [
+        (role_ids_by_name[name], internal_code, name, priority, profile)
+        for name, internal_code, priority, profile in REC_RECRUITMENT_POSITION_SPECS
+    ]
+
+
+async def _configure_recruitment_position_mappings(
+    database: Database,
+    guild_id: int,
+    actor_id: int,
+    role_ids_by_name: dict[str, int],
+) -> None:
+    now = utc_now_ms()
+    async with database.transaction() as connection:
+        profile_cursor = await connection.execute(
+            """
+            SELECT id, code FROM access_profiles
+            WHERE guild_id=? AND code IN ('ADMINISTRADOR','INSTRUTOR') AND enabled=1
+            """,
+            (guild_id,),
+        )
+        profiles = {str(row["code"]): int(row["id"]) for row in await profile_cursor.fetchall()}
+        if set(profiles) != {"ADMINISTRADOR", "INSTRUTOR"}:
+            raise RuntimeError("Perfis administrativos do REC não estão configurados.")
+
+        positions: dict[str, int] = {}
+        for code, name, priority in (
+            ("RECRUITMENT_LEAD", "Comando do Recrutamento", 700),
+            ("RECRUITER", "Auxiliar do Recrutamento", 500),
+        ):
+            await connection.execute(
+                """
+                INSERT INTO functional_positions(
+                  guild_id,code,name,priority,access_profile_id,
+                  is_primary_candidate,enabled,created_at,updated_at
+                ) VALUES(?,?,?,?,?,1,1,?,?)
+                ON CONFLICT(guild_id,code) DO UPDATE SET
+                  name=excluded.name,priority=excluded.priority,
+                  access_profile_id=excluded.access_profile_id,enabled=1,
+                  updated_at=excluded.updated_at
+                """,
+                (guild_id, code, name, priority, profiles["INSTRUTOR"], now, now),
+            )
+            position_cursor = await connection.execute(
+                "SELECT id FROM functional_positions WHERE guild_id=? AND code=?",
+                (guild_id, code),
+            )
+            positions[code] = int((await position_cursor.fetchone())["id"])
+
+        for role_id, internal_code, display_name, priority, profile in (
+            _recruitment_position_rows(role_ids_by_name)
+        ):
+            await connection.execute(
+                """
+                INSERT INTO discord_role_mappings(
+                  guild_id,discord_role_id,mapping_type,internal_code,display_name,
+                  priority,position_id,access_profile_id,is_primary_position_candidate,
+                  enabled,created_at,updated_at,created_by
+                ) VALUES(?,?,'POSITION',?,?,?,?,?,1,1,?,?,?)
+                ON CONFLICT(guild_id,discord_role_id,mapping_type) DO UPDATE SET
+                  internal_code=excluded.internal_code,display_name=excluded.display_name,
+                  priority=excluded.priority,position_id=excluded.position_id,
+                  access_profile_id=excluded.access_profile_id,
+                  is_primary_position_candidate=1,enabled=1,
+                  updated_at=excluded.updated_at
+                """,
+                (
+                    guild_id,
+                    role_id,
+                    internal_code,
+                    display_name,
+                    priority,
+                    positions[internal_code],
+                    profiles[profile],
+                    now,
+                    now,
+                    actor_id,
+                ),
+            )
+
 
 class DiscordRest:
     def __init__(self, token: str) -> None:
@@ -850,6 +945,20 @@ async def run(args: argparse.Namespace) -> int:
                 """,
                 (target_guild_id, role_id, profile, utc_now_ms(), int(target_guild["owner_id"])),
             )
+        await _configure_recruitment_position_mappings(
+            database,
+            target_guild_id,
+            int(target_guild["owner_id"]),
+            {
+                "Comando REC": int(command_role["id"]),
+                "Responsável Recrutamento": role_map[
+                    source_named_ids["Responsável Recrutamento"]
+                ],
+                "Auxiliar Recrutamento": role_map[
+                    source_named_ids["Auxiliar Recrutamento"]
+                ],
+            },
+        )
 
         requirements_id = await _upsert_panel(
             api,
