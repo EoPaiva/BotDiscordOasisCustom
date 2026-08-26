@@ -802,8 +802,11 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     fechamento por `Escape` e retorno do foco ao acionador. TDD preservado nos commits `2ca8770`
     (RED) e `20d4153` (GREEN). O segundo corte fez o cabeçalho do dashboard mostrar o timestamp do
     snapshot real da API em `<time>`, sem usar o relógio do render; `5e36506` preserva o RED e
-    `098fea0` entrega o GREEN. Gate consolidado: 4 testes focados, 59 testes web, `npm audit` sem
-    vulnerabilidades, typecheck, lint e build. Os cortes permanecem somente locais e não publicados.
+    `098fea0` entrega o GREEN. O terceiro corte tornou todas as faixas `MetricStrip` listas de
+    descrição com pares semânticos `<dt>/<dd>`, sem alterar visual ou valores; `093a1cf` preserva o
+    RED e `d0eecb6` entrega o GREEN. Gate consolidado: 8 testes focados, 60 testes web, `npm audit`
+    sem vulnerabilidades, typecheck, lint e build. Os cortes permanecem somente locais e não
+    publicados.
 
 58. ⏳ **Prompt Master — Identidade Visual / Design System CHOQUE — registrado na fila.**
     Fonte recebida: `C:\Users\mpaii\.codex\attachments\8f7db861-0f81-4655-a0fc-b3fc90133b12\pasted-text.txt`,

@@ -1231,3 +1231,13 @@ Fora do escopo atual: eventos, API e integração MTA.
 - TDD: `5e36506` registra o contrato RED e `098fea0` entrega o GREEN.
 - Gate consolidado do portal: 4 testes focados, **59 testes web**, `npm audit` sem vulnerabilidades,
   typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
+
+# Site CHOQUE — métricas semânticas prontas localmente em 2026-08-26
+
+- `MetricStrip`, usado pelas superfícies administrativas, agora expõe a coleção como `<dl>` e cada
+  rótulo/valor como `<dt>/<dd>`. Leitores de tela recebem a relação sem depender da posição visual.
+- Classes, tons, conteúdo, ordem horizontal e comportamento responsivo foram preservados; somente
+  margens nativas de `dl/dt/dd` foram neutralizadas no CSS existente.
+- TDD: `093a1cf` registra o contrato RED e `d0eecb6` entrega o GREEN.
+- Gate consolidado do portal: 8 testes focados, **60 testes web**, `npm audit` sem vulnerabilidades,
+  typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
