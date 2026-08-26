@@ -849,3 +849,15 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     sete testes do módulo, **575 testes Python**, Ruff, compileall e `main.py --check` em migration 52.
     Nenhum Discord real, push, merge ou deploy foi executado. Rollout exige máquina principal,
     backup, migration em cópia, smoke humano e nova autorização explícita.
+
+60. ✅ **Controle proativo do cargo AGUARDANDO SET — concluído localmente, sem rollout.**
+    Fonte integral preservada em `docs/source-prompts/18-central-tags-set-identity-original.md`,
+    SHA-256 `6330CC70FE7920C2BA0DA5B4F85A9A29310F935530BDC837475DD8F81A8978B1`. Os commits
+    `8757005`/`c29a726` entregam migration 53, detecção, DM idempotente, fallback humano, assunção,
+    auditoria, outbox e painel administrativo. A auditoria desta máquina encontrou a divergência em
+    que `TAG SETADA` era adicionada no Discord mas a solicitação `WAITING_ROLE_SCAN` permanecia ativa;
+    `2a6db1d` agora conclui o estado durável antes de remover `AGUARDANDO SET`, sem inventar o ator da
+    alteração e com retry versionado. A fila acionável continua excluindo quem ainda não respondeu à
+    DM; a visão `Todos` já inclui esses casos. Gates: **586 testes Python**, 1 pulado, Ruff, compileall,
+    `main.py --check`, scanner de segredos, diff e revisão independente. Nenhum Discord real, push,
+    merge ou deploy foi executado.

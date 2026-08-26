@@ -1344,3 +1344,23 @@ Fora do escopo atual: eventos, API e integração MTA.
 - TDD: `c5f7e2c` registra o contrato RED e `88dde3a` entrega o GREEN.
 - Gate consolidado do portal: 15 testes focados, **67 testes web em 17 arquivos**, `npm audit` sem
   vulnerabilidades, typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
+
+# Central de Tags — controle proativo de AGUARDANDO SET auditado localmente em 2026-08-26
+
+- A fonte original de 40 seções foi preservada byte a byte em
+  `docs/source-prompts/18-central-tags-set-identity-original.md`, SHA-256
+  `6330CC70FE7920C2BA0DA5B4F85A9A29310F935530BDC837475DD8F81A8978B1`.
+- A migration 53 e os commits `8757005`/`c29a726` detectam o cargo `AGUARDANDO SET`, abrem uma
+  confirmação privada persistente e idempotente, encaminham bloqueio de DM para humanos, controlam
+  assunção concorrente e mantêm auditoria, outbox e painel administrativo.
+- A auditoria do recorte encontrou um caso real de convergência: `TAG SETADA` adicionada diretamente
+  no Discord removia o cargo de espera, mas não encerrava o agregado durável. `2a6db1d` corrige a
+  ordem: conclui a solicitação `WAITING_ROLE_SCAN`, registra evento e auditoria com ator nulo,
+  atualiza membro/estado de sincronização, enfileira o reparo versionado e somente então remove
+  `AGUARDANDO SET`. Repetições não duplicam conclusão nem outbox.
+- A decisão da lista administrativa foi mantida: `Faltam setar` mostra somente `AGUARDANDO_SET`;
+  membros que ainda não responderam à DM não são acionáveis nessa fila, mas continuam visíveis em
+  `Todos`.
+- Gates locais: **586 testes Python passaram**, 1 foi pulado, 21 avisos conhecidos de depreciação;
+  Ruff, compileall, `main.py --check` em migration 53, scanner de segredos, diff e revisão
+  independente passaram. Nenhum Discord real, push, merge ou deploy foi executado.

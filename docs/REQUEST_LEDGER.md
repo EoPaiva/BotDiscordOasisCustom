@@ -29,6 +29,15 @@ Atualizado em 2026-08-26.
 | UX contextual enxuta | CONCLUÍDO EM PRODUÇÃO | Pedido novo mostra `Assumir` e `Ver detalhes`; após assumir, a própria ficha oferece `Chamar para DP`, `Tag aplicada`/validação e `Mais ações`. Fichas encerradas permanecem no histórico, em cinza e sem controles. |
 | Notificação, recovery e concorrência | CONCLUÍDO EM PRODUÇÃO | A migration 43 versiona a projeção da ficha. O reinício controlado preservou as treze fichas, sem reenvio ou duplicação, com Gateway único; 58 testes focados e 507 testes da suíte completa passaram. |
 
+## Controle proativo do cargo AGUARDANDO SET — concluído localmente em 2026-08-26
+
+| Pedido | Estado | Fonte e garantia de escopo |
+|---|---|---|
+| Detectar membros com `AGUARDANDO SET` fora do fluxo normal | CONCLUÍDO LOCALMENTE, SEM ROLLOUT | Fonte integral preservada em `docs/source-prompts/18-central-tags-set-identity-original.md`, SHA-256 `6330CC70FE7920C2BA0DA5B4F85A9A29310F935530BDC837475DD8F81A8978B1`; migration 53, DM persistente, fallback humano, fila, auditoria e cargos por outbox estão nos commits `8757005`/`c29a726`. |
+| `TAG SETADA` adicionada externamente | CORRIGIDO LOCALMENTE, SEM ROLLOUT | `2a6db1d` conclui primeiro o agregado durável `WAITING_ROLE_SCAN`, sem atribuir ator inexistente, registra evento/auditoria, versiona a sincronização e só depois remove `AGUARDANDO SET`. A repetição é idempotente. |
+| Lista administrativa de quem ainda não respondeu à DM | DECISÃO CONFIRMADA | `Faltam setar` continua restrita a `AGUARDANDO_SET`; quem aguarda resposta inicial não é fila acionável. A visão `Todos` permanece sem filtro e inclui esses casos. |
+| Gates | APROVADOS LOCALMENTE | 586 testes Python passaram, 1 foi pulado e 21 avisos de depreciação conhecidos permaneceram; Ruff, compileall, `main.py --check`, scanner de segredos, diff e revisão independente passaram. |
+
 ## Notificação automática de promoções e rebaixamentos — futuro
 
 | Pedido | Estado | Garantia de escopo |

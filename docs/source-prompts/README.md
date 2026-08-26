@@ -1,8 +1,9 @@
 # Fontes originais preservadas
 
-Esta pasta contém dezessete prompts longos importados durante o projeto e uma fonte financeira externa
-preservada por caminho e hash. Os doze primeiros foram preservados byte a byte; os cinco mais recentes foram normalizados para UTF-8/LF pelo mecanismo de
-patch, sem alterar o conteúdo textual. Ela existe
+Esta pasta contém dezoito prompts longos importados durante o projeto e uma fonte financeira externa
+preservada por caminho e hash. Os doze primeiros e o prompt 18 foram preservados byte a byte; os
+prompts 13–17 foram normalizados para UTF-8/LF pelo mecanismo de patch, sem alterar o conteúdo
+textual. Ela existe
 para impedir que regras sejam perdidas quando a conversa for compactada ou encerrada. Os arquivos
 são fonte de requisitos, não prova de implementação. O estado real continua documentado em
 `PROJECT_HANDOFF.md`; a ordem de execução está em `docs/PHASE_QUEUE.md`.
@@ -28,4 +29,5 @@ Nenhum token ou endereço de e-mail foi encontrado nessas fontes antes da cópia
 | `15-discord-role-access-sync-original.md` | `474E97E28C350105594221BBE4A8CABDA33D2E75AC74377D3FA07B75D0A5E426` |
 | `16-vehicle-operation-ptr-career-merit-officer-original.md` | `11EC9D26F62AB5C646C66CAE7215F633C6748A7E884AB9BAC020C15A5F12AD15` |
 | `17-dismissal-records-original.md` | `B626412356E33510440E4D2E4262008C3CAF36BCE717064B752F21016B6CB46B` |
+| `18-central-tags-set-identity-original.md` | `6330CC70FE7920C2BA0DA5B4F85A9A29310F935530BDC837475DD8F81A8978B1` |
 | `C:\Users\mpaii\.codex\attachments\dbcc3e73-3d46-4cc6-a021-2680bab85abc\pasted-text.txt` (Auxílio Financeiro, 40 blocos) | `EC9FA0507AC4CC2F43C1CAD93BF739A050488FB57A8584573273CB7AF70F75B2` |

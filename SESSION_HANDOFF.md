@@ -11,38 +11,38 @@ merge, deploy ou Discord real.
 
 **Branch:** `codex/phase-b-transfers`
 
-**Commits do corte:**
+**Commits do corte e da auditoria:**
 
 - `8757005` — `test: define waiting-role tag control` (contratos RED);
-- `c29a726` — `feat: automate waiting-role tag control` (implementação GREEN).
+- `c29a726` — `feat: automate waiting-role tag control` (implementação GREEN);
+- `2a6db1d` — `fix: reconcile externally assigned tag role` (convergência auditada).
 
 **Concluído localmente:** migration 53; detecção periódica e por `on_member_update` do cargo
 configurado `AGUARDANDO SET`; DM persistente e idempotente com respostas positiva/negativa;
 encaminhamento à ficha única da Central; fallback para contato manual quando a DM é proibida;
 assunção concorrente; aviso durável do responsável; finalização direta pelo responsável; cargos por
 outbox; auditoria; arquivamento ao sair do servidor; e entrada `🏷️ Tags` na Central Administrativa.
+O caso de `TAG SETADA` adicionada fora do fluxo agora conclui primeiro o agregado durável, registra
+ator nulo/auditoria/outbox versionada e só então remove `AGUARDANDO SET`. A lista acionável continua
+sem quem ainda não respondeu à DM; a visão `Todos` já inclui essas solicitações.
 
-**Validação concluída:** 85 testes focados verdes; Ruff do recorte verde; compileall verde;
-`main.py --check` verde com migration 53, 20 cogs, 46 comandos internos e 34 views persistentes;
-`git diff --check` verde. A suíte Python completa foi interrompida, sem falha observada, quando havia
-passado aproximadamente 51%, porque o proprietário pediu a pausa.
+**Validação concluída:** 586 testes Python verdes, 1 pulado e 21 avisos conhecidos; Ruff do recorte,
+compileall, `main.py --check` com migration 53, scanner de segredos, `git diff --check` e revisão
+independente verdes. A primeira tentativa completa ficou sem espaço temporário; o lixo exclusivo do
+pytest foi removido e a repetição com `--basetemp` dedicado passou integralmente.
 
-**Próxima ação exata:** no novo computador, confirmar `git status --short --branch` e os dois commits
-acima. Depois revisar somente o diff `8757005..c29a726`, executar `pytest -q` completo e o scanner de
-segredos. Verificar especialmente o caso de cargo `TAG SETADA` adicionado fora do fluxo e se a lista
-administrativa deve incluir também quem ainda não respondeu à DM. Se os gates ficarem verdes,
-preservar o prompt original em `docs/source-prompts/`, atualizar ledger/fila/relatório e criar o
-commit documental. Não tocar produção; rollout continua dependendo da auditoria na máquina
-principal, banco em cópia e autorização nova.
+**Próxima ação exata:** o corte de Tags está fechado localmente. Não tocar produção. O rollout
+continua dependendo de auditoria na máquina principal, backup e migration em cópia, smoke humano e
+nova autorização explícita. Até isso acontecer, a tarefa `AGORA` abaixo permanece válida.
 
 ## Handoff
 
-**Última atualização:** 2026-08-26 17:31 -03:00
+**Última atualização:** 2026-08-26 18:55 -03:00
 
 **Branch atual:** `codex/phase-b-transfers`
 
 **Último commit funcional:**
-`c29a726` — `feat: automate waiting-role tag control`
+`2a6db1d` — `fix: reconcile externally assigned tag role`
 
 **Commit do protocolo:** este arquivo pertence ao commit de documentação imediatamente posterior;
 confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferência impossível.
