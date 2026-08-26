@@ -437,6 +437,8 @@ class MemberService:
             if approved and transfer:
                 # A patente autorizada na primeira decisão é imutável nesta
                 # etapa. Cargos atuais do Discord não podem elevar o ingresso.
+                if transfer["approved_rank_id"] is None:
+                    raise ConflictError("O protocolo não possui uma patente aprovada válida.")
                 initial_rank_id = int(transfer["approved_rank_id"])
             status = "APPROVED" if approved else "REJECTED"
             cursor = await connection.execute(
@@ -462,6 +464,10 @@ class MemberService:
                     )
                 rank = await rank_cursor.fetchone()
                 if rank is None and initial_rank_id is not None:
+                    if transfer:
+                        raise ConflictError(
+                            "A patente aprovada foi desativada; reabra o protocolo para nova decisão."
+                        )
                     # O cargo pode ter sido desativado entre a abertura do modal e
                     # a decisão. Nesse caso, volte de forma determinística à menor
                     # patente ativa em vez de cadastrar o membro sem patente.
