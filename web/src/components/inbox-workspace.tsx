@@ -22,6 +22,13 @@ function isoDateTime(value: unknown): string | undefined {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
+function fieldValue(key: string, value: unknown) {
+  const machineDateTime = /_(?:at|time)$/.test(key) ? isoDateTime(value) : undefined;
+  return machineDateTime
+    ? <time dateTime={machineDateTime}>{dateTime(Number(value))}</time>
+    : String(value);
+}
+
 export function InboxWorkspace({ items }: { items: InboxItem[] }) {
   const [selectedId, setSelectedId] = useState(items[0] ? `${items[0].type}:${items[0].id}` : "");
   const selected = useMemo(
@@ -48,7 +55,7 @@ export function InboxWorkspace({ items }: { items: InboxItem[] }) {
       </ul>
       <article aria-labelledby={decisionTitleId} className="decision-panel" id={decisionPanelId}>
         <header><div><span className="technical-index">PROCESSO / {selected.id}</span><h2 id={decisionTitleId}>{label(selected.type)}</h2></div><Status value={selected.data.status ?? "PENDING"} /></header>
-        <dl className="decision-fields">{visibleFields(selected.data).map(([key, value]) => <div key={key}><dt>{label(key)}</dt><dd>{typeof value === "number" && /_at$/.test(key) ? dateTime(value) : String(value)}</dd></div>)}</dl>
+        <dl className="decision-fields">{visibleFields(selected.data).map(([key, value]) => <div key={key}><dt>{label(key)}</dt><dd>{fieldValue(key, value)}</dd></div>)}</dl>
         {selected.type === "RECRUITMENT_APPLICATION" ? <div className="decision-form"><p>A candidatura exige leitura do dossiê, integridade, entrevista e confirmação humana separada.</p><Link className="button button-primary" href={`/recruitment/${selected.id}`}>Abrir dossiê de recrutamento</Link></div> : <form action={decideInboxItem} className="decision-form">
           <input type="hidden" name="itemId" value={selected.id} /><input type="hidden" name="itemType" value={selected.type} />
           <label>Fundamentação da decisão<textarea name="reason" minLength={3} maxLength={500} required placeholder="Registre uma justificativa objetiva e auditável." /></label>
