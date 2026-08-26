@@ -115,4 +115,39 @@ describe("command dashboard snapshot", () => {
     expect(within(briefing).getByText("promotions")).toBeInTheDocument();
     expect(within(briefing).getByText("2")).toBeInTheDocument();
   });
+
+  it("exposes active patrol records as a semantic list", async () => {
+    const generatedAt = Date.parse("2026-08-26T15:30:00.000Z");
+    api.commandCenterFetch.mockResolvedValue({
+      generated_at: generatedAt,
+      readiness: { counts: {} },
+      patrols: [{
+        id: 5,
+        sequence_number: 5,
+        status: "ACTIVE",
+        voice_channel_name: "CALL ALFA",
+        member_names: "Sentinela",
+        member_count: 1,
+        started_at: generatedAt - 60_000,
+      }],
+      queue: [],
+      inbox: [],
+      changes: { counts: {}, events: [] },
+      capabilities: {
+        view_inbox: false,
+        view_changes: false,
+        view_all_operations: false,
+      },
+    });
+
+    const view = render(await DashboardPage());
+    const patrols = within(view.container).getByRole("list", {
+      name: "Patrulhas em andamento",
+    });
+
+    expect(patrols.tagName).toBe("UL");
+    expect(within(patrols).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(patrols).getByRole("article")).toHaveTextContent("Sentinela");
+    expect(within(patrols).getByText("CALL ALFA")).toBeInTheDocument();
+  });
 });
