@@ -88,4 +88,31 @@ describe("command dashboard snapshot", () => {
     expect(within(inbox).getAllByRole("listitem")).toHaveLength(1);
     expect(within(inbox).getByRole("link", { name: /TRF-003/ })).toHaveAttribute("href", "/inbox");
   });
+
+  it("exposes the change briefing as a semantic list", async () => {
+    const generatedAt = Date.parse("2026-08-26T15:30:00.000Z");
+    api.commandCenterFetch.mockResolvedValue({
+      generated_at: generatedAt,
+      readiness: { counts: {} },
+      patrols: [],
+      queue: [],
+      inbox: [],
+      changes: { counts: { promotions: 2, transfers: 1 }, events: [] },
+      capabilities: {
+        view_inbox: false,
+        view_changes: true,
+        view_all_operations: false,
+      },
+    });
+
+    const view = render(await DashboardPage());
+    const briefing = within(view.container).getByRole("list", {
+      name: "Resumo de mudanças dos últimos 7 dias",
+    });
+
+    expect(briefing.tagName).toBe("UL");
+    expect(within(briefing).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(briefing).getByText("promotions")).toBeInTheDocument();
+    expect(within(briefing).getByText("2")).toBeInTheDocument();
+  });
 });
