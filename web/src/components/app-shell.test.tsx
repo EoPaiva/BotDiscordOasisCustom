@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -102,5 +102,32 @@ describe("AppShell live authorization", () => {
 
     expect(navigation.refresh).toHaveBeenCalledTimes(1);
     expect(screen.getAllByText("Comando").length).toBeGreaterThan(0);
+  });
+
+  it("exposes an accessible mobile drawer and restores focus after Escape", () => {
+    const context = normalizeAccessContext({
+      member: { discord_id: 20, mta_nick: "Sentinela", status: "ACTIVE" },
+      access: { profile: "MEMBRO", profile_name: "Membro", permissions: [], authorization_version: 2 },
+    });
+
+    const view = render(<AppShell context={context}><div>Centro</div></AppShell>);
+    const shell = within(view.container);
+
+    const trigger = shell.getByRole("button", { name: "Abrir menu" });
+    expect(trigger).toHaveAttribute("aria-controls", "command-navigation-drawer");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(shell.queryByRole("dialog", { name: "Menu de navegação" })).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(shell.getByRole("dialog", { name: "Menu de navegação" })).toBeInTheDocument();
+    expect(shell.getByRole("button", { name: "Fechar menu" })).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(shell.queryByRole("dialog", { name: "Menu de navegação" })).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveFocus();
   });
 });
