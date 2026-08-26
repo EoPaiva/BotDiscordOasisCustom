@@ -1281,3 +1281,13 @@ Fora do escopo atual: eventos, API e integração MTA.
 - TDD: `c38d050` registra o contrato RED e `2fab9ce` entrega o GREEN.
 - Gate consolidado do portal: 12 testes focados, **64 testes web**, `npm audit` sem vulnerabilidades,
   typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
+
+# Site CHOQUE — seletor administrativo semântico pronto localmente em 2026-08-26
+
+- A caixa administrativa deixou de declarar `listbox/option` sem implementar o modelo de teclado
+  exigido por esse widget composto. Os processos agora formam `<ul>/<li>` com botões nativos.
+- O processo ativo mantém classe visual e passa a expor `aria-current`; clique, painel, formulários,
+  decisões, ordem e dados foram preservados.
+- TDD: `d6fd37c` registra o contrato RED e `93bc047` entrega o GREEN.
+- Gate consolidado do portal: 13 testes focados, **65 testes web em 17 arquivos**, `npm audit` sem
+  vulnerabilidades, typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.

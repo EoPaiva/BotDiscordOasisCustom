@@ -5,12 +5,12 @@
 
 ## Handoff
 
-**Última atualização:** 2026-08-26 16:02 -03:00
+**Última atualização:** 2026-08-26 16:05 -03:00
 
 **Branch atual:** `codex/phase-b-transfers`
 
 **Último commit funcional:**
-`2fab9ce` — `fix: expose semantic patrol records`
+`93bc047` — `fix: expose semantic inbox selector`
 
 **Commit do protocolo:** este arquivo pertence ao commit de documentação imediatamente posterior;
 confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferência impossível.
@@ -24,7 +24,7 @@ confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferên
 Na máquina principal, auditar os blocos locais ADV, Cursos e Transferências contra o checkout que
 opera o projeto, validar migrations 49–51 numa cópia do banco e preparar um rollout controlado. A
 implementação local de Transferências está concluída. Enquanto essa etapa externa permanece
-bloqueada, a Fase 57 pode avançar localmente em cortes pequenos e fecháveis; sete cortes do Centro
+bloqueada, a Fase 57 pode avançar localmente em cortes pequenos e fecháveis; oito cortes do Centro
 de Comando estão concluídos e não há código parcial neste computador.
 
 ### Critério de conclusão
@@ -40,7 +40,7 @@ de Comando estão concluídos e não há código parcial neste computador.
 
 ### Última ação concluída
 
-O protocolo de continuidade foi instalado na raiz. Depois, a Fase 57 avançou em sete cortes do
+O protocolo de continuidade foi instalado na raiz. Depois, a Fase 57 avançou em oito cortes do
 Centro de Comando: `2ca8770`/`20d4153` entregam o drawer móvel acessível;
 `5e36506`/`098fea0` fazem o cabeçalho usar o `generated_at` real da API em um elemento `<time>`, em
 vez do relógio do render; `093a1cf`/`d0eecb6` expõem todas as faixas de métricas como pares
@@ -48,11 +48,13 @@ semânticos `<dt>/<dd>`, preservando visual e conteúdo; `03b2bd6`/`ff86f4e` tor
 lista ordenada acessível; `b52379c`/`d0681c6` expõem as pendências administrativas recentes como
 lista semântica nomeada; `6de2297`/`b3db98c` fazem o mesmo com o briefing de mudanças dos últimos
 sete dias; `c38d050`/`2fab9ce` expõem as patrulhas ativas como lista nomeada, preservando cada registro
-como `<article>`. Nenhum contrato, URL, RBAC, API ou regra de negócio foi alterado.
+como `<article>`; `d6fd37c`/`93bc047` substituem o padrão incompleto `listbox/option` da caixa
+administrativa por lista nativa com botões de seleção e estado atual explícito. Nenhum contrato, URL,
+RBAC, API ou regra de negócio foi alterado.
 
 ### Ação em andamento
 
-Nenhuma alteração está em andamento. Transferências e os sete cortes acessíveis da Fase 57
+Nenhuma alteração está em andamento. Transferências e os oito cortes acessíveis da Fase 57
 terminaram em pontos seguros e commitados.
 
 ### PRÓXIMA AÇÃO EXATA
@@ -163,8 +165,9 @@ antes de qualquer rollout.
 
 ### Gate do corte local da Fase 57
 
-- 3 testes focados de `app-shell`, 5 de dashboard e 4 de componentes compartilhados passaram.
-- 64 testes Web passaram.
+- 3 testes focados de `app-shell`, 5 de dashboard, 4 de componentes compartilhados e 1 da caixa
+  administrativa passaram.
+- 65 testes Web passaram em 17 arquivos.
 - Typecheck, ESLint e build Next.js passaram.
 - `npm audit` encontrou 0 vulnerabilidades.
 - `git diff --check` passou antes dos commits.
@@ -213,10 +216,10 @@ npm run build
 
 - [ ] Com gates verdes e autorização nova, executar merge/push/deploy controlado, validar health,
   migration, Gateway único, duas decisões, outbox e rollback.
-- [ ] Continuar a Fase 57 na superfície administrativa: criar teste RED focado para
-  `web/src/components/inbox-workspace.tsx` que exige `inbox-list` como lista semântica nomeada com
-  botões de seleção nativos; depois ajustar somente marcação/CSS, sem alterar item ativo, decisão,
-  formulários, ordem ou dados.
+- [ ] Continuar a Fase 57 na superfície administrativa: ampliar o teste de
+  `web/src/components/inbox-workspace.tsx` com RED que exige associação acessível entre os botões e
+  o painel de decisão ativo; usar IDs únicos e `aria-controls`/`aria-labelledby`, sem alterar seleção,
+  decisões, formulários, ordem ou dados.
 - [ ] Consolidar a Fase 58, Design System, sem inventar o trecho ausente do prompt original.
 - [ ] Continuar os blocos restantes do Prompt Master do ecossistema pela ordem da fila oficial.
 
