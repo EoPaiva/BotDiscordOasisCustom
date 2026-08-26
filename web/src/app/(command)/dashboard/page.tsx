@@ -75,13 +75,15 @@ export default async function DashboardPage() {
 
         {data.capabilities.view_inbox && <section className="command-section pending-sector">
           <SectionHeader index="03" title="Pendências" meta={`${data.inbox.length} itens recentes`} />
-          {data.inbox.length ? <div className="inbox-summary">{data.inbox.map((item, index) => {
+          {data.inbox.length ? <ul aria-label="Pendências administrativas recentes" className="inbox-summary">{data.inbox.map((item, index) => {
             const detail = (item.data ?? {}) as Row;
-            return <Link href="/inbox" key={`${item.type}-${item.id}-${index}`}>
-              <div><code>{String(detail.code ?? `SOL-${item.id ?? index + 1}`)}</code><strong>{label(item.type ?? detail.request_type)}</strong></div>
-              <div><Status value={detail.status ?? "PENDING"} /><span>{dateTime(Number(detail.created_at ?? detail.submitted_at ?? 0))}</span></div>
-            </Link>;
-          })}</div> : <EmptyState title="Caixa regular" detail="Nenhuma pendência administrativa no momento." />}
+            return <li key={`${item.type}-${item.id}-${index}`}>
+              <Link href="/inbox">
+                <div><code>{String(detail.code ?? `SOL-${item.id ?? index + 1}`)}</code><strong>{label(item.type ?? detail.request_type)}</strong></div>
+                <div><Status value={detail.status ?? "PENDING"} /><span>{dateTime(Number(detail.created_at ?? detail.submitted_at ?? 0))}</span></div>
+              </Link>
+            </li>;
+          })}</ul> : <EmptyState title="Caixa regular" detail="Nenhuma pendência administrativa no momento." />}
           <Link className="text-link" href="/inbox">Abrir caixa administrativa <ArrowRight size={15} /></Link>
         </section>}
       </div>
