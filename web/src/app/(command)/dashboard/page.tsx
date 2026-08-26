@@ -29,13 +29,19 @@ export default async function DashboardPage() {
   const data = await commandCenterFetch<DashboardData>("/v1/dashboard");
   const counts = data.readiness.counts ?? {};
   const changeCounts = data.changes.counts ?? {};
+  const generatedAt = new Date(data.generated_at);
+  const generatedAtLabel = new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "long",
+    timeStyle: "short",
+    timeZone: "America/Sao_Paulo",
+  }).format(generatedAt);
   return (
     <>
       <LiveDataRefresh intervalMs={10_000} />
       <PageHeader
         code="CC / 01"
         title="Centro de Comando"
-        description={`${new Intl.DateTimeFormat("pt-BR", { dateStyle: "long", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date())} • Situação consolidada`}
+        description={<><time dateTime={generatedAt.toISOString()}>{generatedAtLabel}</time> • Situação consolidada</>}
       />
       <MetricStrip items={[
         { label: "EM PATRULHA", value: counts.ON_PATROL ?? 0, tone: "success" },

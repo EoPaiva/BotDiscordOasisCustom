@@ -8,7 +8,7 @@ export function PageHeader({
 }: {
   code: string;
   title: string;
-  description?: string;
+  description?: React.ReactNode;
   actions?: React.ReactNode;
 }) {
   return (
