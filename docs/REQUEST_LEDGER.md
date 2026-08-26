@@ -2,6 +2,13 @@
 
 Atualizado em 2026-08-25.
 
+## Prompts Master recebidos em 2026-08-26
+
+| Pedido | Estado | Fonte e garantia de escopo |
+|---|---|---|
+| Evolução Completa do Ecossistema CHOQUE | EM EXECUÇÃO POR FASES | Fonte integral preservada na fase 56, SHA-256 `797967256032CBA953CC3493D745E4706AD5EDC506EAF2D2AE68444B170B44A6`; 65 seções consolidadas sem duplicar sistemas existentes. |
+| Reformulação Completa do Site CHOQUE | FASE VISUAL ATIVA | Fonte integral preservada na fase 57, SHA-256 `808436337D493D5548FF12696DEC465A2DC6BF6B6A983FF191861D6AD25D3B45`; primeira entrega publicada e referência visual tática definida como contrato das telas restantes. |
+
 ## Central de Auxílio Financeiro, Metas, Transparência e Honrarias — em desenvolvimento isolado
 
 | Pedido | Estado | Fonte e garantia de escopo |

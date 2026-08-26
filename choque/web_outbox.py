@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from contextlib import suppress
 from urllib.parse import urlsplit
 
+import aiosqlite
 import discord
 
 from .audit import AuditService
@@ -273,6 +274,26 @@ class WebActionWorker:
                 SET status='FAILED', completed_at=?,
                     last_error='Recuperado após reinício do worker'
                 WHERE status='PROCESSING'
+                """,
+                (now,),
+            )
+            await connection.execute(
+                """
+                UPDATE web_action_outbox AS action
+                SET status='FAILED', attempts=9, available_at=?,
+                    last_error='Retomado após confirmação idempotente da auditoria'
+                WHERE action.status='FAILED' AND action.attempts >= 10
+                  AND action.action_type != 'IDENTITY_SYNC'
+                  AND EXISTS (
+                      SELECT 1 FROM audit_logs AS audit
+                      WHERE audit.action='DISCORD_SYNC_COMPLETED'
+                        AND audit.guild_id=action.guild_id
+                        AND audit.target_id=action.target_discord_id
+                        AND audit.correlation_id=(
+                            action.correlation_id || ':audit:discord-sync-completed-'
+                            || CAST(action.id AS TEXT)
+                        )
+                  )
                 """,
                 (now,),
             )
@@ -591,19 +612,10 @@ class WebActionWorker:
         if result.warning:
             raise RuntimeError(result.warning)
         if action_type != "IDENTITY_SYNC":
-            await self.audit.record(
-                int(row["guild_id"]),
-                "DISCORD_SYNC_COMPLETED",
-                actor_id=_optional_actor_id(row["requested_by"]),
+            await self._record_sync_completed_once(
+                row,
+                action_type=action_type,
                 target_id=target_id,
-                after={
-                    "action_id": int(row["id"]),
-                    "action_type": action_type,
-                    "operation_correlation_id": str(row["correlation_id"]),
-                },
-                correlation_id=_audit_correlation_id(
-                    row["correlation_id"], f"discord-sync-completed-{row['id']}"
-                ),
             )
         if action_type == "MEMBER_SYNC":
             await self._mark_registration_sync(
@@ -614,6 +626,75 @@ class WebActionWorker:
                 correlation_id=str(row["correlation_id"]),
             )
         return result
+
+    async def _record_sync_completed_once(
+        self,
+        row,
+        *,
+        action_type: str,
+        target_id: int,
+    ) -> None:
+        """Persist the dispatch audit exactly once across worker retries.
+
+        A Discord mutation can finish before the outbox row is marked complete.
+        On recovery, replaying that mutation is safe, but inserting the same
+        deterministic audit correlation used to raise an integrity error and
+        leave the action retrying forever.  Treat an identical existing audit
+        as proof of the completed boundary while rejecting a correlation that
+        belongs to a different event.
+        """
+
+        correlation_id = _audit_correlation_id(
+            row["correlation_id"], f"discord-sync-completed-{row['id']}"
+        )
+        expected = (
+            int(row["guild_id"]),
+            "DISCORD_SYNC_COMPLETED",
+            target_id,
+        )
+
+        async def matching_existing() -> bool:
+            existing = await self.database.fetchone(
+                """
+                SELECT guild_id, action, target_id FROM audit_logs
+                WHERE correlation_id=?
+                """,
+                (correlation_id,),
+            )
+            if existing is None:
+                return False
+            actual = (
+                int(existing["guild_id"]),
+                str(existing["action"]),
+                int(existing["target_id"]) if existing["target_id"] is not None else None,
+            )
+            if actual != expected:
+                raise RuntimeError(
+                    "Correlação de auditoria já pertence a outro evento: "
+                    f"{correlation_id}"
+                )
+            return True
+
+        if await matching_existing():
+            return
+        try:
+            await self.audit.record(
+                int(row["guild_id"]),
+                "DISCORD_SYNC_COMPLETED",
+                actor_id=_optional_actor_id(row["requested_by"]),
+                target_id=target_id,
+                after={
+                    "action_id": int(row["id"]),
+                    "action_type": action_type,
+                    "operation_correlation_id": str(row["correlation_id"]),
+                },
+                correlation_id=correlation_id,
+            )
+        except aiosqlite.IntegrityError:
+            # A second worker may have won the insert between the read and the
+            # write.  Accept only the exact same durable event.
+            if not await matching_existing():
+                raise
 
     async def _sync_special_unit_roles(self, row, payload, guild, member) -> None:
         if self.special_units is None:

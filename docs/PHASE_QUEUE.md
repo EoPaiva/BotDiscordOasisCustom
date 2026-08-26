@@ -757,3 +757,26 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     versionadas, auditadas e recuperadas após reinício. Gate: 546 testes, Ruff, compileall,
     `main.py --check`, backup íntegro, migration 46, health 200 e Gateway único. O reinício de prova
     preservou os mesmos seis IDs de painéis e oito conjuntos de recursos, sem duplicação.
+
+56. 🟡 **Prompt Master — Evolução Completa do Ecossistema CHOQUE — registrado e em execução por fases.**
+    Fonte integral: `C:\Users\mpaii\.codex\attachments\2fa5a165-f89d-4795-a943-564a5d0b87c6\pasted-text.txt`,
+    SHA-256 `797967256032CBA953CC3493D745E4706AD5EDC506EAF2D2AE68444B170B44A6`. As 65 seções
+    permanecem obrigatórias, mas não autorizam recriar módulos já concluídos. A execução segue
+    `mapear → reutilizar → corrigir → integrar → criar`, usando identidade, RBAC, auditoria, outbox,
+    painéis persistentes, banco e sincronização multi-servidor existentes. O inventário e as decisões
+    técnicas estão em `docs/ECOSYSTEM_SITE_AUDIT_20260826.md`. Os blocos restantes avançam por
+    dependência após a fase visual ativa, começando por ADV/cursos, sincronização/transferências e
+    analytics factuais. Dados simulados apresentados como produção, IA decisora e sistemas paralelos
+    continuam proibidos.
+
+57. 🔄 **Prompt Master — Reformulação Completa do Site CHOQUE — fase visual ativa.**
+    Fonte integral: `C:\Users\mpaii\.codex\attachments\89ef54de-2878-4b01-8ba7-9c600f45a3ad\pasted-text.txt`,
+    SHA-256 `808436337D493D5548FF12696DEC465A2DC6BF6B6A983FF191861D6AD25D3B45`. A referência visual
+    aprovada é o mosaico tático escuro encaminhado em 26/08/2026: preto/grafite, verde oliva como
+    acento, tipografia condensada, painéis densos, navegação militar e brasão oficial. Essa imagem é
+    contrato visual para todas as superfícies restantes; não deve ser reinterpretada como SaaS
+    genérico, cyberpunk ou interface clara. A primeira entrega já está publicada: identidade e
+    metadados oficiais, brasão otimizado, recrutamento, avaliação acessível, acompanhamento humano e
+    status com fonte real. Gates: 57 testes web, lint, typecheck e build. Permanecem ativos o Centro
+    de Comando, telas administrativas, mobile/acessibilidade e consolidação visual completa, sem
+    alterar contratos, URLs, RBAC ou regras de negócio existentes.

@@ -253,6 +253,77 @@ async def test_crash_after_identity_dispatch_retries_with_single_success_audit(
 
 
 @pytest.mark.asyncio
+async def test_member_sync_retry_accepts_existing_completion_audit(service_bundle) -> None:
+    database = service_bundle["database"]
+    audit = service_bundle["audit"]
+    gate = service_bundle["registration_gate"]
+    record = await gate.reconcile_identity(GUILD_ID, DISCORD_ID, source="REJOIN")
+    action_id = await _enqueue(
+        service_bundle,
+        action_type="MEMBER_SYNC",
+        payload={"source": "REC_APPROVAL_IMPORT"},
+        correlation_id="rec-source-member-sync:test:74",
+    )
+    action = await database.fetchone(
+        "SELECT * FROM web_action_outbox WHERE id=?",
+        (action_id,),
+    )
+    assert action is not None
+    correlation_id = str(action["correlation_id"])
+    completion_correlation = (
+        f"{correlation_id}:audit:discord-sync-completed-{action_id}"
+    )
+    await audit.record(
+        GUILD_ID,
+        "DISCORD_SYNC_COMPLETED",
+        actor_id=DISCORD_ID,
+        target_id=DISCORD_ID,
+        after={"action_id": action_id, "action_type": "MEMBER_SYNC"},
+        correlation_id=completion_correlation,
+    )
+    await database.execute(
+        """
+        UPDATE web_action_outbox
+        SET status='FAILED', attempts=10, available_at=0,
+            last_error='interrompido após auditoria'
+        WHERE id=?
+        """,
+        (action_id,),
+    )
+    member = SimpleNamespace(id=DISCORD_ID)
+    worker, rank_sync, _ = _worker(service_bundle, _FakeGuild(member), audit=audit)
+    rank_sync.sync_to_member.return_value = RankSyncResult(
+        True,
+        DISCORD_ID,
+        "REC_APPROVAL_IMPORT",
+    )
+
+    await worker._recover_inflight_actions()
+    assert await worker.process_pending() == 1
+
+    completed = await database.fetchone(
+        "SELECT status, attempts, last_error FROM web_action_outbox WHERE id=?",
+        (action_id,),
+    )
+    synced = await database.fetchone(
+        "SELECT sync_status, sync_error FROM registration_gate_records WHERE id=?",
+        (record["id"],),
+    )
+    completion_audits = await database.fetchone(
+        "SELECT COUNT(*) AS total FROM audit_logs WHERE correlation_id=?",
+        (completion_correlation,),
+    )
+    assert completed is not None
+    assert completed["status"] == "COMPLETED"
+    assert int(completed["attempts"]) == 10
+    assert completed["last_error"] is None
+    assert synced is not None
+    assert synced["sync_status"] == "SYNCED"
+    assert synced["sync_error"] is None
+    assert int(completion_audits["total"]) == 1
+
+
+@pytest.mark.asyncio
 async def test_identity_sync_marks_registered_member_absent_on_discord_not_found(
     service_bundle,
 ) -> None:
