@@ -133,6 +133,7 @@ async def test_approval_never_demotes_higher_rank(tmp_path):
 @pytest.mark.asyncio
 async def test_only_active_canonical_member_can_apply_and_open_application_is_unique(tmp_path):
     database, _, service = await _bundle(tmp_path)
+    assert await service.linked_recruitment_guild_ids(PRIMARY) == [REC]
     await service.submit_application(REC, MEMBER, "TATICO")
     with pytest.raises(ConflictError, match="pendente"):
         await service.submit_application(REC, MEMBER, "ROCAM")

@@ -696,17 +696,13 @@ class SpecialUnitCommands(commands.Cog):
             primary = self.bot.get_guild(primary_id)
             if primary is None:
                 return
-            rows = await self.services.database.fetchall(
-                """
-                SELECT guild_id FROM guild_settings
-                WHERE setting_key='identity_source_guild_id' AND setting_value_json=?
-                """,
-                (str(primary_id),),
+            linked_guild_ids = (
+                await self.services.special_units.linked_recruitment_guild_ids(primary_id)
             )
             rec_guilds = [
                 guild
-                for row in rows
-                if (guild := self.bot.get_guild(int(row["guild_id"]))) is not None
+                for guild_id in linked_guild_ids
+                if (guild := self.bot.get_guild(guild_id)) is not None
                 and guild.id != primary_id
             ]
             if not rec_guilds:

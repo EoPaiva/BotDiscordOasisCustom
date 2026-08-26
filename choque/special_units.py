@@ -42,6 +42,17 @@ class SpecialUnitService:
             "SELECT * FROM special_units WHERE enabled=1 ORDER BY sort_order"
         )
 
+    async def linked_recruitment_guild_ids(self, canonical_guild_id: int) -> list[int]:
+        rows = await self.database.fetchall(
+            """
+            SELECT guild_id FROM guild_settings
+            WHERE setting_key='identity_source_guild_id' AND value_json=?
+            ORDER BY guild_id
+            """,
+            (json.dumps(canonical_guild_id),),
+        )
+        return [int(row["guild_id"]) for row in rows]
+
     async def canonical_guild_id(self, recruitment_guild_id: int) -> int:
         source = await self.settings.get(recruitment_guild_id, "identity_source_guild_id")
         if source is None:
