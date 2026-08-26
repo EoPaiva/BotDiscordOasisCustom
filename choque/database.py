@@ -4027,6 +4027,33 @@ BEGIN
 END;
 """
 
+MIGRATION_045 = """
+-- O Responsável pelo Recrutamento precisa concluir a análise sem receber
+-- permissões administrativas fora do módulo. O Auxiliar permanece restrito
+-- a visualizar, assumir e avaliar candidaturas.
+INSERT INTO functional_position_permissions(
+    position_id, permission, effect, created_at, updated_at
+)
+SELECT id, 'recruitment.approve', 'GRANT',
+       CAST(strftime('%s','now') AS INTEGER) * 1000,
+       CAST(strftime('%s','now') AS INTEGER) * 1000
+FROM functional_positions
+WHERE code='RECRUITMENT_LEAD' AND enabled=1
+ON CONFLICT(position_id, permission) DO UPDATE SET
+    effect='GRANT', updated_at=excluded.updated_at;
+
+INSERT INTO functional_position_permissions(
+    position_id, permission, effect, created_at, updated_at
+)
+SELECT id, 'recruitment.reject', 'GRANT',
+       CAST(strftime('%s','now') AS INTEGER) * 1000,
+       CAST(strftime('%s','now') AS INTEGER) * 1000
+FROM functional_positions
+WHERE code='RECRUITMENT_LEAD' AND enabled=1
+ON CONFLICT(position_id, permission) DO UPDATE SET
+    effect='GRANT', updated_at=excluded.updated_at;
+"""
+
 MIGRATIONS = (
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -4072,6 +4099,7 @@ MIGRATIONS = (
     (42, MIGRATION_042),
     (43, MIGRATION_043),
     (44, MIGRATION_044),
+    (45, MIGRATION_045),
 )
 
 

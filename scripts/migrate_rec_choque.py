@@ -160,6 +160,20 @@ async def _configure_recruitment_position_mappings(
             )
             positions[code] = int((await position_cursor.fetchone())["id"])
 
+        await connection.executemany(
+            """
+            INSERT INTO functional_position_permissions(
+              position_id,permission,effect,created_at,updated_at
+            ) VALUES(?,?,'GRANT',?,?)
+            ON CONFLICT(position_id,permission) DO UPDATE SET
+              effect='GRANT',updated_at=excluded.updated_at
+            """,
+            (
+                (positions["RECRUITMENT_LEAD"], permission, now, now)
+                for permission in ("recruitment.approve", "recruitment.reject")
+            ),
+        )
+
         for role_id, internal_code, display_name, priority, profile in (
             _recruitment_position_rows(role_ids_by_name)
         ):

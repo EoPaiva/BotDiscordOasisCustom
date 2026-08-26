@@ -21,6 +21,61 @@ from .conftest import DISCORD_ID, GUILD_ID
 
 
 @pytest.mark.asyncio
+async def test_migration_45_grants_decisions_only_to_recruitment_lead(
+    tmp_path,
+    monkeypatch,
+):
+    target = tmp_path / "recruitment-lead-v44.db"
+    all_migrations = database_module.MIGRATIONS
+    monkeypatch.setattr(
+        database_module,
+        "MIGRATIONS",
+        tuple(item for item in all_migrations if item[0] <= 44),
+    )
+    database = Database(target)
+    await database.open()
+    await database.execute(
+        """
+        INSERT INTO functional_positions(
+            guild_id, code, name, priority, enabled, created_at, updated_at
+        ) VALUES (?, 'RECRUITMENT_LEAD', 'Responsável Recrutamento', 700, 1, 1, 1)
+        """,
+        (GUILD_ID,),
+    )
+    await database.execute(
+        """
+        INSERT INTO functional_positions(
+            guild_id, code, name, priority, enabled, created_at, updated_at
+        ) VALUES (?, 'RECRUITER', 'Auxiliar Recrutamento', 500, 1, 1, 1)
+        """,
+        (GUILD_ID,),
+    )
+    await database.close()
+
+    monkeypatch.setattr(database_module, "MIGRATIONS", all_migrations)
+    migrated = Database(target)
+    await migrated.open()
+    try:
+        rows = await migrated.fetchall(
+            """
+            SELECT fp.code, fpp.permission, fpp.effect
+            FROM functional_positions fp
+            LEFT JOIN functional_position_permissions fpp ON fpp.position_id=fp.id
+            WHERE fp.guild_id=? AND fp.code IN ('RECRUITMENT_LEAD','RECRUITER')
+            ORDER BY fp.code, fpp.permission
+            """,
+            (GUILD_ID,),
+        )
+        assert [tuple(row) for row in rows] == [
+            ("RECRUITER", None, None),
+            ("RECRUITMENT_LEAD", "recruitment.approve", "GRANT"),
+            ("RECRUITMENT_LEAD", "recruitment.reject", "GRANT"),
+        ]
+    finally:
+        await migrated.close()
+
+
+@pytest.mark.asyncio
 async def test_migration_44_retires_visitor_and_links_completed_registration(
     tmp_path,
     monkeypatch,

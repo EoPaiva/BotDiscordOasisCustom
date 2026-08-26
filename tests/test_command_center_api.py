@@ -227,6 +227,7 @@ async def _seed_database(path: Path) -> dict[str, int]:
             )
         return {
             "member_id": int(member["id"]),
+            "instructor_id": int(instructor["id"]),
             "soldier_rank": soldier_rank,
         }
     finally:
@@ -1102,6 +1103,88 @@ def test_candidate_cannot_read_another_candidate_and_instructor_cannot_approve(
     )
     assert visible.status_code == 200
     assert approve.status_code == 403
+
+
+def test_recruitment_lead_can_approve_without_global_command_access(api_client) -> None:
+    client, database_path, seeded = api_client
+    started = client.post(
+        "/v1/recruitment/applications/start",
+        headers=_headers(CANDIDATE_DISCORD_ID + 2),
+        json={
+            "candidate_nick": "Candidato_Lideranca",
+            "bgr_id": "5503",
+            "age": 20,
+            "consent_accepted": True,
+            "idempotency_key": "candidate-api-lead-authorization-key",
+        },
+    ).json()
+    now = int(time.time() * 1000)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "UPDATE recruitment_applications SET status='UNDER_REVIEW' WHERE id=?",
+            (started["id"],),
+        )
+        position_id = int(
+            connection.execute(
+                """
+                INSERT INTO functional_positions(
+                    guild_id, code, name, priority, access_profile_id,
+                    is_primary_candidate, enabled, created_at, updated_at
+                ) VALUES (?, 'RECRUITMENT_LEAD', 'Responsável Recrutamento', 700,
+                          NULL, 1, 1, ?, ?)
+                """,
+                (GUILD_ID, now, now),
+            ).lastrowid
+        )
+        connection.executemany(
+            """
+            INSERT INTO functional_position_permissions(
+                position_id, permission, effect, created_at, updated_at
+            ) VALUES (?, ?, 'GRANT', ?, ?)
+            """,
+            (
+                (position_id, "recruitment.approve", now, now),
+                (position_id, "recruitment.reject", now, now),
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO discord_role_mappings(
+                guild_id, discord_role_id, mapping_type, internal_code,
+                display_name, priority, position_id,
+                is_primary_position_candidate, enabled,
+                created_at, updated_at, created_by
+            ) VALUES (?, 9304, 'POSITION', 'RECRUITMENT_LEAD',
+                      'Responsável Recrutamento', 700, ?, 1, 1, ?, ?, ?)
+            """,
+            (GUILD_ID, position_id, now, now, ADMIN_DISCORD_ID),
+        )
+        connection.execute(
+            """
+            INSERT INTO member_positions(
+                member_id, position_id, source_role_id, is_primary,
+                assigned_at, last_seen_at
+            ) VALUES (?, ?, 9304, 1, ?, ?)
+            """,
+            (seeded["instructor_id"], position_id, now, now),
+        )
+        connection.commit()
+
+    lead_headers = _headers(INSTRUCTOR_DISCORD_ID)
+    approved = client.post(
+        f"/v1/admin/recruitment/applications/{started['id']}/approve",
+        headers=lead_headers,
+        json={
+            "expected_version": 1,
+            "internal_reason": "Análise humana concluída pela liderança do recrutamento.",
+            "candidate_message": "Candidatura aprovada após análise humana.",
+        },
+    )
+    members = client.get("/v1/members", headers=lead_headers)
+
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "APPROVED"
+    assert members.status_code == 403
 
 
 def test_candidate_can_withdraw_and_only_command_can_manage_blocks(api_client) -> None:
