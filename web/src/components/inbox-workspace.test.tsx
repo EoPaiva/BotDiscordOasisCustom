@@ -45,4 +45,19 @@ describe("administrative inbox workspace", () => {
     expect(times[0]).toHaveAttribute("dateTime", "2026-08-26T15:30:00.000Z");
     expect(times[1]).not.toHaveAttribute("dateTime");
   });
+
+  it("formats temporal fields in the decision panel without raw timestamps", () => {
+    const timestamp = Date.parse("2026-08-26T15:30:00.000Z");
+    const view = render(<InboxWorkspace items={[
+      { type: "TRANSFER", id: 3, data: { inbox_time: timestamp, created_at: timestamp, status: "PENDING" } },
+    ]} />);
+
+    const panel = within(view.container).getByRole("article", { name: "TRANSFER" });
+    const times = panel.querySelectorAll("dl.decision-fields time");
+
+    expect(times).toHaveLength(2);
+    expect(times[0]).toHaveAttribute("dateTime", "2026-08-26T15:30:00.000Z");
+    expect(times[1]).toHaveAttribute("dateTime", "2026-08-26T15:30:00.000Z");
+    expect(panel).not.toHaveTextContent(String(timestamp));
+  });
 });
