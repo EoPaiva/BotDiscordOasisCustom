@@ -776,7 +776,14 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     histórico canônico e enfileira uma única sincronização do cargo do curso. A migration 50 preserva o
     índice agregado apenas como orientação, sem concentrar candidaturas. Gate local consolidado: 68 testes
     focados e 561 testes da suíte completa, além de Ruff, compileall, `main.py --check` e `git diff --check`.
-    ADV e Cursos ainda não foram publicados em produção.
+    O terceiro bloco, **Transferências**, está concluído localmente na migration 51. O ticket existente
+    continua sendo a entrada e a sala privada; o novo agregado cobre somente protocolo estável, snapshot,
+    teto de patente por guild, timeline e aplicação. Aprovar o ticket cria uma ficha pendente e não altera
+    vínculo; outra decisão humana aplica exatamente a patente autorizada e então usa a outbox canônica.
+    Migração de histórico não concede patente retroativamente. Gate consolidado: 65 testes focados,
+    **566 testes Python**, scanner de segredos, `pip-audit`, Ruff, compileall, `main.py --check`, 57 testes
+    web, `npm audit`, typecheck, lint e build. A sincronização multi-servidor existente não foi duplicada
+    nem alterada neste corte. ADV, Cursos e Transferências ainda não foram publicados em produção.
 
 57. 🔄 **Prompt Master — Reformulação Completa do Site CHOQUE — fase visual ativa.**
     Fonte integral: `C:\Users\mpaii\.codex\attachments\89ef54de-2878-4b01-8ba7-9c600f45a3ad\pasted-text.txt`,

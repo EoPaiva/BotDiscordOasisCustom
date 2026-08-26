@@ -1187,3 +1187,21 @@ Fora do escopo atual: eventos, API e integração MTA.
   edita as mesmas mensagens e remove páginas excedentes da projeção sem apagar o histórico Discord.
 - Gates locais: 53 testes focados, **559 testes Python** na suíte completa, Ruff, compileall,
   `main.py --check` e `git diff --check`. Produção ainda não foi alterada por este bloco.
+
+# Ecossistema CHOQUE — transferências auditáveis prontas localmente em 2026-08-26
+
+- O fluxo existente de ticket, sala privada e cadastro foi preservado. A migration 51 adiciona um
+  agregado mínimo para protocolo estável, snapshot do pedido, decisão, patente autorizada e timeline.
+- O teto de patente é configurável por guild e aparece na configuração administrativa. A seleção usa
+  o ID canônico da patente e a decisão persiste o nível máximo vigente, impedindo elevação por nome,
+  cargo visual ou alteração posterior da configuração.
+- Aprovar a transferência apenas cria uma ficha pendente. O membro só é criado/reativado depois da
+  segunda análise humana; a patente aplicada é a autorizada no protocolo e a sincronização Discord
+  segue pela outbox já existente.
+- Tickets históricos são migrados sem concessão retroativa. Casos pendentes podem seguir o ciclo
+  novo; aprovações antigas ficam identificadas separadamente para revisão, sem patente inferida.
+- TDD: `8c20229` registra quatro falhas esperadas antes da implementação; `422e213` entrega o GREEN.
+  Evidência detalhada: `docs/testing/phase-b-transfers-tdd.md`.
+- Gates locais: 65 testes focados, **566 testes Python**, scanner de segredos, `pip-audit`, Ruff,
+  compileall, `main.py --check`, diff, `npm audit`, typecheck, lint, **57 testes web** e build.
+  Nenhuma ação de produção foi executada.
