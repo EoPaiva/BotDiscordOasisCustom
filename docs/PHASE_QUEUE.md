@@ -870,4 +870,6 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     geral não é criada antes da entrega dessa prévia e permanece bloqueada por
     `tag_outreach_rollout_approved=false` até nova autorização explícita. Gates: **595 testes
     Python**, 1 pulado, Ruff, compileall, `main.py --check` em migration 54, scanner de segredos e
-    diff. Nenhuma DM real, push, merge ou produção foi alterada.
+    diff. A prévia real foi enviada somente ao proprietário via REST, sem segundo Gateway, e
+    verificada como mensagem `1542302969305890930`; o lote permanece desligado. Nenhum push, merge,
+    deploy ou reinício de produção foi executado.

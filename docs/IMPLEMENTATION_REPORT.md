@@ -1379,6 +1379,9 @@ Fora do escopo atual: eventos, API e integração MTA.
 - O Discord ID `395061579101503491` recebe primeiro a prévia exata. O lote só pode ser criado depois
   que essa prévia estiver `DELIVERED`; mesmo então, `tag_outreach_rollout_approved=false` mantém o
   envio geral parado até autorização explícita do proprietário.
+- A prévia real foi enviada em 2026-08-26 19:41 -03:00 por REST, sem abrir um segundo Gateway, e
+  validada como mensagem `1542302969305890930`. O recovery da prévia também procura a marca estável
+  na primeira tentativa, para reconhecer esse envio preexistente após o futuro deploy e não duplicá-lo.
 - Gates locais: **595 testes Python passaram**, 1 foi pulado; Ruff, compileall, `main.py --check` em
   migration 54, scanner de segredos e `git diff --check` passaram. Nenhuma DM real, push, merge,
   deploy ou alteração de produção foi executada.

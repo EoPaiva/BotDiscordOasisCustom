@@ -27,9 +27,12 @@ Ruff, compileall, `main.py --check` com migration 54, scanner de segredos e `git
 verdes. A suíte foi executada integralmente em cinco blocos temporários no disco D devido ao espaço
 insuficiente no disco C.
 
-**Estado externo:** nenhuma DM real foi enviada; nenhum push, merge, deploy ou reinício de produção
-foi executado. O primeiro rollout ainda exige backup, migration em cópia e autorização explícita.
-Depois da prévia real, o lote continua pausado até nova confirmação do proprietário.
+**Estado externo:** a prévia real foi enviada somente ao Discord ID `395061579101503491` em
+2026-08-26 19:41 -03:00, mensagem `1542302969305890930`, usando REST para não abrir um segundo
+Gateway. Conteúdo, embed, rodapé e link oficial foram verificados. Nenhum outro membro recebeu DM;
+nenhum push, merge, deploy ou reinício de produção foi executado. O código reconhece essa prévia
+preexistente quando for publicado, evitando duplicá-la. O lote continua pausado até nova confirmação
+explícita do proprietário.
 
 ## 0.1 Checkpoint anterior — Controle de Tags
 
@@ -65,7 +68,7 @@ nova autorização explícita. Até isso acontecer, a tarefa `AGORA` abaixo perm
 
 ## Handoff
 
-**Última atualização:** 2026-08-26 19:28 -03:00
+**Última atualização:** 2026-08-26 19:41 -03:00
 
 **Branch atual:** `codex/phase-b-transfers`
 

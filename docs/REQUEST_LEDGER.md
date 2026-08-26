@@ -44,7 +44,7 @@ Atualizado em 2026-08-26.
 |---|---|---|
 | Avisar todos os membros CHOQUE cadastrados | CONCLUÍDO LOCALMENTE, SEM ROLLOUT | Migration 54 cria fila durável por campanha para vínculos aprovados `ACTIVE`, `AWAY`, `RESERVE` e `SUSPENDED`; `PENDING` e `DISMISSED` não entram. O aviso não abre solicitação nem altera cargos. |
 | Ritmo seguro e recuperação | CONCLUÍDO LOCALMENTE, SEM ROLLOUT | O worker processa no máximo uma DM a cada cinco segundos, respeita o controle de rate limit do cliente Discord, aplica retry exponencial somente a falhas transitórias, encerra 403/404 e recupera claims abandonados. |
-| Prévia obrigatória ao proprietário | TRAVA ATIVA | O Discord ID `395061579101503491` recebe primeiro a mesma mensagem, embed e link do lote. `tag_outreach_rollout_approved=false` impede criar ou enviar o lote até a prévia ser entregue e o proprietário autorizar explicitamente a continuação. |
+| Prévia obrigatória ao proprietário | ENVIADA E VERIFICADA | O Discord ID `395061579101503491` recebeu primeiro a mensagem `1542302969305890930`, com o mesmo conteúdo, embed e link do lote. O envio usou REST sem segundo Gateway. `tag_outreach_rollout_approved=false` continua impedindo criar ou enviar o lote até nova autorização explícita. |
 | Gates | APROVADOS LOCALMENTE | 595 testes Python passaram e 1 foi pulado; Ruff, compileall, `main.py --check` em migration 54, scanner de segredos e diff passaram. Nenhuma DM real, push, merge ou produção foi alterada. |
 
 ## Notificação automática de promoções e rebaixamentos — futuro
