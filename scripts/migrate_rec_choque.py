@@ -185,6 +185,28 @@ def _permission_overwrites(
     return result
 
 
+def _preserve_member_overwrites(
+    overwrites: list[dict[str, str | int]],
+    existing_overwrites: list[dict[str, Any]] | None,
+) -> list[dict[str, str | int]]:
+    result = list(overwrites)
+    known = {(str(item["id"]), int(item["type"])) for item in result}
+    for item in existing_overwrites or []:
+        identity = (str(item.get("id")), int(item.get("type", -1)))
+        if identity[1] != 1 or identity in known:
+            continue
+        result.append(
+            {
+                "id": identity[0],
+                "type": 1,
+                "allow": str(item.get("allow") or 0),
+                "deny": str(item.get("deny") or 0),
+            }
+        )
+        known.add(identity)
+    return result
+
+
 async def _ensure_role(
     api: DiscordRest,
     guild_id: int,
@@ -277,6 +299,11 @@ async def _ensure_channel(
     )
     if matches:
         channel = matches[0]
+        if spec.key == "recruitment.main_server":
+            overwrites = _preserve_member_overwrites(
+                overwrites,
+                list(channel.get("permission_overwrites") or []),
+            )
         return await api.request(
             "PATCH",
             f"/channels/{channel['id']}",

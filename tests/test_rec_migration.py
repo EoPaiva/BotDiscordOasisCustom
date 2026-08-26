@@ -6,7 +6,13 @@ import pytest
 
 from cogs.member_commands import MemberCommands
 from cogs.ticket_commands import TicketCommands
-from scripts.migrate_rec_choque import CHANNELS, _copy_data, _permission_overwrites, run
+from scripts.migrate_rec_choque import (
+    CHANNELS,
+    _copy_data,
+    _permission_overwrites,
+    _preserve_member_overwrites,
+    run,
+)
 
 
 def test_recruitment_results_are_public_in_recruitment_category() -> None:
@@ -19,6 +25,25 @@ def test_recruitment_results_are_public_in_recruitment_category() -> None:
     assert set(results) == {"recruitment.approved", "recruitment.rejected"}
     assert all(spec.category == "recruitment" for spec in results.values())
     assert all(not spec.private for spec in results.values())
+
+
+def test_reprovision_preserves_only_member_specific_overwrites() -> None:
+    base = _permission_overwrites(
+        100,
+        staff_role_ids=[200],
+        private=True,
+        writable=False,
+    )
+    merged = _preserve_member_overwrites(
+        base,
+        [
+            {"id": "300", "type": 1, "allow": "66560", "deny": "2048"},
+            {"id": "400", "type": 0, "allow": "1024", "deny": "0"},
+        ],
+    )
+
+    assert any(item["id"] == "300" and item["type"] == 1 for item in merged)
+    assert not any(item["id"] == "400" for item in merged)
 
 
 def test_private_interview_grants_candidate_access_without_moderation() -> None:

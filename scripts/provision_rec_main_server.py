@@ -20,6 +20,7 @@ from scripts.migrate_rec_choque import (  # noqa: E402
     _button,
     _embed,
     _permission_overwrites,
+    _preserve_member_overwrites,
     _role_key,
 )
 
@@ -47,17 +48,26 @@ def _find_unique(
     return matches[0]
 
 
-def channel_payload(guild_id: int, category_id: int, staff_role_ids: list[int]) -> dict[str, Any]:
+def channel_payload(
+    guild_id: int,
+    category_id: int,
+    staff_role_ids: list[int],
+    existing_overwrites: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    overwrites = _permission_overwrites(
+        guild_id,
+        staff_role_ids=staff_role_ids,
+        private=True,
+        writable=False,
+    )
     return {
         "name": CHANNEL_NAME,
         "type": 0,
         "parent_id": str(category_id),
         "topic": TOPIC,
-        "permission_overwrites": _permission_overwrites(
-            guild_id,
-            staff_role_ids=staff_role_ids,
-            private=True,
-            writable=False,
+        "permission_overwrites": _preserve_member_overwrites(
+            overwrites,
+            existing_overwrites,
         ),
     }
 
@@ -105,7 +115,6 @@ async def run(args: argparse.Namespace) -> int:
         staff_role_ids = [
             int(_find_unique(roles, name=name)["id"]) for name in STAFF_ROLES
         ]
-        payload = channel_payload(guild_id, int(category["id"]), staff_role_ids)
         matches = [
             channel
             for channel in channels
@@ -114,6 +123,12 @@ async def run(args: argparse.Namespace) -> int:
         ]
         if len(matches) > 1:
             raise RuntimeError("Canal de ingresso duplicado no servidor de instrução.")
+        payload = channel_payload(
+            guild_id,
+            int(category["id"]),
+            staff_role_ids,
+            list(matches[0].get("permission_overwrites") or []) if matches else None,
+        )
         created = not matches
         if created:
             channel = await api.request(
