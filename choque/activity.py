@@ -359,6 +359,22 @@ class ActivityService:
         activity naturally starts a new cycle without deleting history.
         """
         now = self.clock()
+        identity_source_guild_id = await self.settings.get(
+            guild_id, "identity_source_guild_id"
+        )
+        if identity_source_guild_id and int(identity_source_guild_id) != guild_id:
+            # Linked recruitment/training guilds mirror identities, but they are
+            # not an independent personnel authority.  Suppress any alert that
+            # may have been staged there before this guard was deployed.
+            await self.database.execute(
+                """
+                UPDATE activity_absence_alerts
+                SET status='DISABLED', updated_at=?
+                WHERE guild_id=? AND status='PENDING'
+                """,
+                (now, guild_id),
+            )
+            return []
         async with self.database.transaction() as connection:
             cursor = await connection.execute(
                 """

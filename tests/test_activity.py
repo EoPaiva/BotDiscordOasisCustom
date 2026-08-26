@@ -253,6 +253,48 @@ async def test_justified_absence_and_individual_disable_suppress_alerts(service_
 
 
 @pytest.mark.asyncio
+async def test_linked_recruitment_guild_never_emits_personnel_absence_alerts(
+    service_bundle,
+) -> None:
+    activity = service_bundle["activity"]
+    settings = service_bundle["settings"]
+    database = service_bundle["database"]
+    clock = service_bundle["clock"]
+    member = await database.fetchone(
+        "SELECT id, discord_id FROM members WHERE guild_id=? LIMIT 1",
+        (GUILD_ID,),
+    )
+    await database.execute(
+        "UPDATE members SET last_activity_at=? WHERE id=?",
+        (clock.value - 4 * DAY_MS, int(member["id"])),
+    )
+    await settings.set(GUILD_ID, "identity_source_guild_id", GUILD_ID + 1, DISCORD_ID)
+    await database.execute(
+        """
+        INSERT INTO activity_absence_alerts(
+            guild_id, member_id, discord_id, cycle_started_at,
+            threshold_days, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 3, ?, ?)
+        """,
+        (
+            GUILD_ID,
+            int(member["id"]),
+            int(member["discord_id"]),
+            clock.value - 4 * DAY_MS,
+            clock.value,
+            clock.value,
+        ),
+    )
+
+    assert await activity.scan_absence_alerts(GUILD_ID) == []
+    alert = await database.fetchone(
+        "SELECT status FROM activity_absence_alerts WHERE guild_id=?",
+        (GUILD_ID,),
+    )
+    assert alert["status"] == "DISABLED"
+
+
+@pytest.mark.asyncio
 async def test_activity_rules_validate_and_are_audited(service_bundle):
     activity = service_bundle["activity"]
     settings = service_bundle["settings"]
