@@ -269,3 +269,47 @@ async def test_transfer_close_and_reopen_keep_protocol_state_consistent(service_
         "CANCELLED",
         "REOPENED",
     ]
+
+
+@pytest.mark.asyncio
+async def test_transfer_application_stops_if_approved_rank_was_deactivated(service_bundle):
+    tickets = service_bundle["tickets"]
+    settings = service_bundle["settings"]
+    members = service_bundle["members"]
+    database = service_bundle["database"]
+    _, soldier_rank_id, _ = await seed_ranks(database)
+    await settings.set(GUILD_ID, "transfer_max_rank_level", 2, REVIEWER_ID)
+    ticket_id = await tickets.create(
+        GUILD_ID,
+        REQUESTER_ID,
+        "TRANSFER",
+        transfer_payload(),
+    )
+    await tickets.decide_transfer(
+        GUILD_ID,
+        ticket_id,
+        REVIEWER_ID,
+        approved=True,
+        reason="Experiência validada.",
+        approved_rank_id=soldier_rank_id,
+    )
+    transfer = await tickets.transfer_case_for_ticket(GUILD_ID, ticket_id)
+    application_id = int(transfer["member_application_id"])
+    await database.execute(
+        "UPDATE ranks SET active=0 WHERE guild_id=? AND id=?",
+        (GUILD_ID, soldier_rank_id),
+    )
+
+    with pytest.raises(ConflictError, match="patente aprovada"):
+        await members.review_application(
+            application_id,
+            REVIEWER_ID + 1,
+            True,
+            "Conferência final.",
+            "Policial Transferido",
+            None,
+        )
+
+    assert await members.get(GUILD_ID, REQUESTER_ID) is None
+    assert (await members.get_application(application_id))["status"] == "PENDING"
+    assert (await tickets.transfer_case_for_ticket(GUILD_ID, ticket_id))["status"] == "APPROVED"
