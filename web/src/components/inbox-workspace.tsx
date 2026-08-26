@@ -15,6 +15,13 @@ function visibleFields(data: Record<string, unknown>) {
   return Object.entries(data).filter(([key, value]) => !hidden.has(key) && value != null).slice(0, 10);
 }
 
+function isoDateTime(value: unknown): string | undefined {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return undefined;
+  const parsed = new Date(timestamp);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
 export function InboxWorkspace({ items }: { items: InboxItem[] }) {
   const [selectedId, setSelectedId] = useState(items[0] ? `${items[0].type}:${items[0].id}` : "");
   const selected = useMemo(
@@ -34,7 +41,7 @@ export function InboxWorkspace({ items }: { items: InboxItem[] }) {
               <code>#{item.type.slice(0, 3)}-{String(item.id).padStart(4, "0")}</code>
               <strong>{label(item.type)}</strong>
               <span>{String(item.data.mta_nick ?? item.data.discord_id ?? "Solicitante")}</span>
-              <footer><Status value={item.data.status ?? "PENDING"} /><time>{dateTime(Number(item.data.inbox_time))}</time></footer>
+              <footer><Status value={item.data.status ?? "PENDING"} /><time dateTime={isoDateTime(item.data.inbox_time)}>{dateTime(Number(item.data.inbox_time))}</time></footer>
             </button>
           </li>;
         })}
