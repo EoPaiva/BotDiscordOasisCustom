@@ -5,12 +5,12 @@
 
 ## Handoff
 
-**Última atualização:** 2026-08-26 16:16 -03:00
+**Última atualização:** 2026-08-26 16:42 -03:00
 
 **Branch atual:** `codex/phase-b-transfers`
 
 **Último commit funcional:**
-`f13d2b0` — `fix: format inbox detail times`
+`88dde3a` — `fix: expose machine-readable dashboard inbox times`
 
 **Commit do protocolo:** este arquivo pertence ao commit de documentação imediatamente posterior;
 confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferência impossível.
@@ -24,7 +24,7 @@ confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferên
 Na máquina principal, auditar os blocos locais ADV, Cursos e Transferências contra o checkout que
 opera o projeto, validar migrations 49–51 numa cópia do banco e preparar um rollout controlado. A
 implementação local de Transferências está concluída. Enquanto essa etapa externa permanece
-bloqueada, a Fase 57 pode avançar localmente em cortes pequenos e fecháveis; onze cortes do Centro
+bloqueada, a Fase 57 pode avançar localmente em cortes pequenos e fecháveis; doze cortes do Centro
 de Comando estão concluídos e não há código parcial neste computador.
 
 ### Critério de conclusão
@@ -40,7 +40,7 @@ de Comando estão concluídos e não há código parcial neste computador.
 
 ### Última ação concluída
 
-O protocolo de continuidade foi instalado na raiz. Depois, a Fase 57 avançou em nove cortes do
+O protocolo de continuidade foi instalado na raiz. Depois, a Fase 57 avançou em doze cortes do
 Centro de Comando: `2ca8770`/`20d4153` entregam o drawer móvel acessível;
 `5e36506`/`098fea0` fazem o cabeçalho usar o `generated_at` real da API em um elemento `<time>`, em
 vez do relógio do render; `093a1cf`/`d0eecb6` expõem todas as faixas de métricas como pares
@@ -52,12 +52,13 @@ como `<article>`; `d6fd37c`/`93bc047` substituem o padrão incompleto `listbox/o
 administrativa por lista nativa com botões de seleção e estado atual explícito; `2d1f744`/`e351128`
 ligam esses botões ao painel de decisão nomeado com IDs únicos por instância; `94b53ca`/`39e5a7c`
 adicionam ISO legível por máquina somente aos horários administrativos válidos; `0a45900`/`f13d2b0`
-formatam também os campos detalhados `_at`/`_time` em `<time dateTime>` e eliminam o timestamp bruto.
-Nenhum contrato, URL, RBAC, API ou regra de negócio foi alterado.
+formatam também os campos detalhados `_at`/`_time` em `<time dateTime>` e eliminam o timestamp bruto;
+`c5f7e2c`/`88dde3a` aplicam o mesmo contrato temporal às pendências recentes do dashboard e extraem
+o formatador ISO seguro compartilhado. Nenhum contrato, URL, RBAC, API ou regra de negócio foi alterado.
 
 ### Ação em andamento
 
-Nenhuma alteração está em andamento. Transferências e os onze cortes acessíveis da Fase 57
+Nenhuma alteração está em andamento. Transferências e os doze cortes acessíveis da Fase 57
 terminaram em pontos seguros e commitados.
 
 ### PRÓXIMA AÇÃO EXATA
@@ -220,8 +221,8 @@ npm run build
 - [ ] Com gates verdes e autorização nova, executar merge/push/deploy controlado, validar health,
   migration, Gateway único, duas decisões, outbox e rollback.
 - [ ] Continuar a Fase 57 no dashboard: ampliar
-  `web/src/app/(command)/dashboard/page.test.tsx` com RED que exige `<time dateTime>` na data de cada
-  pendência administrativa recente; preservar texto, links, status, ordem, filtros e dados.
+  `web/src/app/(command)/dashboard/page.test.tsx` com RED que exige duração de patrulha em
+  `<time dateTime="PT…">`; preservar texto, cálculo, efetivo, ordem e dados.
 - [ ] Consolidar a Fase 58, Design System, sem inventar o trecho ausente do prompt original.
 - [ ] Continuar os blocos restantes do Prompt Master do ecossistema pela ordem da fila oficial.
 

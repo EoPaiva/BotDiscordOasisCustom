@@ -1319,3 +1319,12 @@ Fora do escopo atual: eventos, API e integração MTA.
 - TDD: `0a45900` registra o contrato RED e `f13d2b0` entrega o GREEN.
 - Gate consolidado do portal: 15 testes focados, **67 testes web em 17 arquivos**, `npm audit` sem
   vulnerabilidades, typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
+
+# Site CHOQUE — datas recentes do dashboard legíveis por máquina em 2026-08-26
+
+- Cada pendência administrativa recente mantém o texto humano e agora usa `<time dateTime="ISO">`.
+- O formatador ISO defensivo passou para `lib/format` e é compartilhado com a caixa administrativa;
+  links, status, ordem, dados e aparência foram preservados.
+- TDD: `c5f7e2c` registra o contrato RED e `88dde3a` entrega o GREEN.
+- Gate consolidado do portal: 15 testes focados, **67 testes web em 17 arquivos**, `npm audit` sem
+  vulnerabilidades, typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.

@@ -821,7 +821,9 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     corte adiciona ISO legível por máquina ao `<time>` da lista somente para timestamps
     válidos e preserva o estado ausente; `94b53ca` registra o RED e `39e5a7c` entrega o GREEN. O décimo
     primeiro corte formata campos detalhados `_at`/`_time` válidos como `<time dateTime>` e
-    impede timestamps brutos no dossiê; `0a45900` registra o RED e `f13d2b0` entrega o GREEN. Gate
+    impede timestamps brutos no dossiê; `0a45900` registra o RED e `f13d2b0` entrega o GREEN. O décimo
+    segundo corte expõe datas das pendências recentes do dashboard em `<time dateTime>` e
+    centraliza o formatador ISO defensivo; `c5f7e2c` registra o RED e `88dde3a` entrega o GREEN. Gate
     atual: 15 testes focados, 67 testes web em 17 arquivos, audit, typecheck, lint e build. Os cortes
     permanecem somente locais e não publicados.
 
