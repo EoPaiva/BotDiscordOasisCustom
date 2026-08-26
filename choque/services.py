@@ -22,6 +22,7 @@ from .requests import RequestService
 from .security import SecurityService
 from .settings import SettingsService
 from .shifts import ShiftService
+from .special_units import SpecialUnitService
 from .status import StatusService
 from .tags import TagService
 from .tickets import TicketService
@@ -53,4 +54,5 @@ class Services:
     registration_gate: RegistrationGateService
     tags: TagService
     status: StatusService
+    special_units: SpecialUnitService
     security: SecurityService

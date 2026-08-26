@@ -13,6 +13,7 @@ import discord
 from .audit import AuditService
 from .database import Database
 from .rank_sync import RankSyncResult, RankSyncService
+from .special_units import SpecialUnitService
 from .tags import TagService
 from .time_utils import utc_now_ms
 
@@ -186,12 +187,14 @@ class WebActionWorker:
         bot: discord.Client,
         *,
         tags: TagService | None = None,
+        special_units: SpecialUnitService | None = None,
     ) -> None:
         self.database = database
         self.rank_sync = rank_sync
         self.audit = audit
         self.bot = bot
         self.tags = tags
+        self.special_units = special_units
         self._task: asyncio.Task[None] | None = None
         self._last_registry_refresh = 0
         self._last_stale_scan = 0
@@ -469,6 +472,7 @@ class WebActionWorker:
             "IDENTITY_RECONCILE_BULK",
             "QUALIFICATION_SYNC",
             "TAG_ROLE_SYNC",
+            "SPECIAL_UNIT_ROLE_SYNC",
         }
         if action_type not in supported:
             raise ValueError(f"Ação web não suportada: {row['action_type']}")
@@ -501,6 +505,18 @@ class WebActionWorker:
             try:
                 member = await guild.fetch_member(target_id)
             except discord.NotFound:
+                if action_type == "SPECIAL_UNIT_ROLE_SYNC":
+                    await self.audit.record(
+                        int(row["guild_id"]),
+                        "SPECIAL_UNIT_ROLE_SYNC_DEFERRED",
+                        actor_id=_optional_actor_id(row["requested_by"]),
+                        target_id=target_id,
+                        after={"reason": "MEMBER_NOT_IN_GUILD"},
+                        correlation_id=_audit_correlation_id(
+                            row["correlation_id"], f"special-unit-absent-{row['id']}"
+                        ),
+                    )
+                    return None
                 if action_type != "IDENTITY_SYNC":
                     raise RuntimeError("Membro indisponível no Discord") from None
                 result = await self.rank_sync.mark_discord_absent(
@@ -534,6 +550,9 @@ class WebActionWorker:
             return None
         if action_type == "TAG_ROLE_SYNC":
             await self._sync_tag_roles(row, payload, guild, member)
+            return None
+        if action_type == "SPECIAL_UNIT_ROLE_SYNC":
+            await self._sync_special_unit_roles(row, payload, guild, member)
             return None
         if action_type == "IDENTITY_SYNC":
             result = await self.rank_sync.sync_from_member(
@@ -579,6 +598,47 @@ class WebActionWorker:
                 correlation_id=str(row["correlation_id"]),
             )
         return result
+
+    async def _sync_special_unit_roles(self, row, payload, guild, member) -> None:
+        if self.special_units is None:
+            raise RuntimeError("Serviço de Unidades Especiais indisponível")
+        canonical_guild_id = int(payload.get("canonical_guild_id") or 0)
+        if canonical_guild_id <= 0:
+            raise ValueError("Guild canônica ausente no payload de unidade")
+        managed_ids, desired_ids = await self.special_units.desired_role_ids(
+            guild.id, canonical_guild_id, member.id
+        )
+        current_ids = {role.id for role in member.roles}
+        remove_ids = (current_ids & managed_ids) - desired_ids
+        add_ids = desired_ids - current_ids
+        remove_roles = [role for role_id in sorted(remove_ids) if (role := guild.get_role(role_id))]
+        add_roles = [role for role_id in sorted(add_ids) if (role := guild.get_role(role_id))]
+        if remove_roles:
+            await member.remove_roles(
+                *remove_roles,
+                reason="Sincronização de Unidade Especial",
+                atomic=True,
+            )
+        if add_roles:
+            await member.add_roles(
+                *add_roles,
+                reason="Sincronização de Unidade Especial",
+                atomic=True,
+            )
+        await self.audit.record(
+            guild.id,
+            "SPECIAL_UNIT_ROLE_SYNC_COMPLETED",
+            actor_id=_optional_actor_id(row["requested_by"]),
+            target_id=member.id,
+            after={
+                "added_role_ids": sorted(add_ids),
+                "removed_role_ids": sorted(remove_ids),
+                "canonical_guild_id": canonical_guild_id,
+            },
+            correlation_id=_audit_correlation_id(
+                row["correlation_id"], f"special-unit-completed-{row['id']}"
+            ),
+        )
 
     async def _sync_tag_roles(
         self,

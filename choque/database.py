@@ -4054,6 +4054,156 @@ ON CONFLICT(position_id, permission) DO UPDATE SET
     effect='GRANT', updated_at=excluded.updated_at;
 """
 
+MIGRATION_046 = """
+-- Unidades especiais estendem identidade, patente, auditoria e outbox
+-- canônicos. Apenas candidatura, vínculo e recursos Discord específicos
+-- precisam de estado próprio.
+ALTER TABLE web_action_outbox RENAME TO web_action_outbox_v46;
+DROP INDEX IF EXISTS ix_web_action_outbox_delivery;
+
+CREATE TABLE web_action_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    action_type TEXT NOT NULL CHECK (
+        action_type IN (
+            'RANK_SYNC','MEMBER_SYNC','PANEL_REFRESH',
+            'IDENTITY_SYNC','IDENTITY_RECONCILE_BULK','QUALIFICATION_SYNC',
+            'TAG_ROLE_SYNC','SPECIAL_UNIT_ROLE_SYNC'
+        )
+    ),
+    target_discord_id INTEGER,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    requested_by INTEGER NOT NULL,
+    correlation_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','PROCESSING','COMPLETED','FAILED')
+    ),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    available_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    processed_at INTEGER,
+    last_error TEXT
+);
+
+INSERT INTO web_action_outbox(
+    id, guild_id, action_type, target_discord_id, payload_json,
+    requested_by, correlation_id, status, attempts, available_at,
+    created_at, processed_at, last_error
+)
+SELECT id, guild_id, action_type, target_discord_id, payload_json,
+       requested_by, correlation_id, status, attempts, available_at,
+       created_at, processed_at, last_error
+FROM web_action_outbox_v46;
+
+DROP TABLE web_action_outbox_v46;
+
+CREATE INDEX ix_web_action_outbox_delivery
+ON web_action_outbox(status, available_at, created_at);
+
+CREATE TABLE special_units (
+    code TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    sort_order INTEGER NOT NULL UNIQUE,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+INSERT INTO special_units(code, display_name, sort_order, created_at, updated_at)
+VALUES
+    ('ROCAM', 'COMANDO ROCAM', 10, CAST(strftime('%s','now') AS INTEGER)*1000, CAST(strftime('%s','now') AS INTEGER)*1000),
+    ('TATICO', 'COMANDO TÁTICO', 20, CAST(strftime('%s','now') AS INTEGER)*1000, CAST(strftime('%s','now') AS INTEGER)*1000),
+    ('ELITE', 'COMANDO ELITE', 30, CAST(strftime('%s','now') AS INTEGER)*1000, CAST(strftime('%s','now') AS INTEGER)*1000),
+    ('CORREGEDORIA', 'COMANDO CORREGEDORIA', 40, CAST(strftime('%s','now') AS INTEGER)*1000, CAST(strftime('%s','now') AS INTEGER)*1000);
+
+CREATE TABLE special_unit_guild_resources (
+    unit_code TEXT NOT NULL REFERENCES special_units(code) ON DELETE RESTRICT,
+    guild_id INTEGER NOT NULL,
+    category_id INTEGER,
+    central_channel_id INTEGER,
+    panel_message_id INTEGER,
+    member_role_id INTEGER,
+    assistant_role_id INTEGER,
+    command_role_id INTEGER,
+    updated_by INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(unit_code, guild_id)
+);
+
+CREATE TABLE special_unit_applications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recruitment_guild_id INTEGER NOT NULL,
+    canonical_guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    unit_code TEXT NOT NULL REFERENCES special_units(code) ON DELETE RESTRICT,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','APPROVED','REJECTED','CANCELLED')
+    ),
+    assigned_to INTEGER,
+    assigned_at INTEGER,
+    reviewed_by INTEGER,
+    reviewed_at INTEGER,
+    decision_reason TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    submitted_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX ux_special_unit_open_application
+ON special_unit_applications(canonical_guild_id, member_id)
+WHERE status='PENDING';
+
+CREATE INDEX ix_special_unit_application_queue
+ON special_unit_applications(recruitment_guild_id, status, submitted_at, id);
+
+CREATE TABLE special_unit_memberships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    canonical_guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    unit_code TEXT NOT NULL REFERENCES special_units(code) ON DELETE RESTRICT,
+    role_level TEXT NOT NULL DEFAULT 'MEMBER' CHECK (
+        role_level IN ('MEMBER','ASSISTANT','COMMAND')
+    ),
+    status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (
+        status IN ('ACTIVE','LEFT','TRANSFERRED')
+    ),
+    version INTEGER NOT NULL DEFAULT 1,
+    joined_at INTEGER NOT NULL,
+    left_at INTEGER,
+    changed_by INTEGER,
+    change_reason TEXT,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX ux_special_unit_active_membership
+ON special_unit_memberships(canonical_guild_id, member_id)
+WHERE status='ACTIVE';
+
+CREATE INDEX ix_special_unit_membership_unit
+ON special_unit_memberships(canonical_guild_id, unit_code, status, role_level);
+
+CREATE TABLE special_unit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    canonical_guild_id INTEGER NOT NULL,
+    unit_code TEXT NOT NULL REFERENCES special_units(code) ON DELETE RESTRICT,
+    member_id INTEGER REFERENCES members(id) ON DELETE RESTRICT,
+    application_id INTEGER REFERENCES special_unit_applications(id) ON DELETE RESTRICT,
+    event_type TEXT NOT NULL,
+    actor_id INTEGER,
+    previous_state TEXT,
+    next_state TEXT,
+    reason TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    correlation_id TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX ix_special_unit_events_timeline
+ON special_unit_events(canonical_guild_id, unit_code, created_at DESC, id DESC);
+"""
+
 MIGRATIONS = (
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -4100,6 +4250,7 @@ MIGRATIONS = (
     (43, MIGRATION_043),
     (44, MIGRATION_044),
     (45, MIGRATION_045),
+    (46, MIGRATION_046),
 )
 
 

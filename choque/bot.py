@@ -32,6 +32,7 @@ from .security import SecurityService
 from .services import Services
 from .settings import SettingsService
 from .shifts import ShiftService
+from .special_units import SpecialUnitService
 from .status import StatusService
 from .tags import TagService
 from .tickets import TicketService
@@ -56,6 +57,7 @@ COGS = (
     "cogs.tag_commands",
     "cogs.status_commands",
     "cogs.financial_aid_commands",
+    "cogs.special_unit_commands",
     "cogs.operations_commands",
     "cogs.hierarchy_system",
     "cogs.rank_sync_system",
@@ -116,6 +118,7 @@ class ChoqueBot(commands.Bot):
         tags = TagService(database, audit)
         status = StatusService(database, audit)
         financial_aid = FinancialAidService(database, settings, audit)
+        special_units = SpecialUnitService(database, settings, audit)
         security = SecurityService(database, settings, audit)
         recruitment.analysis_service = recruitment_analysis
         self.services = Services(
@@ -142,6 +145,7 @@ class ChoqueBot(commands.Bot):
             registration_gate=registration_gate,
             tags=tags,
             status=status,
+            special_units=special_units,
             security=security,
         )
         if self.guild_id:
@@ -149,7 +153,14 @@ class ChoqueBot(commands.Bot):
             await recruitment.ensure_defaults(self.guild_id)
             await recruitment_analysis.ensure_defaults(self.guild_id)
             await financial_aid.ensure_defaults(self.guild_id)
-        self.web_action_worker = WebActionWorker(database, rank_sync, audit, self, tags=tags)
+        self.web_action_worker = WebActionWorker(
+            database,
+            rank_sync,
+            audit,
+            self,
+            tags=tags,
+            special_units=special_units,
+        )
         self.recruitment_analysis_worker = RecruitmentAnalysisWorker(recruitment_analysis)
         if imported_guild and not await settings.get(
             imported_guild, "legacy_import_audited", False
