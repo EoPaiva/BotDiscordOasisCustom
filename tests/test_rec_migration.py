@@ -6,6 +6,7 @@ import pytest
 
 from cogs.member_commands import MemberCommands
 from cogs.ticket_commands import TicketCommands
+from scripts.configure_rec_inactivity_alerts import _validate_target_guild
 from scripts.migrate_rec_choque import (
     CHANNELS,
     RECRUITMENT_URL,
@@ -26,6 +27,18 @@ def test_rec_inactivity_channel_is_private_and_administrative() -> None:
     spec = next(item for item in CHANNELS if item.key == "recruitment.inactivity")
     assert spec.category == "recruitment_admin"
     assert spec.private is True
+
+
+def test_rec_inactivity_provisioning_uses_immutable_guild_id_not_display_name() -> None:
+    _validate_target_guild(
+        {
+            "id": "1541908574463070311",
+            "name": "𝗖𝗛𝗢𝗤𝗨𝗘 | 𝗖𝗘𝗡𝗧𝗥𝗢 𝗗𝗘 𝗜𝗡𝗦𝗧𝗥𝗨ÇÃ𝗢",
+        },
+        1541908574463070311,
+    )
+    with pytest.raises(RuntimeError, match="Servidor de destino inesperado"):
+        _validate_target_guild({"id": "1", "name": "REC Choque"}, 2)
 
 
 def test_recruitment_results_are_public_in_recruitment_category() -> None:

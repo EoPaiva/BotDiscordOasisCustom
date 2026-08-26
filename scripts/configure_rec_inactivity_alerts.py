@@ -41,6 +41,15 @@ CHANNEL_SPEC = ChannelSpec(
 )
 
 
+def _validate_target_guild(guild: dict[str, object], expected_id: int) -> None:
+    """Bind provisioning to the immutable Discord guild ID, never its display name."""
+    actual_id = int(guild.get("id") or 0)
+    if actual_id != expected_id:
+        raise RuntimeError(
+            f"Servidor de destino inesperado: esperado {expected_id}, recebido {actual_id}."
+        )
+
+
 def _unique_role_id(roles: list[dict[str, object]], name: str) -> int:
     matches = [
         role
@@ -70,8 +79,7 @@ async def run(args: argparse.Namespace) -> int:
             api.request("GET", f"/guilds/{target_guild_id}/roles"),
             api.request("GET", f"/guilds/{target_guild_id}/channels"),
         )
-        if str(target_guild["name"]).casefold() != "rec choque":
-            raise RuntimeError("O servidor de destino não corresponde ao REC CHOQUE.")
+        _validate_target_guild(target_guild, target_guild_id)
         manager_role_ids = [_unique_role_id(roles, name) for name in MANAGER_ROLE_NAMES]
         overwrites = _permission_overwrites(
             target_guild_id,
