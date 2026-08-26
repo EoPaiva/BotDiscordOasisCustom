@@ -9,7 +9,7 @@ import aiosqlite
 
 from .audit import AuditService
 from .database import Database
-from .errors import NotFoundError, ValidationError
+from .errors import ConflictError, NotFoundError, ValidationError
 from .settings import SettingsService
 from .shift_validation import countable_shift_clause
 from .shifts import ShiftService
@@ -351,6 +351,180 @@ class ActivityService:
                 item.update({"days_inactive": days, "activity_bucket": member_bucket})
                 result.append(item)
         return result
+
+    async def scan_absence_alerts(self, guild_id: int) -> list[dict[str, object]]:
+        """Create each 3/7/10-day alert once and return pending deliveries.
+
+        The cycle key is the member's last real activity timestamp. A later
+        activity naturally starts a new cycle without deleting history.
+        """
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT m.id AS member_id, m.discord_id, m.mta_nick,
+                       COALESCE(m.last_activity_at, m.joined_at) AS cycle_started_at,
+                       COALESCE(su.unit_code, NULLIF(m.unit, 'BGR')) AS unit_code,
+                       COALESCE(ac.disabled, 0) AS alerts_disabled
+                FROM members m
+                LEFT JOIN special_unit_memberships su
+                  ON su.canonical_guild_id=m.guild_id AND su.member_id=m.id
+                 AND su.status='ACTIVE'
+                LEFT JOIN activity_absence_controls ac
+                  ON ac.guild_id=m.guild_id AND ac.member_id=m.id
+                WHERE m.guild_id=? AND m.status='ACTIVE'
+                ORDER BY m.id
+                """,
+                (guild_id,),
+            )
+            members = await cursor.fetchall()
+            for member in members:
+                member_id = int(member["member_id"])
+                cycle_started_at = int(member["cycle_started_at"])
+                cursor = await connection.execute(
+                    """
+                    SELECT 1 FROM absence_requests
+                    WHERE guild_id=? AND member_id=? AND status='APPROVED'
+                      AND starts_at<=? AND ends_at>?
+                    LIMIT 1
+                    """,
+                    (guild_id, member_id, now, now),
+                )
+                justified = await cursor.fetchone() is not None
+                if justified or bool(member["alerts_disabled"]):
+                    terminal = "JUSTIFIED" if justified else "DISABLED"
+                    await connection.execute(
+                        """
+                        UPDATE activity_absence_alerts
+                        SET status=?, updated_at=?
+                        WHERE guild_id=? AND member_id=? AND status='PENDING'
+                        """,
+                        (terminal, now, guild_id, member_id),
+                    )
+                    continue
+                days = max(0, (now - cycle_started_at) // DAY_MS)
+                for threshold in (3, 7, 10):
+                    if days < threshold:
+                        continue
+                    await connection.execute(
+                        """
+                        INSERT OR IGNORE INTO activity_absence_alerts(
+                            guild_id, member_id, discord_id, unit_code,
+                            cycle_started_at, threshold_days, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            guild_id,
+                            member_id,
+                            int(member["discord_id"]),
+                            member["unit_code"],
+                            cycle_started_at,
+                            threshold,
+                            now,
+                            now,
+                        ),
+                    )
+            cursor = await connection.execute(
+                """
+                SELECT aa.*, m.mta_nick, r.name AS rank_name
+                FROM activity_absence_alerts aa
+                JOIN members m ON m.id=aa.member_id
+                LEFT JOIN ranks r ON r.id=m.rank_id
+                WHERE aa.guild_id=? AND aa.status='PENDING'
+                ORDER BY aa.created_at, aa.threshold_days, aa.id
+                """,
+                (guild_id,),
+            )
+            return [dict(row) for row in await cursor.fetchall()]
+
+    async def mark_absence_alert_delivered(
+        self, guild_id: int, alert_id: int, channel_id: int, message_id: int
+    ) -> None:
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE activity_absence_alerts
+                SET status='DELIVERED', channel_id=?, message_id=?,
+                    delivered_at=?, updated_at=?
+                WHERE guild_id=? AND id=? AND status='PENDING'
+                """,
+                (channel_id, message_id, now, now, guild_id, alert_id),
+            )
+            if cursor.rowcount != 1:
+                raise ConflictError("Este alerta já foi entregue ou encerrado.")
+
+    async def get_absence_alert(self, guild_id: int, alert_id: int):
+        return await self.database.fetchone(
+            "SELECT * FROM activity_absence_alerts WHERE guild_id=? AND id=?",
+            (guild_id, alert_id),
+        )
+
+    async def disable_member_absence_alerts(
+        self,
+        guild_id: int,
+        alert_id: int,
+        actor_id: int,
+        reason: str | None = None,
+    ) -> dict[str, object]:
+        now = self.clock()
+        normalized_reason = (reason or "").strip() or None
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                "SELECT * FROM activity_absence_alerts WHERE guild_id=? AND id=?",
+                (guild_id, alert_id),
+            )
+            alert = await cursor.fetchone()
+            if alert is None:
+                raise NotFoundError("Alerta de ausência não encontrado.")
+            await connection.execute(
+                """
+                INSERT INTO activity_absence_controls(
+                    guild_id, member_id, disabled, disabled_by,
+                    disabled_at, reason, updated_at
+                ) VALUES (?, ?, 1, ?, ?, ?, ?)
+                ON CONFLICT(guild_id, member_id) DO UPDATE SET
+                    disabled=1, disabled_by=excluded.disabled_by,
+                    disabled_at=excluded.disabled_at, reason=excluded.reason,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    guild_id,
+                    int(alert["member_id"]),
+                    actor_id,
+                    now,
+                    normalized_reason,
+                    now,
+                ),
+            )
+            await connection.execute(
+                """
+                UPDATE activity_absence_alerts SET status='DISABLED', updated_at=?
+                WHERE guild_id=? AND member_id=? AND status='PENDING'
+                """,
+                (now, guild_id, int(alert["member_id"])),
+            )
+            await self.audit.record(
+                guild_id,
+                "ACTIVITY_ABSENCE_ALERTS_DISABLED",
+                actor_id=actor_id,
+                target_id=int(alert["discord_id"]),
+                after={
+                    "alert_id": alert_id,
+                    "member_id": int(alert["member_id"]),
+                    "unit": alert["unit_code"],
+                },
+                reason=normalized_reason,
+                connection=connection,
+            )
+        return {
+            "alert_id": alert_id,
+            "member_id": int(alert["member_id"]),
+            "discord_id": int(alert["discord_id"]),
+            "unit_code": alert["unit_code"],
+            "disabled_by": actor_id,
+            "disabled_at": now,
+        }
 
     async def set_rules(
         self,

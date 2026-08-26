@@ -119,6 +119,7 @@ async def test_registration_and_point_panels_are_detailed_and_keep_persistent_ac
     assert {item.label for item in public_recruitment.children} == {
         "Candidatar-me agora",
         "Acompanhar candidatura",
+        "Entrada por indicação",
         "Requisitos",
     }
     assert {item.url for item in public_recruitment.children if item.url} == {
@@ -126,6 +127,7 @@ async def test_registration_and_point_panels_are_detailed_and_keep_persistent_ac
         "https://example.test/minha-candidatura",
     }
     assert custom_ids(public_recruitment) == {
+        "choque:recruitment:direct-indication:v1",
         "choque:recruitment:requirements:v1",
     }
 

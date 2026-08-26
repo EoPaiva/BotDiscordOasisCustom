@@ -548,12 +548,163 @@ class ReportMemberSelectView(AdminView):
         self.add_item(ReportMemberSelect())
 
 
+async def require_absence_alert_responsible(
+    interaction: discord.Interaction, alert_id: int
+) -> tuple[discord.Member, object]:
+    actor = await require_activity_admin(interaction)
+    bot = get_bot(interaction)
+    alert = await bot.services.activity.get_absence_alert(actor.guild.id, alert_id)
+    if alert is None:
+        raise NotFoundError("Alerta de ausência não encontrado.")
+    unit_code = str(alert["unit_code"] or "").strip()
+    if unit_code and not await bot.services.permissions.has(actor, "settings.manage"):
+        resource = await bot.services.database.fetchone(
+            """
+            SELECT assistant_role_id, command_role_id
+            FROM special_unit_guild_resources
+            WHERE guild_id=? AND unit_code=?
+            """,
+            (actor.guild.id, unit_code),
+        )
+        allowed = {
+            int(value)
+            for value in (
+                resource["assistant_role_id"] if resource else None,
+                resource["command_role_id"] if resource else None,
+            )
+            if value
+        }
+        if allowed and not any(role.id in allowed for role in actor.roles):
+            raise PermissionDenied("Somente os responsáveis desta unidade podem alterar o alerta.")
+    return actor, alert
+
+
+class DisableAbsenceAlertModal(ErrorModal, title="Desativar alertas do membro"):
+    reason = discord.ui.TextInput(
+        label="Motivo (opcional)",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=500,
+    )
+
+    def __init__(self, alert_id: int) -> None:
+        super().__init__()
+        self.alert_id = alert_id
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        actor, _ = await require_absence_alert_responsible(interaction, self.alert_id)
+        result = await get_bot(interaction).services.activity.disable_member_absence_alerts(
+            actor.guild.id, self.alert_id, actor.id, str(self.reason)
+        )
+        await interaction.response.send_message(
+            f"🔕 Alertas desativados para <@{result['discord_id']}> por <@{actor.id}>.",
+            ephemeral=True,
+        )
+        if interaction.message:
+            await interaction.message.edit(view=None)
+
+
+class JustifiedAbsenceModal(ErrorModal, title="Registrar ausência justificada"):
+    days = discord.ui.TextInput(
+        label="Duração em dias",
+        placeholder="Ex.: 7",
+        min_length=1,
+        max_length=3,
+    )
+    reason = discord.ui.TextInput(
+        label="Motivo",
+        style=discord.TextStyle.paragraph,
+        min_length=3,
+        max_length=500,
+    )
+
+    def __init__(self, alert_id: int) -> None:
+        super().__init__()
+        self.alert_id = alert_id
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        actor, alert = await require_absence_alert_responsible(interaction, self.alert_id)
+        raw_days = str(self.days).strip()
+        if not raw_days.isdigit() or not 1 <= int(raw_days) <= 366:
+            raise ValidationError("A duração deve ficar entre 1 e 366 dias.")
+        now = get_bot(interaction).services.activity.clock()
+        result = await get_bot(interaction).services.personnel.register_justified_absence(
+            actor.guild.id,
+            int(alert["discord_id"]),
+            now,
+            now + int(raw_days) * 86_400_000,
+            actor.id,
+            str(self.reason),
+        )
+        await interaction.response.send_message(
+            f"✅ Ausência justificada **#{result['absence_id']}** registrada para "
+            f"<@{result['discord_id']}>.",
+            ephemeral=True,
+        )
+        if interaction.message:
+            await interaction.message.edit(view=None)
+
+
+class DisableAbsenceAlertButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"^choque:activity:absence:(?P<alert_id>[0-9]+):disable:v1$",
+):
+    def __init__(self, alert_id: int) -> None:
+        super().__init__(
+            discord.ui.Button(
+                label="Desativar alertas",
+                emoji="🔕",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"choque:activity:absence:{alert_id}:disable:v1",
+            )
+        )
+        self.alert_id = alert_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["alert_id"]))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(DisableAbsenceAlertModal(self.alert_id))
+
+
+class JustifiedAbsenceButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"^choque:activity:absence:(?P<alert_id>[0-9]+):justify:v1$",
+):
+    def __init__(self, alert_id: int) -> None:
+        super().__init__(
+            discord.ui.Button(
+                label="Registrar ausência justificada",
+                emoji="✅",
+                style=discord.ButtonStyle.success,
+                custom_id=f"choque:activity:absence:{alert_id}:justify:v1",
+            )
+        )
+        self.alert_id = alert_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["alert_id"]))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(JustifiedAbsenceModal(self.alert_id))
+
+
+class AbsenceAlertView(ErrorView):
+    def __init__(self, alert_id: int) -> None:
+        super().__init__(timeout=None)
+        self.add_item(DisableAbsenceAlertButton(alert_id))
+        self.add_item(JustifiedAbsenceButton(alert_id))
+
+
 class ActivityCommands(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = cast("ChoqueBot", bot)
         self.services = self.bot.services
         self._panel_lock = asyncio.Lock()
         self.bot.add_view(ActivityPanelView())
+        self.bot.add_dynamic_items(DisableAbsenceAlertButton, JustifiedAbsenceButton)
 
     async def open_admin(self, interaction: discord.Interaction) -> None:
         await require_activity_admin(interaction)
@@ -607,8 +758,67 @@ class ActivityCommands(commands.Cog):
         for guild in self.bot.guilds:
             try:
                 await self.services.activity.close_completed_weeks(guild.id)
+                await self.deliver_absence_alerts(guild)
             except Exception:
                 LOGGER.exception("Falha no fechamento semanal da guild %s", guild.id)
+
+    async def deliver_absence_alerts(self, guild: discord.Guild) -> int:
+        delivered = 0
+        labels = {
+            3: ("🟡 BAIXA ATIVIDADE", 0xE0B341),
+            7: ("🟠 AUSÊNCIA DETECTADA", 0xE67E22),
+            10: ("🔴 AUSÊNCIA PROLONGADA", 0xC0392B),
+        }
+        for alert in await self.services.activity.scan_absence_alerts(guild.id):
+            unit_code = str(alert["unit_code"] or "").strip()
+            resource = (
+                await self.services.database.fetchone(
+                    """
+                    SELECT * FROM special_unit_guild_resources
+                    WHERE guild_id=? AND unit_code=?
+                    """,
+                    (guild.id, unit_code),
+                )
+                if unit_code
+                else None
+            )
+            channel_id = (
+                int(resource["central_channel_id"])
+                if resource and resource["central_channel_id"]
+                else await self.services.settings.get(guild.id, "personnel_admin_channel_id")
+            )
+            channel = guild.get_channel(int(channel_id)) if channel_id else None
+            if not isinstance(channel, discord.TextChannel):
+                continue
+            threshold = int(alert["threshold_days"])
+            title, color = labels[threshold]
+            embed = discord.Embed(
+                title=title,
+                description=(
+                    f"O membro <@{alert['discord_id']}> está há **{threshold} dias** "
+                    "sem atividade registrada na corporação.\n\n"
+                    f"**Última atividade:** {discord_timestamp(int(alert['cycle_started_at']), 'd')}\n"
+                    f"**Unidade:** `{unit_code or 'GERAL'}`\n\n"
+                    "Este aviso é informativo e não aplica punição automática."
+                ),
+                color=color,
+            )
+            role_mentions: list[str] = []
+            if resource:
+                for key in ("command_role_id", "assistant_role_id"):
+                    if resource[key]:
+                        role_mentions.append(f"<@&{int(resource[key])}>")
+            message = await channel.send(
+                content=" ".join(role_mentions) or None,
+                embed=embed,
+                view=AbsenceAlertView(int(alert["id"])),
+                allowed_mentions=discord.AllowedMentions(roles=True),
+            )
+            await self.services.activity.mark_absence_alert_delivered(
+                guild.id, int(alert["id"]), channel.id, message.id
+            )
+            delivered += 1
+        return delivered
 
     @weekly_close_loop.before_loop
     async def before_weekly_close_loop(self) -> None:

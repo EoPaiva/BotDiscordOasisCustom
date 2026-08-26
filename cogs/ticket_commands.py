@@ -435,6 +435,63 @@ async def send_my_tickets(interaction: discord.Interaction) -> None:
     )
 
 
+class DirectIndicationModal(ErrorModal, title="Entrada por indicação"):
+    indicated_by = discord.ui.TextInput(
+        label="ID Discord de quem indicou",
+        placeholder="Somente números",
+        min_length=17,
+        max_length=20,
+    )
+    candidate_nick = discord.ui.TextInput(
+        label="Nick BGR",
+        min_length=2,
+        max_length=80,
+    )
+    bgr_id = discord.ui.TextInput(
+        label="ID BGR",
+        min_length=1,
+        max_length=40,
+    )
+    unit_code = discord.ui.TextInput(
+        label="Unidade especial (opcional)",
+        placeholder="ROCAM, TATICO, ELITE ou CORREGEDORIA",
+        required=False,
+        max_length=20,
+    )
+    notes = discord.ui.TextInput(
+        label="Informações adicionais (opcional)",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=1000,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        actor = await require_guild_user(interaction)
+        raw_indicator = str(self.indicated_by).strip()
+        if not raw_indicator.isdigit():
+            raise ValidationError("O indicador precisa ser informado pelo ID numérico do Discord.")
+        indicator_id = int(raw_indicator)
+        try:
+            await actor.guild.fetch_member(indicator_id)
+        except discord.NotFound as exc:
+            raise ValidationError("O indicador informado não está neste servidor.") from exc
+        application = await get_bot(interaction).services.recruitment.submit_direct_indication(
+            actor.guild.id,
+            actor.id,
+            discord_username=str(actor),
+            candidate_nick=str(self.candidate_nick),
+            bgr_id=str(self.bgr_id),
+            indicated_by=indicator_id,
+            requested_unit_code=str(self.unit_code),
+            notes=str(self.notes),
+        )
+        await interaction.response.send_message(
+            f"✅ Solicitação **{application['protocol']}** enviada para análise do Comando. "
+            "Você não precisa preencher o formulário tradicional.",
+            ephemeral=True,
+        )
+
+
 class RecruitmentPanelView(ErrorView):
     def __init__(self, public_url: str | None = None) -> None:
         super().__init__(timeout=None)
@@ -530,11 +587,23 @@ class RecruitmentPanelView(ErrorView):
         )
 
     @discord.ui.button(
+        label="Entrada por indicação",
+        emoji="📨",
+        style=discord.ButtonStyle.secondary,
+        custom_id="choque:recruitment:direct-indication:v1",
+        row=1,
+    )
+    async def direct_indication(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        await interaction.response.send_modal(DirectIndicationModal())
+
+    @discord.ui.button(
         label="Requisitos",
         emoji="📚",
         style=discord.ButtonStyle.success,
         custom_id="choque:recruitment:requirements:v1",
-        row=1,
+        row=2,
     )
     async def requirements(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         channel_id = await get_bot(interaction).services.settings.get(
@@ -968,6 +1037,44 @@ class RecruitmentDecisionModal(ErrorModal):
                 origin="DISCORD",
                 correlation_id=str(uuid.uuid4()),
             )
+            unit_result = ""
+            if (
+                self.approved
+                and str(application.get("entry_method") or "FORM") == "INDICATION"
+                and application.get("requested_unit_code")
+            ):
+                unit_code = str(application["requested_unit_code"])
+                canonical_guild_id = await bot.services.special_units.canonical_guild_id(
+                    actor.guild.id
+                )
+                membership = await bot.services.database.fetchone(
+                    """
+                    SELECT su.unit_code FROM special_unit_memberships su
+                    JOIN members m ON m.id=su.member_id
+                    WHERE su.canonical_guild_id=? AND m.discord_id=?
+                      AND su.status='ACTIVE'
+                    """,
+                    (canonical_guild_id, int(application["discord_id"])),
+                )
+                if not membership or str(membership["unit_code"]) != unit_code:
+                    unit_application = await bot.services.special_units.submit_application(
+                        actor.guild.id,
+                        int(application["discord_id"]),
+                        unit_code,
+                    )
+                    assigned = await bot.services.special_units.assign(
+                        int(unit_application["id"]),
+                        actor.id,
+                        expected_version=int(unit_application["version"]),
+                    )
+                    await bot.services.special_units.decide(
+                        int(assigned["id"]),
+                        actor.id,
+                        approved=True,
+                        reason="Entrada direta por indicação aprovada pelo Comando.",
+                        expected_version=int(assigned["version"]),
+                    )
+                unit_result = f" Unidade **{unit_code}** sincronizada pelo fluxo existente."
             public_url = await bot.services.settings.get(
                 actor.guild.id, "recruitment_public_url"
             )
@@ -991,7 +1098,8 @@ class RecruitmentDecisionModal(ErrorModal):
                 return
             result = "aprovada" if self.approved else "reprovada"
             await interaction.followup.send(
-                f"✅ Candidatura **{application['protocol']}** {result}. A ficha foi atualizada.",
+                f"✅ Candidatura **{application['protocol']}** {result}. "
+                f"A ficha foi atualizada.{unit_result}",
                 ephemeral=True,
             )
         except Exception as exc:

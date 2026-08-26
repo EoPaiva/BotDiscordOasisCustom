@@ -124,6 +124,84 @@ async def test_migration_27_aligns_existing_campaign_age_and_audits_with_later_v
         await migrated.close()
 
 
+@pytest.mark.asyncio
+async def test_direct_indication_skips_form_reuses_approval_and_blocks_duplicate(
+    recruitment_bundle,
+) -> None:
+    service = recruitment_bundle["service"]
+    database = recruitment_bundle["database"]
+    application = await service.submit_direct_indication(
+        GUILD_ID,
+        CANDIDATE_ID,
+        discord_username="candidate",
+        candidate_nick="Candidato_Indicado",
+        bgr_id="7788",
+        indicated_by=2002,
+        requested_unit_code="ROCAM",
+        notes="Indicação registrada pelo responsável.",
+    )
+    assert application["status"] == "UNDER_REVIEW"
+    assert application["entry_method"] == "INDICATION"
+    assert application["protocol"].startswith("IND-")
+    questions = await database.fetchone(
+        "SELECT COUNT(*) AS total FROM recruitment_application_questions WHERE application_id=?",
+        (application["id"],),
+    )
+    assert questions["total"] == 0
+
+    with pytest.raises(ConflictError, match="já possui uma solicitação"):
+        await service.submit_direct_indication(
+            GUILD_ID,
+            CANDIDATE_ID,
+            discord_username="candidate",
+            candidate_nick="Candidato_Indicado",
+            bgr_id="7788",
+            indicated_by=2002,
+        )
+
+    decided = await service.decide(
+        GUILD_ID,
+        int(application["id"]),
+        ADMIN_ID,
+        int(application["version"]),
+        approved=True,
+        internal_reason="Indicação validada pelo Comando.",
+        candidate_message="Entrada aprovada por indicação.",
+        origin="DISCORD",
+    )
+    assert decided["status"] == "APPROVED"
+    member = await database.fetchone(
+        "SELECT * FROM members WHERE guild_id=? AND discord_id=?",
+        (GUILD_ID, CANDIDATE_ID),
+    )
+    assert member is not None
+    assert member["mta_nick"] == "Candidato_Indicado"
+    registration = await database.fetchone(
+        "SELECT * FROM registration_gate_records WHERE guild_id=? AND discord_id=?",
+        (GUILD_ID, CANDIDATE_ID),
+    )
+    assert registration["status"] == "REGISTERED"
+    audit = await database.fetchone(
+        """
+        SELECT after_json FROM audit_logs
+        WHERE guild_id=? AND action='RECRUITMENT_DIRECT_INDICATION_SUBMITTED'
+        """,
+        (GUILD_ID,),
+    )
+    assert json.loads(audit["after_json"])["entry_method"] == "INDICATION"
+    decision_audit = await database.fetchone(
+        """
+        SELECT after_json FROM audit_logs
+        WHERE guild_id=? AND action='RECRUITMENT_APPLICATION_APPROVED'
+        """,
+        (GUILD_ID,),
+    )
+    decision_after = json.loads(decision_audit["after_json"])
+    assert decision_after["entry_method"] == "INDICATION"
+    assert decision_after["indicated_by"] == 2002
+    assert decision_after["requested_unit_code"] == "ROCAM"
+
+
 async def _start(
     service: RecruitmentService,
     discord_id: int = CANDIDATE_ID,

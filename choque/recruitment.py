@@ -674,6 +674,151 @@ class RecruitmentService:
             raise ConflictError("Já existe candidatura ativa para este Discord ou ID BGR.") from exc
         return dict(await self.database.fetchone("SELECT * FROM recruitment_applications WHERE id=?", (application_id,)))
 
+    async def submit_direct_indication(
+        self,
+        guild_id: int,
+        discord_id: int,
+        *,
+        discord_username: str,
+        candidate_nick: str,
+        bgr_id: str,
+        indicated_by: int,
+        requested_unit_code: str | None = None,
+        notes: str | None = None,
+    ) -> dict[str, object]:
+        """Open a review-ready application without the traditional form."""
+        nick = candidate_nick.strip()
+        bgr = bgr_id.strip()
+        unit = (requested_unit_code or "").strip().upper() or None
+        detail = (notes or "").strip() or None
+        if not nick or not bgr:
+            raise ValidationError("Nick e ID BGR são obrigatórios.")
+        if indicated_by <= 0 or indicated_by == discord_id:
+            raise ValidationError("Informe um indicador válido diferente do candidato.")
+        if unit not in {None, "ROCAM", "TATICO", "ELITE", "CORREGEDORIA"}:
+            raise ValidationError("Unidade especial inválida.")
+        active = await self.database.fetchone(
+            f"""
+            SELECT * FROM recruitment_applications
+            WHERE guild_id=? AND discord_id=?
+              AND status IN ({','.join('?' for _ in ACTIVE_APPLICATION_STATUSES)})
+            ORDER BY id DESC LIMIT 1
+            """,
+            (guild_id, discord_id, *sorted(ACTIVE_APPLICATION_STATUSES)),
+        )
+        if active:
+            if str(active["entry_method"] or "FORM") == "INDICATION":
+                raise ConflictError(
+                    "Este candidato já possui uma solicitação de entrada por indicação em análise."
+                )
+            raise ConflictError("Este candidato já possui uma candidatura em andamento.")
+        member = await self.database.fetchone(
+            "SELECT id FROM members WHERE guild_id=? AND discord_id=? AND status!='DISMISSED'",
+            (guild_id, discord_id),
+        )
+        if member:
+            raise ConflictError("Este Discord já possui vínculo ativo no efetivo.")
+        blocked = await self.database.fetchone(
+            """
+            SELECT id FROM recruitment_blocks
+            WHERE guild_id=? AND active=1 AND (discord_id=? OR bgr_id=?) LIMIT 1
+            """,
+            (guild_id, discord_id, bgr),
+        )
+        if blocked:
+            raise ConflictError("Entrada indisponível por bloqueio administrativo.")
+        campaign = await self.current_campaign(guild_id)
+        if not campaign:
+            raise ConflictError("Configure o recrutamento antes de receber indicações.")
+        now = self.clock()
+        public_id = str(uuid.uuid4())
+        idempotency_key = f"direct-indication:{guild_id}:{discord_id}:{uuid.uuid4()}"
+        try:
+            async with self.database.transaction() as connection:
+                cursor = await connection.execute(
+                    """
+                    INSERT INTO recruitment_applications(
+                        guild_id, public_id, campaign_id, form_version_id, discord_id,
+                        discord_username, guild_membership_verified_at,
+                        consent_accepted_at, bgr_id, candidate_nick, age,
+                        status, stage, idempotency_key, started_at, submitted_at,
+                        created_at, updated_at, entry_method, indicated_by,
+                        requested_unit_code, indication_notes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0,
+                              'UNDER_REVIEW', 'REVIEW', ?, ?, ?, ?, ?,
+                              'INDICATION', ?, ?, ?)
+                    """,
+                    (
+                        guild_id,
+                        public_id,
+                        int(campaign["id"]),
+                        int(campaign["form_version_id"]),
+                        discord_id,
+                        discord_username[:100],
+                        now,
+                        now,
+                        bgr[:40],
+                        nick[:80],
+                        idempotency_key[:100],
+                        now,
+                        now,
+                        now,
+                        now,
+                        indicated_by,
+                        unit,
+                        detail[:1000] if detail else None,
+                    ),
+                )
+                application_id = int(cursor.lastrowid)
+                protocol = f"IND-{application_id:05d}"
+                await connection.execute(
+                    "UPDATE recruitment_applications SET protocol=? WHERE id=?",
+                    (protocol, application_id),
+                )
+                await self._history(
+                    connection,
+                    guild_id,
+                    application_id,
+                    "DIRECT_INDICATION_SUBMITTED",
+                    discord_id,
+                    "Entrada por indicação enviada para análise.",
+                    {
+                        "protocol": protocol,
+                        "indicated_by": indicated_by,
+                        "unit": unit,
+                        "entry_method": "INDICATION",
+                    },
+                )
+                await self._public_status_notification(
+                    connection, guild_id, application_id, "UNDER_REVIEW", now
+                )
+                await self._review_card_notification(
+                    connection, guild_id, application_id, "UNDER_REVIEW", 1, now
+                )
+                await self.audit.record(
+                    guild_id,
+                    "RECRUITMENT_DIRECT_INDICATION_SUBMITTED",
+                    actor_id=discord_id,
+                    target_id=discord_id,
+                    after={
+                        "application_id": application_id,
+                        "protocol": protocol,
+                        "indicated_by": indicated_by,
+                        "unit": unit,
+                        "entry_method": "INDICATION",
+                    },
+                    connection=connection,
+                )
+        except aiosqlite.IntegrityError as exc:
+            raise ConflictError(
+                "Este candidato já possui uma solicitação de entrada por indicação em análise."
+            ) from exc
+        return dict(
+            await self.database.fetchone(
+                "SELECT * FROM recruitment_applications WHERE id=?", (application_id,)
+            )
+        )
+
     async def _assign_questions(
         self, connection: aiosqlite.Connection, application_id: int, form_version_id: int
     ) -> None:
@@ -1869,6 +2014,9 @@ class RecruitmentService:
                     "member_id": member_id,
                     "origin": normalized_origin,
                     "correlation_id": correlation,
+                    "entry_method": str(application["entry_method"] or "FORM"),
+                    "indicated_by": application["indicated_by"],
+                    "requested_unit_code": application["requested_unit_code"],
                 },
                 reason=internal,
                 correlation_id=correlation,

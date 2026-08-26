@@ -4204,6 +4204,54 @@ CREATE INDEX ix_special_unit_events_timeline
 ON special_unit_events(canonical_guild_id, unit_code, created_at DESC, id DESC);
 """
 
+MIGRATION_047 = """
+-- Ausencia operacional: o ciclo e os alertas sao duraveis para que um
+-- reinicio nunca repita os avisos de 3/7/10 dias.
+CREATE TABLE activity_absence_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    unit_code TEXT,
+    cycle_started_at INTEGER NOT NULL,
+    threshold_days INTEGER NOT NULL CHECK (threshold_days IN (3,7,10)),
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','DELIVERED','DISABLED','JUSTIFIED')
+    ),
+    channel_id INTEGER,
+    message_id INTEGER,
+    created_at INTEGER NOT NULL,
+    delivered_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(guild_id, member_id, cycle_started_at, threshold_days)
+);
+
+CREATE INDEX ix_activity_absence_alert_delivery
+ON activity_absence_alerts(guild_id, status, created_at, id);
+
+CREATE TABLE activity_absence_controls (
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE RESTRICT,
+    disabled INTEGER NOT NULL DEFAULT 0 CHECK (disabled IN (0,1)),
+    disabled_by INTEGER,
+    disabled_at INTEGER,
+    reason TEXT,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(guild_id, member_id)
+);
+
+-- Entrada por indicacao usa a candidatura e a admissao existentes. Estes
+-- campos apenas identificam a origem e os metadados minimos do novo caminho.
+ALTER TABLE recruitment_applications
+ADD COLUMN entry_method TEXT NOT NULL DEFAULT 'FORM';
+ALTER TABLE recruitment_applications ADD COLUMN indicated_by INTEGER;
+ALTER TABLE recruitment_applications ADD COLUMN requested_unit_code TEXT;
+ALTER TABLE recruitment_applications ADD COLUMN indication_notes TEXT;
+
+CREATE INDEX ix_recruitment_entry_method
+ON recruitment_applications(guild_id, entry_method, status, submitted_at, id);
+"""
+
 MIGRATIONS = (
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -4251,6 +4299,7 @@ MIGRATIONS = (
     (44, MIGRATION_044),
     (45, MIGRATION_045),
     (46, MIGRATION_046),
+    (47, MIGRATION_047),
 )
 
 

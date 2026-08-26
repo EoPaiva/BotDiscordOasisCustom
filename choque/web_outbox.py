@@ -82,6 +82,22 @@ def build_recruitment_review_embed(branding, application: Mapping[str, object]) 
     embed.add_field(name="Protocolo", value=str(application.get("protocol") or "—"), inline=True)
     embed.add_field(name="Candidato", value=str(application.get("candidate_nick") or "—"), inline=True)
     embed.add_field(name="ID BGR", value=str(application.get("bgr_id") or "—"), inline=True)
+    if str(application.get("entry_method") or "FORM") == "INDICATION":
+        indicated_by = application.get("indicated_by")
+        embed.add_field(name="Forma de entrada", value="📨 INDICAÇÃO", inline=True)
+        embed.add_field(
+            name="Indicado por",
+            value=f"<@{indicated_by}>" if indicated_by else "—",
+            inline=True,
+        )
+        embed.add_field(
+            name="Unidade solicitada",
+            value=str(application.get("requested_unit_code") or "Nenhuma"),
+            inline=True,
+        )
+        notes = str(application.get("indication_notes") or "").strip()
+        if notes:
+            embed.add_field(name="Informações adicionais", value=notes[:1000], inline=False)
 
     assigned_to = application.get("assigned_to")
     if assigned_to is None:

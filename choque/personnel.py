@@ -696,6 +696,87 @@ class PersonnelService:
             "member_status": member_status,
         }
 
+    async def register_justified_absence(
+        self,
+        guild_id: int,
+        discord_id: int,
+        starts_at: int,
+        ends_at: int,
+        actor_id: int,
+        reason: str,
+    ) -> dict[str, object]:
+        """Register an already-authorized absence using the canonical table."""
+        now = self.clock()
+        normalized_reason = reason.strip()
+        if not normalized_reason:
+            raise ValidationError("Informe o motivo da ausência justificada.")
+        if starts_at >= ends_at or ends_at <= now:
+            raise ValidationError("Informe um período futuro válido.")
+        try:
+            async with self.database.transaction() as connection:
+                cursor = await connection.execute(
+                    "SELECT id, status FROM members WHERE guild_id=? AND discord_id=?",
+                    (guild_id, discord_id),
+                )
+                member = await cursor.fetchone()
+                if member is None:
+                    raise NotFoundError("Membro não encontrado.")
+                if str(member["status"]) in {
+                    MemberStatus.SUSPENDED.value,
+                    MemberStatus.DISMISSED.value,
+                }:
+                    raise ConflictError("O status atual não permite registrar afastamento.")
+                cursor = await connection.execute(
+                    """
+                    INSERT INTO absence_requests(
+                        guild_id, member_id, discord_id, starts_at, ends_at,
+                        reason, status, submitted_at, reviewed_by, reviewed_at,
+                        review_reason, previous_member_status
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'APPROVED', ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        guild_id,
+                        int(member["id"]),
+                        discord_id,
+                        starts_at,
+                        ends_at,
+                        normalized_reason,
+                        now,
+                        actor_id,
+                        now,
+                        normalized_reason,
+                        str(member["status"]),
+                    ),
+                )
+                absence_id = int(cursor.lastrowid)
+                if starts_at <= now < ends_at and str(member["status"]) != MemberStatus.AWAY.value:
+                    await connection.execute(
+                        "UPDATE members SET status='AWAY', updated_at=? WHERE id=?",
+                        (now, int(member["id"])),
+                    )
+                await self.audit.record(
+                    guild_id,
+                    "ABSENCE_JUSTIFIED_REGISTERED",
+                    actor_id=actor_id,
+                    target_id=discord_id,
+                    after={
+                        "absence_id": absence_id,
+                        "starts_at": starts_at,
+                        "ends_at": ends_at,
+                    },
+                    reason=normalized_reason,
+                    connection=connection,
+                )
+        except aiosqlite.IntegrityError as exc:
+            raise ConflictError("O membro já possui afastamento pendente ou aprovado.") from exc
+        return {
+            "absence_id": absence_id,
+            "discord_id": discord_id,
+            "status": "APPROVED",
+            "starts_at": starts_at,
+            "ends_at": ends_at,
+        }
+
     async def cancel_absence(self, guild_id: int, discord_id: int) -> int:
         now = self.clock()
         async with self.database.transaction() as connection:

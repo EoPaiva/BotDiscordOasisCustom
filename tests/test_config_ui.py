@@ -483,7 +483,7 @@ async def test_phase_four_and_five_panels_are_persistent_and_have_stable_custom_
         4,
         9,
         3,
-        3,
+        4,
         5,
         3,
     ]

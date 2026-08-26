@@ -189,6 +189,70 @@ async def test_inactivity_is_only_monitoring_and_never_creates_punishment(servic
 
 
 @pytest.mark.asyncio
+async def test_absence_alerts_are_once_per_threshold_and_reset_after_activity(service_bundle):
+    activity = service_bundle["activity"]
+    database = service_bundle["database"]
+    clock = service_bundle["clock"]
+    first_cycle = clock.value - 10 * DAY_MS
+    await database.execute(
+        "UPDATE members SET last_activity_at=? WHERE guild_id=? AND discord_id=?",
+        (first_cycle, GUILD_ID, DISCORD_ID),
+    )
+
+    alerts = await activity.scan_absence_alerts(GUILD_ID)
+    assert [row["threshold_days"] for row in alerts] == [3, 7, 10]
+    for row in alerts:
+        await activity.mark_absence_alert_delivered(GUILD_ID, row["id"], 100, row["id"])
+    assert await activity.scan_absence_alerts(GUILD_ID) == []
+
+    second_cycle = clock.value
+    await database.execute(
+        "UPDATE members SET last_activity_at=? WHERE guild_id=? AND discord_id=?",
+        (second_cycle, GUILD_ID, DISCORD_ID),
+    )
+    clock.advance(3 * DAY_MS)
+    reset = await activity.scan_absence_alerts(GUILD_ID)
+    assert [(row["cycle_started_at"], row["threshold_days"]) for row in reset] == [
+        (second_cycle, 3)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_justified_absence_and_individual_disable_suppress_alerts(service_bundle):
+    activity = service_bundle["activity"]
+    personnel = service_bundle["personnel"]
+    database = service_bundle["database"]
+    clock = service_bundle["clock"]
+    await database.execute(
+        "UPDATE members SET last_activity_at=? WHERE guild_id=? AND discord_id=?",
+        (clock.value - 10 * DAY_MS, GUILD_ID, DISCORD_ID),
+    )
+    await personnel.register_justified_absence(
+        GUILD_ID,
+        DISCORD_ID,
+        clock.value,
+        clock.value + 7 * DAY_MS,
+        999,
+        "Afastamento autorizado pelo Comando.",
+    )
+    assert await activity.scan_absence_alerts(GUILD_ID) == []
+    await database.execute(
+        "UPDATE absence_requests SET status='ENDED', ended_at=?",
+        (clock.value,),
+    )
+    await database.execute("UPDATE members SET status='ACTIVE' WHERE discord_id=?", (DISCORD_ID,))
+    alerts = await activity.scan_absence_alerts(GUILD_ID)
+    assert alerts
+    disabled = await activity.disable_member_absence_alerts(
+        GUILD_ID, int(alerts[0]["id"]), 999, "Situação acompanhada pela unidade."
+    )
+    assert disabled["discord_id"] == DISCORD_ID
+    assert await activity.scan_absence_alerts(GUILD_ID) == []
+    punishments = await database.fetchone("SELECT COUNT(*) AS total FROM punishments")
+    assert punishments["total"] == 0
+
+
+@pytest.mark.asyncio
 async def test_activity_rules_validate_and_are_audited(service_bundle):
     activity = service_bundle["activity"]
     settings = service_bundle["settings"]
