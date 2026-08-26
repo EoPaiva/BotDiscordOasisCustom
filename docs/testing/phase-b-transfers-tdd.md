@@ -33,7 +33,7 @@ Commit exclusivo dos testes: `8c20229 test: define auditable transfer lifecycle`
 O mesmo arquivo terminou com `4 passed`. O conjunto direcionado ampliado terminou com:
 
 ```text
-66 passed, 2 warnings
+68 passed, 2 warnings
 ```
 
 As advertências são depreciações já conhecidas do `discord.py` em inspeções de labels; não são falhas
@@ -48,9 +48,18 @@ era publicada no painel visual de análise. O teste isolado falhou com `Awaited 
 o fluxo dependeria do comando administrativo legado. O commit `d18e739` preserva esse RED; o commit
 `06ae652` amplia o roteamento existente para `TRANSFER` e levou o mesmo teste a `1 passed`.
 
+## RED/GREEN das invariantes finais
+
+- `63da5fa` provou que fechar o ticket deixava o protocolo pendente; `9b654d9` passou a cancelar e
+  reabrir ambos na mesma transação, com eventos próprios.
+- `9a71063` provou que uma patente desativada seria substituída silenciosamente pela menor patente;
+  `0c3a989` bloqueou a aplicação e manteve ficha/protocolo pendentes para nova decisão humana.
+- `305888c` provou que “Meus pedidos” não expunha o protocolo; `fab9bbb` passou a projetar o mesmo ID
+  estável na consulta privada do solicitante.
+
 ## Gate completo local
 
-- Python: `567 passed, 21 warnings` em 162,75 s após a correção de alcançabilidade;
+- Python: `569 passed, 21 warnings` em 180,60 s no gate final;
 - scanner de segredos: `SECRET_SCAN_OK`;
 - dependências Python: `No known vulnerabilities found`;
 - Ruff: sem achados;

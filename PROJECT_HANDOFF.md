@@ -2205,6 +2205,9 @@ Programa Web. Tudo continua na ordem de
   deploy, chamada ao Discord, acesso ao banco remoto ou leitura/cópia do arquivo local de variáveis.
   A revisão de alcançabilidade adicionou `d18e739` (RED) e `06ae652` (fix) para garantir que a ficha
   criada pela transferência seja publicada no fluxo visual de revisão, sem depender de comando.
+  Revisões adicionais cobrem fechamento/reabertura (`63da5fa`/`9b654d9`), patente aprovada que foi
+  desativada (`9a71063`/`0c3a989`) e protocolo no histórico do solicitante
+  (`305888c`/`fab9bbb`).
 - A migration 51 cria `transfer_cases` e `transfer_case_events`. `service_tickets` permanece como
   entrada, fila e sala privada; o agregado novo guarda somente protocolo, snapshot, decisão, patente
   autorizada, aplicação e timeline. Tickets antigos são migrados sem reinterpretar aprovação legada
@@ -2216,11 +2219,14 @@ Programa Web. Tudo continua na ordem de
   A análise posterior da ficha é a segunda decisão humana e aplica exatamente a patente aprovada,
   ignorando cargos Discord que pudessem elevar o ingresso; somente então a sincronização canônica é
   enfileirada. Concorrência e repetição são protegidas transacionalmente.
-- Gates locais: 66 testes focados e **567 testes Python**; `SECRET_SCAN_OK`; `pip-audit` sem
+- Fechar ou reabrir o atendimento altera o protocolo na mesma transação e registra timeline. Se a
+  patente aprovada for desativada antes da aplicação, a operação para e exige nova decisão; não há
+  fallback silencioso. O protocolo também aparece em “Meus pedidos”.
+- Gates locais: 68 testes focados e **569 testes Python**; `SECRET_SCAN_OK`; `pip-audit` sem
   vulnerabilidades; Ruff, compileall, `main.py --check` em migration 51 e `git diff --check`; portal
   com `npm audit` sem vulnerabilidades, typecheck, lint, **57 testes** e build Next.js verdes.
 - Este checkpoint está **somente local e não implantado**. Na máquina principal: reler este handoff e
-  o diff dos quatro commits de teste/código; confirmar a patente-teto; parar o escritor único; gerar
+  o diff dos dez commits de teste/código; confirmar a patente-teto; parar o escritor único; gerar
   e validar backup (`quick_check` e foreign keys); aplicar a migration primeiro em cópia; repetir
   gates e smoke humano;
   só então, com nova autorização explícita, fazer merge/push/deploy e validar health, migration,

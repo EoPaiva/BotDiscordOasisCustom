@@ -1200,10 +1200,13 @@ Fora do escopo atual: eventos, API e integração MTA.
   segue pela outbox já existente.
 - Tickets históricos são migrados sem concessão retroativa. Casos pendentes podem seguir o ciclo
   novo; aprovações antigas ficam identificadas separadamente para revisão, sem patente inferida.
+- Cancelamento e reabertura mantêm ticket/protocolo consistentes na mesma transação. Patente
+  desativada entre as decisões bloqueia a aplicação sem fallback, e o protocolo fica visível no
+  histórico privado do solicitante.
 - TDD: `8c20229` registra quatro falhas esperadas antes da implementação; `422e213` entrega o GREEN.
   A revisão de alcançabilidade gerou outro RED em `d18e739`, corrigido por `06ae652`, para publicar a
   ficha de transferência no painel de revisão existente. Evidência detalhada:
   `docs/testing/phase-b-transfers-tdd.md`.
-- Gates locais: 66 testes focados, **567 testes Python**, scanner de segredos, `pip-audit`, Ruff,
+- Gates locais: 68 testes focados, **569 testes Python**, scanner de segredos, `pip-audit`, Ruff,
   compileall, `main.py --check`, diff, `npm audit`, typecheck, lint, **57 testes web** e build.
   Nenhuma ação de produção foi executada.
