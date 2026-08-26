@@ -57,17 +57,15 @@ CHANNELS = (
     ),
     ChannelSpec(
         "recruitment.approved",
-        "recruitment_admin",
+        "recruitment",
         "Aprovados",
         "✅",
-        private=True,
     ),
     ChannelSpec(
         "recruitment.rejected",
-        "recruitment_admin",
+        "recruitment",
         "Reprovados",
         "❌",
-        private=True,
     ),
     ChannelSpec(
         "recruitment.main_server",

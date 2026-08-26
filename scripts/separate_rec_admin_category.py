@@ -24,8 +24,9 @@ RECRUITMENT_CATEGORY = format_category_name(1, "Recrutamento")
 ADMIN_CATEGORY = format_category_name(2, "Administração do Recrutamento")
 OLD_COURSES_CATEGORY = format_category_name(2, "Cursos")
 COURSES_CATEGORY = format_category_name(3, "Cursos")
-ADMIN_KEYS = frozenset(
-    {"recruitment.review", "recruitment.approved", "recruitment.rejected"}
+ADMIN_KEYS = frozenset({"recruitment.review"})
+PUBLIC_RESULT_KEYS = frozenset(
+    {"recruitment.approved", "recruitment.rejected"}
 )
 STAFF_ROLES = (
     "Comando REC",
@@ -57,6 +58,17 @@ def _admin_overwrites(guild_id: int, staff_role_ids: list[int]) -> list[dict[str
     )
 
 
+def _public_result_overwrites(
+    guild_id: int, staff_role_ids: list[int]
+) -> list[dict[str, str | int]]:
+    return _permission_overwrites(
+        guild_id,
+        staff_role_ids=staff_role_ids,
+        private=False,
+        writable=False,
+    )
+
+
 def build_admin_channel_plan(
     guild_id: int,
     channels: list[dict[str, Any]],
@@ -81,6 +93,36 @@ def build_admin_channel_plan(
                 "key": key,
                 "actual_parent_id": int(channel.get("parent_id") or 0),
                 "parent_id": admin_category_id,
+                "permission_overwrites": overwrites,
+            }
+        )
+    return plan
+
+
+def build_public_result_plan(
+    guild_id: int,
+    channels: list[dict[str, Any]],
+    recruitment_category_id: int,
+    staff_role_ids: list[int],
+) -> list[dict[str, Any]]:
+    by_topic = {
+        str(channel.get("topic") or ""): channel
+        for channel in channels
+        if int(channel.get("type", -1)) == 0
+    }
+    overwrites = _public_result_overwrites(guild_id, staff_role_ids)
+    plan = []
+    for key in sorted(PUBLIC_RESULT_KEYS):
+        topic = f"CHOQUE-BGR rec-migration:{key}"
+        channel = by_topic.get(topic)
+        if channel is None:
+            raise RuntimeError(f"Canal público de resultado ausente: {key}.")
+        plan.append(
+            {
+                "id": int(channel["id"]),
+                "key": key,
+                "actual_parent_id": int(channel.get("parent_id") or 0),
+                "parent_id": recruitment_category_id,
                 "permission_overwrites": overwrites,
             }
         )
@@ -144,7 +186,10 @@ async def run(args: argparse.Namespace) -> int:
         plan = build_admin_channel_plan(
             guild_id, channels, int(admin["id"]), staff_role_ids
         )
-        for item in plan:
+        result_plan = build_public_result_plan(
+            guild_id, channels, int(recruitment["id"]), staff_role_ids
+        )
+        for item in [*plan, *result_plan]:
             await api.request(
                 "PATCH",
                 f"/channels/{item['id']}",
@@ -172,11 +217,22 @@ async def run(args: argparse.Namespace) -> int:
         verified = build_admin_channel_plan(
             guild_id, refreshed, int(refreshed_admin["id"]), staff_role_ids
         )
+        verified_results = build_public_result_plan(
+            guild_id,
+            refreshed,
+            int(refreshed_recruitment["id"]),
+            staff_role_ids,
+        )
         if any(
             item["actual_parent_id"] != int(refreshed_admin["id"])
             for item in verified
         ):
             raise RuntimeError("Canal administrativo ficou fora da categoria correta.")
+        if any(
+            item["actual_parent_id"] != int(refreshed_recruitment["id"])
+            for item in verified_results
+        ):
+            raise RuntimeError("Canal de resultado ficou fora da categoria pública.")
         category_order = [
             item["name"]
             for item in sorted(
@@ -193,6 +249,9 @@ async def run(args: argparse.Namespace) -> int:
                     "admin_category_id": int(refreshed_admin["id"]),
                     "created": created,
                     "admin_channels": [item["key"] for item in verified],
+                    "public_result_channels": [
+                        item["key"] for item in verified_results
+                    ],
                     "category_order": category_order,
                     "verified": True,
                 },

@@ -6,7 +6,19 @@ import pytest
 
 from cogs.member_commands import MemberCommands
 from cogs.ticket_commands import TicketCommands
-from scripts.migrate_rec_choque import _copy_data, _permission_overwrites, run
+from scripts.migrate_rec_choque import CHANNELS, _copy_data, _permission_overwrites, run
+
+
+def test_recruitment_results_are_public_in_recruitment_category() -> None:
+    results = {
+        spec.key: spec
+        for spec in CHANNELS
+        if spec.key in {"recruitment.approved", "recruitment.rejected"}
+    }
+
+    assert set(results) == {"recruitment.approved", "recruitment.rejected"}
+    assert all(spec.category == "recruitment" for spec in results.values())
+    assert all(not spec.private for spec in results.values())
 
 
 def test_private_interview_grants_candidate_access_without_moderation() -> None:
