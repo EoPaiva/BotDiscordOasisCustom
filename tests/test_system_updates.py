@@ -3,9 +3,12 @@ from __future__ import annotations
 from choque.config import Branding
 from scripts.publish_system_updates import (
     CHANNEL_NAME,
+    LATEST_UPDATE_FOOTER,
+    LATEST_UPDATE_TITLE,
     MESSAGE_FOOTER,
     MESSAGE_TITLE,
     _normalized_overwrites,
+    build_latest_update_embed,
     build_update_embed,
 )
 from scripts.remodel_discord_layout import CHANNEL_SPECS
@@ -65,3 +68,17 @@ def test_permission_comparison_is_order_independent() -> None:
     second = list(reversed(first))
 
     assert _normalized_overwrites(first) == _normalized_overwrites(second)
+
+
+def test_latest_update_is_a_separate_safe_message() -> None:
+    embed = build_latest_update_embed(Branding())
+
+    assert embed["title"] == LATEST_UPDATE_TITLE
+    assert embed["footer"]["text"] == LATEST_UPDATE_FOOTER
+    assert len(embed["fields"]) == 6
+    text = str(embed)
+    assert "26/08/2026" in text
+    assert "decisões humanas" in text
+    assert "envio coletivo" in text
+    assert "permanece desligado" in text
+    assert "@everyone" not in text

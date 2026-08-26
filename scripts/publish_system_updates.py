@@ -27,6 +27,8 @@ CHANNEL_TOPIC = (
 )
 MESSAGE_TITLE = "Atualizações do sistema"
 MESSAGE_FOOTER = "CHOQUE - BGR • Sistema de Gestão • Atualizações oficiais"
+LATEST_UPDATE_TITLE = "Novidades do sistema — 26/08/2026"
+LATEST_UPDATE_FOOTER = "CHOQUE - BGR • Atualização oficial • 26/08/2026"
 AUDIT_REASON = "CHOQUE - BGR • criação do canal oficial de atualizações"
 
 
@@ -188,6 +190,24 @@ def build_update_embed(branding: Branding) -> dict[str, Any]:
     return embed
 
 
+def build_latest_update_embed(branding: Branding) -> dict[str, Any]:
+    summary = build_update_embed(branding)
+    embed: dict[str, Any] = {
+        "title": LATEST_UPDATE_TITLE,
+        "description": (
+            "As melhorias abaixo foram publicadas hoje. Decisões operacionais continuam humanas "
+            "e o envio coletivo do informativo de Tags permanece desligado."
+        ),
+        "color": branding.embed_color,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "fields": summary["fields"][-6:],
+        "footer": {"text": LATEST_UPDATE_FOOTER},
+    }
+    if branding.logo_url:
+        embed["thumbnail"] = {"url": branding.logo_url}
+    return embed
+
+
 class DiscordRest:
     def __init__(self, token: str) -> None:
         self.session = aiohttp.ClientSession(
@@ -273,7 +293,7 @@ def _normalized_overwrites(items: list[dict[str, Any]]) -> list[tuple[str, int, 
     )
 
 
-async def publish(*, apply: bool) -> int:
+async def publish(*, apply: bool, new_update: bool = False) -> int:
     config = AppConfig.load()
     if not config.token or not config.default_guild_id:
         raise RuntimeError("DISCORD_TOKEN e DEFAULT_GUILD_ID precisam estar configurados.")
@@ -362,6 +382,46 @@ async def publish(*, apply: bool) -> int:
                 f"/channels/{channel['id']}/messages/{summary['id']}",
                 payload=message_payload,
             )
+
+        latest_message = None
+        latest_created = False
+        latest_content_valid = not new_update
+        if new_update:
+            latest_embed = build_latest_update_embed(config.branding)
+            latest_message = next(
+                (
+                    message
+                    for message in messages
+                    if message.get("author", {}).get("id") == me.get("id")
+                    and any(
+                        embed.get("footer", {}).get("text") == LATEST_UPDATE_FOOTER
+                        for embed in message.get("embeds", [])
+                    )
+                ),
+                None,
+            )
+            latest_payload = {
+                "embeds": [latest_embed],
+                "allowed_mentions": {"parse": []},
+            }
+            if latest_message is None:
+                latest_message = await api.request(
+                    "POST", f"/channels/{channel['id']}/messages", payload=latest_payload
+                )
+                latest_created = True
+            else:
+                latest_message = await api.request(
+                    "PATCH",
+                    f"/channels/{channel['id']}/messages/{latest_message['id']}",
+                    payload=latest_payload,
+                )
+            latest_content_valid = any(
+                embed.get("title") == LATEST_UPDATE_TITLE
+                and embed.get("description") == latest_embed["description"]
+                and embed.get("footer", {}).get("text") == LATEST_UPDATE_FOOTER
+                and len(embed.get("fields", [])) == len(latest_embed["fields"])
+                for embed in latest_message.get("embeds", [])
+            )
         if not summary.get("pinned"):
             await api.request(
                 "PUT",
@@ -389,18 +449,27 @@ async def publish(*, apply: bool) -> int:
             or fresh_channel.get("parent_id") != str(INFORMATION_CATEGORY_ID)
             or not valid_message
             or not valid_content
+            or not latest_content_valid
             or not synced
         ):
             raise RuntimeError(
                 "A validação final do canal de atualizações falhou: "
                 f"name={fresh_channel.get('name') == CHANNEL_NAME} "
                 f"category={fresh_channel.get('parent_id') == str(INFORMATION_CATEGORY_ID)} "
-                f"pinned={valid_message} content={valid_content} permissions={synced}."
+                f"pinned={valid_message} content={valid_content} "
+                f"latest_content={latest_content_valid} permissions={synced}."
+            )
+        latest_result = ""
+        if latest_message is not None:
+            latest_result = (
+                f" new_update_created={str(latest_created).lower()} "
+                f"new_message_id={latest_message['id']}"
             )
         print(
             "UPDATES_PUBLISH_OK "
             f"created={str(created).lower()} pinned=true content=true permissions_synced=true "
             f"channel_id={channel['id']} message_id={summary['id']} snapshot={snapshot}"
+            f"{latest_result}"
         )
         return 0
     finally:
@@ -410,8 +479,15 @@ async def publish(*, apply: bool) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Publica o canal oficial de atualizações.")
     parser.add_argument("--apply", action="store_true", help="Cria/atualiza o canal e a mensagem.")
+    parser.add_argument(
+        "--new-update",
+        action="store_true",
+        help="Publica uma nova mensagem para a atualização mais recente.",
+    )
     args = parser.parse_args()
-    return asyncio.run(publish(apply=args.apply))
+    if args.new_update and not args.apply:
+        parser.error("--new-update exige --apply")
+    return asyncio.run(publish(apply=args.apply, new_update=args.new_update))
 
 
 if __name__ == "__main__":
