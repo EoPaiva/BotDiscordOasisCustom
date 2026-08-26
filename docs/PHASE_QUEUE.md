@@ -817,8 +817,10 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     corte substituiu `listbox/option` sem navegação própria por `<ul>/<li>` e botões nativos na caixa
     administrativa, preservando seleção e decisão; `d6fd37c` registra o RED e `93bc047` entrega o
     GREEN. O nono corte associa todos os seletores ao painel de decisão nomeado por IDs únicos e
-    `aria-controls`/`aria-labelledby`; `2d1f744` registra o RED e `e351128` entrega o GREEN. Gate
-    atual: 13 testes focados, 65 testes web em 17 arquivos, audit, typecheck, lint e build. Os cortes
+    `aria-controls`/`aria-labelledby`; `2d1f744` registra o RED e `e351128` entrega o GREEN. O décimo
+    corte adiciona ISO legível por máquina ao `<time>` da lista somente para timestamps
+    válidos e preserva o estado ausente; `94b53ca` registra o RED e `39e5a7c` entrega o GREEN. Gate
+    atual: 14 testes focados, 66 testes web em 17 arquivos, audit, typecheck, lint e build. Os cortes
     permanecem somente locais e não publicados.
 
 58. ⏳ **Prompt Master — Identidade Visual / Design System CHOQUE — registrado na fila.**

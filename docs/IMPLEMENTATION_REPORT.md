@@ -1301,3 +1301,12 @@ Fora do escopo atual: eventos, API e integração MTA.
 - TDD: `2d1f744` registra o contrato RED e `e351128` entrega o GREEN.
 - Gate consolidado do portal: 13 testes focados, **65 testes web em 17 arquivos**, `npm audit` sem
   vulnerabilidades, typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
+
+# Site CHOQUE — horários administrativos legíveis por máquina prontos localmente em 2026-08-26
+
+- Cada horário válido da lista administrativa mantém o texto humano e passa a expor ISO no atributo
+  `dateTime`; valores ausentes, não finitos, não positivos ou inválidos não recebem o atributo.
+- O helper defensivo evita `Invalid Date` e não altera seleção, ordem, dados ou decisões.
+- TDD: `94b53ca` registra o contrato RED e `39e5a7c` entrega o GREEN.
+- Gate consolidado do portal: 14 testes focados, **66 testes web em 17 arquivos**, `npm audit` sem
+  vulnerabilidades, typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
