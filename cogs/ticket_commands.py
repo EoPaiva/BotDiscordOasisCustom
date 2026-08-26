@@ -2441,7 +2441,9 @@ class TicketCommands(commands.Cog):
 
     async def after_decision(self, guild: discord.Guild, ticket) -> None:
         await self.refresh_admin_panel(guild)
-        if ticket["ticket_type"] == "CANDIDACY" and ticket["member_application_id"]:
+        if ticket["ticket_type"] in {"CANDIDACY", "TRANSFER"} and ticket[
+            "member_application_id"
+        ]:
             member_cog = self.bot.get_cog("MemberCommands")
             if member_cog is not None:
                 await member_cog.publish_application_for_review(
