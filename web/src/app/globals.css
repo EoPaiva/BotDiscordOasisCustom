@@ -126,7 +126,7 @@ code { font-family: var(--font-mono), monospace; }
 .inbox-summary > li > a { display: flex; min-height: 62px; align-items: center; justify-content: space-between; gap: 15px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .inbox-summary > li > a:hover { background: rgba(124,137,105,.07); }
 .inbox-summary > li > a > div { display: grid; gap: 2px; }.inbox-summary > li > a > div:last-child { justify-items: end; }
-.inbox-summary code { color: var(--khaki); font-size: 9px; }.inbox-summary strong { font-size: 13px; }.inbox-summary span:not(.status-label) { color: var(--text-dim); font-size: 10px; }
+.inbox-summary code { color: var(--khaki); font-size: 9px; }.inbox-summary strong { font-size: 13px; }.inbox-summary span:not(.status-label), .inbox-summary time { color: var(--text-dim); font-size: 10px; }
 .queue-list { margin: 0; padding: 0; list-style: none; }
 .queue-list > li, .briefing-lines > li { display: grid; min-height: 43px; align-items: center; padding: 0 17px; border-bottom: 1px solid var(--line); }
 .queue-list > li { grid-template-columns: 43px 1fr auto; }.queue-list code { color: var(--khaki); }.queue-list span { color: var(--text-dim); font: 10px var(--font-mono); }

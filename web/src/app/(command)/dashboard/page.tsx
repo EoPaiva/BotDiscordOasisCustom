@@ -4,7 +4,7 @@ import Link from "next/link";
 import { EmptyState, MetricStrip, PageHeader, SectionHeader, Status } from "@/components/ui";
 import { LiveDataRefresh } from "@/components/live-data-refresh";
 import { commandCenterFetch } from "@/lib/api";
-import { dateTime, duration, label } from "@/lib/format";
+import { dateTime, duration, isoDateTime, label } from "@/lib/format";
 
 type Row = Record<string, unknown>;
 type DashboardData = {
@@ -79,10 +79,11 @@ export default async function DashboardPage() {
           <SectionHeader index="03" title="Pendências" meta={`${data.inbox.length} itens recentes`} />
           {data.inbox.length ? <ul aria-label="Pendências administrativas recentes" className="inbox-summary">{data.inbox.map((item, index) => {
             const detail = (item.data ?? {}) as Row;
+            const timestamp = Number(detail.created_at ?? detail.submitted_at ?? 0);
             return <li key={`${item.type}-${item.id}-${index}`}>
               <Link href="/inbox">
                 <div><code>{String(detail.code ?? `SOL-${item.id ?? index + 1}`)}</code><strong>{label(item.type ?? detail.request_type)}</strong></div>
-                <div><Status value={detail.status ?? "PENDING"} /><span>{dateTime(Number(detail.created_at ?? detail.submitted_at ?? 0))}</span></div>
+                <div><Status value={detail.status ?? "PENDING"} /><time dateTime={isoDateTime(timestamp)}>{dateTime(timestamp)}</time></div>
               </Link>
             </li>;
           })}</ul> : <EmptyState title="Caixa regular" detail="Nenhuma pendência administrativa no momento." />}

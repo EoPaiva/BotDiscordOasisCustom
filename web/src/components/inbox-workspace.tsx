@@ -6,20 +6,13 @@ import { useId, useMemo, useState } from "react";
 
 import { decideInboxItem } from "@/app/(command)/actions";
 import { Status } from "@/components/ui";
-import { dateTime, label } from "@/lib/format";
+import { dateTime, isoDateTime, label } from "@/lib/format";
 
 export type InboxItem = { type: string; id: number; data: Record<string, unknown> };
 
 function visibleFields(data: Record<string, unknown>) {
   const hidden = new Set(["payload_json", "evidence_json", "guild_id", "member_id"]);
   return Object.entries(data).filter(([key, value]) => !hidden.has(key) && value != null).slice(0, 10);
-}
-
-function isoDateTime(value: unknown): string | undefined {
-  const timestamp = Number(value);
-  if (!Number.isFinite(timestamp) || timestamp <= 0) return undefined;
-  const parsed = new Date(timestamp);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
 function fieldValue(key: string, value: unknown) {
