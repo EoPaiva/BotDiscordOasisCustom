@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import timedelta
 
 import pytest
 
 from choque.activity import ActivityService, period_bounds_at
+from choque.dismissals import STANDARD_DISMISSAL_REASON
 from choque.errors import ValidationError
 
 from .conftest import CALL_A, DISCORD_ID, GUILD_ID
@@ -365,7 +367,15 @@ async def test_inactivity_dismissal_from_rec_updates_canonical_and_mirror_once(
         """,
         (GUILD_ID,),
     )
+    notifications = await database.fetchall(
+        "SELECT * FROM career_notifications WHERE notification_type='DISMISSAL'"
+    )
     assert punishment["total"] == decision["total"] == audit["total"] == 1
+    assert len(notifications) == 1
+    payload = json.loads(notifications[0]["payload_json"])
+    assert payload["source"] == "INACTIVITY_ALERT"
+    assert payload["public_reason"] == STANDARD_DISMISSAL_REASON
+    assert "inatividade prolongada" not in notifications[0]["payload_json"]
     assert await activity.scan_absence_alerts(GUILD_ID) == []
 
 
