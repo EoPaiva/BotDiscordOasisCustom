@@ -1310,3 +1310,12 @@ Fora do escopo atual: eventos, API e integração MTA.
 - TDD: `94b53ca` registra o contrato RED e `39e5a7c` entrega o GREEN.
 - Gate consolidado do portal: 14 testes focados, **66 testes web em 17 arquivos**, `npm audit` sem
   vulnerabilidades, typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
+
+# Site CHOQUE — datas do painel administrativo formatadas localmente em 2026-08-26
+
+- Campos detalhados terminados em `_at` ou `_time` deixam de mostrar milissegundos brutos quando o
+  valor representa uma data válida; o painel usa texto humano dentro de `<time dateTime="ISO">`.
+- Campos não temporais e valores temporais inválidos permanecem intactos, sem inferência de data.
+- TDD: `0a45900` registra o contrato RED e `f13d2b0` entrega o GREEN.
+- Gate consolidado do portal: 15 testes focados, **67 testes web em 17 arquivos**, `npm audit` sem
+  vulnerabilidades, typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.

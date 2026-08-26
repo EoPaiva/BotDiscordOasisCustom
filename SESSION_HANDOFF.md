@@ -5,12 +5,12 @@
 
 ## Handoff
 
-**Última atualização:** 2026-08-26 16:12 -03:00
+**Última atualização:** 2026-08-26 16:16 -03:00
 
 **Branch atual:** `codex/phase-b-transfers`
 
 **Último commit funcional:**
-`39e5a7c` — `fix: expose machine-readable inbox times`
+`f13d2b0` — `fix: format inbox detail times`
 
 **Commit do protocolo:** este arquivo pertence ao commit de documentação imediatamente posterior;
 confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferência impossível.
@@ -24,7 +24,7 @@ confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferên
 Na máquina principal, auditar os blocos locais ADV, Cursos e Transferências contra o checkout que
 opera o projeto, validar migrations 49–51 numa cópia do banco e preparar um rollout controlado. A
 implementação local de Transferências está concluída. Enquanto essa etapa externa permanece
-bloqueada, a Fase 57 pode avançar localmente em cortes pequenos e fecháveis; dez cortes do Centro
+bloqueada, a Fase 57 pode avançar localmente em cortes pequenos e fecháveis; onze cortes do Centro
 de Comando estão concluídos e não há código parcial neste computador.
 
 ### Critério de conclusão
@@ -51,12 +51,13 @@ sete dias; `c38d050`/`2fab9ce` expõem as patrulhas ativas como lista nomeada, p
 como `<article>`; `d6fd37c`/`93bc047` substituem o padrão incompleto `listbox/option` da caixa
 administrativa por lista nativa com botões de seleção e estado atual explícito; `2d1f744`/`e351128`
 ligam esses botões ao painel de decisão nomeado com IDs únicos por instância; `94b53ca`/`39e5a7c`
-adicionam ISO legível por máquina somente aos horários administrativos válidos. Nenhum contrato, URL,
-RBAC, API ou regra de negócio foi alterado.
+adicionam ISO legível por máquina somente aos horários administrativos válidos; `0a45900`/`f13d2b0`
+formatam também os campos detalhados `_at`/`_time` em `<time dateTime>` e eliminam o timestamp bruto.
+Nenhum contrato, URL, RBAC, API ou regra de negócio foi alterado.
 
 ### Ação em andamento
 
-Nenhuma alteração está em andamento. Transferências e os dez cortes acessíveis da Fase 57
+Nenhuma alteração está em andamento. Transferências e os onze cortes acessíveis da Fase 57
 terminaram em pontos seguros e commitados.
 
 ### PRÓXIMA AÇÃO EXATA
@@ -167,9 +168,9 @@ antes de qualquer rollout.
 
 ### Gate do corte local da Fase 57
 
-- 3 testes focados de `app-shell`, 5 de dashboard, 4 de componentes compartilhados e 2 da caixa
+- 3 testes focados de `app-shell`, 5 de dashboard, 4 de componentes compartilhados e 3 da caixa
   administrativa passaram.
-- 66 testes Web passaram em 17 arquivos.
+- 67 testes Web passaram em 17 arquivos.
 - Typecheck, ESLint e build Next.js passaram.
 - `npm audit` encontrou 0 vulnerabilidades.
 - `git diff --check` passou antes dos commits.
@@ -218,10 +219,9 @@ npm run build
 
 - [ ] Com gates verdes e autorização nova, executar merge/push/deploy controlado, validar health,
   migration, Gateway único, duas decisões, outbox e rollback.
-- [ ] Continuar a Fase 57 na superfície administrativa: ampliar o teste de
-  `web/src/components/inbox-workspace.tsx` com RED que impede `inbox_time` bruto no painel detalhado;
-  formatar chaves temporais `_at`/`_time` como `<time dateTime>` quando válidas, sem alterar campos,
-  seleção, decisões, ordem ou dados.
+- [ ] Continuar a Fase 57 no dashboard: ampliar
+  `web/src/app/(command)/dashboard/page.test.tsx` com RED que exige `<time dateTime>` na data de cada
+  pendência administrativa recente; preservar texto, links, status, ordem, filtros e dados.
 - [ ] Consolidar a Fase 58, Design System, sem inventar o trecho ausente do prompt original.
 - [ ] Continuar os blocos restantes do Prompt Master do ecossistema pela ordem da fila oficial.
 
