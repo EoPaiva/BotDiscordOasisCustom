@@ -125,6 +125,313 @@ def test_tag_role_and_panel_settings_have_safe_unconfigured_defaults() -> None:
     assert SettingsService.DEFAULTS["tag_set_role_id"] is None
     assert SettingsService.DEFAULTS["tag_responsible_role_id"] is None
     assert SettingsService.DEFAULTS["tag_expiration_hours"] == 72
+    assert SettingsService.DEFAULTS["tag_outreach_preview_discord_id"] == 395061579101503491
+    assert SettingsService.DEFAULTS["tag_outreach_rollout_approved"] is False
+    assert TagCommands.OUTREACH_INTERVAL_SECONDS == 5
+
+
+@pytest.mark.asyncio
+async def test_tag_outreach_queues_every_registered_choque_member_once(service_bundle):
+    service = TagService(
+        service_bundle["database"],
+        service_bundle["audit"],
+        clock=service_bundle["clock"],
+    )
+    members = service_bundle["members"]
+    for discord_id, status in (
+        (457, "AWAY"),
+        (458, "RESERVE"),
+        (459, "SUSPENDED"),
+        (460, "PENDING"),
+        (461, "DISMISSED"),
+    ):
+        await members.create_or_update(
+            GUILD_ID,
+            discord_id,
+            discord_nick=f"Member {discord_id}",
+            mta_nick=f"Member_{discord_id}",
+            character_id=str(discord_id),
+            unit="BGR",
+            rank_id=None,
+            actor_id=DISCORD_ID,
+        )
+        await service_bundle["database"].execute(
+            "UPDATE members SET status=? WHERE guild_id=? AND discord_id=?",
+            (status, GUILD_ID, discord_id),
+        )
+
+    first = await service.enqueue_registered_member_outreach(GUILD_ID)
+    repeated = await service.enqueue_registered_member_outreach(GUILD_ID)
+    rows = await service_bundle["database"].fetchall(
+        "SELECT discord_id, status FROM tag_member_outreach ORDER BY discord_id"
+    )
+
+    assert first == 4
+    assert repeated == 0
+    assert [(row["discord_id"], row["status"]) for row in rows] == [
+        (DISCORD_ID, "PENDING"),
+        (457, "PENDING"),
+        (458, "PENDING"),
+        (459, "PENDING"),
+    ]
+    assert await service.member_request(GUILD_ID, DISCORD_ID) is None
+
+
+@pytest.mark.asyncio
+async def test_tag_outreach_claims_one_member_and_recovers_after_restart(service_bundle):
+    service = TagService(
+        service_bundle["database"],
+        service_bundle["audit"],
+        clock=service_bundle["clock"],
+    )
+    await service.enqueue_registered_member_outreach(GUILD_ID)
+
+    claimed = await service.claim_next_member_outreach(GUILD_ID)
+    second_claim = await service.claim_next_member_outreach(GUILD_ID)
+
+    assert claimed is not None
+    assert claimed["discord_id"] == DISCORD_ID
+    assert claimed["status"] == "PROCESSING"
+    assert claimed["attempts"] == 1
+    assert second_claim is None
+
+    service_bundle["clock"].advance(300_001)
+    assert await service.recover_member_outreach_claims() == 1
+    recovered = await service.claim_next_member_outreach(GUILD_ID)
+    assert recovered is not None
+    assert recovered["id"] == claimed["id"]
+    assert recovered["attempts"] == 2
+
+
+@pytest.mark.asyncio
+async def test_tag_outreach_preview_is_exactly_once_and_precedes_bulk(service_bundle):
+    service = TagService(
+        service_bundle["database"],
+        service_bundle["audit"],
+        clock=service_bundle["clock"],
+    )
+    preview_id = 395061579101503491
+
+    assert await service.enqueue_member_outreach_preview(GUILD_ID, preview_id)
+    assert not await service.enqueue_member_outreach_preview(GUILD_ID, preview_id)
+    preview = await service.claim_next_member_outreach(GUILD_ID, preview_only=True)
+    assert preview is not None
+    assert preview["discord_id"] == preview_id
+    assert preview["is_preview"] == 1
+    assert not await service.member_outreach_preview_delivered(GUILD_ID)
+    assert await service.mark_member_outreach_delivered(
+        int(preview["id"]), delivery_message_id=901
+    )
+    assert await service.member_outreach_preview_delivered(GUILD_ID)
+
+    assert await service.enqueue_registered_member_outreach(GUILD_ID) == 1
+    mass = await service.claim_next_member_outreach(GUILD_ID, preview_only=False)
+    assert mass is not None
+    assert mass["discord_id"] == DISCORD_ID
+    assert mass["is_preview"] == 0
+
+
+@pytest.mark.asyncio
+async def test_tag_outreach_forbidden_is_terminal_but_transient_failure_retries_later(
+    service_bundle,
+):
+    service = TagService(
+        service_bundle["database"],
+        service_bundle["audit"],
+        clock=service_bundle["clock"],
+    )
+    await service.enqueue_registered_member_outreach(GUILD_ID)
+    blocked = await service.claim_next_member_outreach(GUILD_ID)
+    assert blocked is not None
+    assert await service.mark_member_outreach_blocked(
+        int(blocked["id"]), error="O membro não permite mensagens privadas."
+    )
+    assert await service.claim_next_member_outreach(GUILD_ID) is None
+
+    await service_bundle["database"].execute(
+        "UPDATE tag_member_outreach SET status='PENDING', attempts=0 WHERE id=?",
+        (int(blocked["id"]),),
+    )
+    transient = await service.claim_next_member_outreach(GUILD_ID)
+    assert transient is not None
+    assert await service.mark_member_outreach_failed(
+        int(transient["id"]), error="Discord indisponível", retry_after_ms=60_000
+    )
+    assert await service.claim_next_member_outreach(GUILD_ID) is None
+    service_bundle["clock"].advance(60_000)
+    assert await service.claim_next_member_outreach(GUILD_ID) is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_preview", [0, 1])
+async def test_tag_cog_uses_exact_outreach_template_for_preview_and_bulk(
+    monkeypatch, is_preview: int
+) -> None:
+    import cogs.tag_commands as tag_commands
+
+    row = {
+        "id": 81,
+        "guild_id": GUILD_ID,
+        "discord_id": DISCORD_ID,
+        "campaign_key": TagService.MEMBER_OUTREACH_CAMPAIGN,
+        "is_preview": is_preview,
+        "status": "PROCESSING",
+        "attempts": 1,
+    }
+    sent_message = SimpleNamespace(id=901)
+    member = SimpleNamespace(id=DISCORD_ID, send=AsyncMock(return_value=sent_message))
+    guild = SimpleNamespace(
+        id=GUILD_ID,
+        get_member=Mock(return_value=member),
+        fetch_member=AsyncMock(return_value=member),
+    )
+    tags = SimpleNamespace(
+        mark_member_outreach_delivered=AsyncMock(return_value=True),
+        mark_member_outreach_blocked=AsyncMock(),
+        mark_member_outreach_failed=AsyncMock(),
+    )
+    settings = SimpleNamespace(
+        get_panel=AsyncMock(return_value={"channel_id": 111, "message_id": 222})
+    )
+    audit = SimpleNamespace(record=AsyncMock())
+    cog = object.__new__(TagCommands)
+    cog.bot = SimpleNamespace(config=SimpleNamespace(branding=SimpleNamespace(footer="CHOQUE")))
+    cog.services = SimpleNamespace(tags=tags, settings=settings, audit=audit)
+    embed = SimpleNamespace(set_footer=Mock())
+    monkeypatch.setattr(tag_commands, "build_member_panel_embed", AsyncMock(return_value=embed))
+
+    delivered = await cog.deliver_member_outreach(guild, row)
+
+    assert delivered is True
+    member.send.assert_awaited_once()
+    assert member.send.await_args.args == (
+        "🏷️ **A Central de Tags do CHOQUE está disponível para você.**",
+    )
+    kwargs = member.send.await_args.kwargs
+    assert kwargs["allowed_mentions"].everyone is False
+    assert kwargs["allowed_mentions"].users is False
+    assert kwargs["allowed_mentions"].roles is False
+    assert kwargs["view"].children[0].url == (
+        f"https://discord.com/channels/{GUILD_ID}/111/222"
+    )
+    embed.set_footer.assert_called_once_with(
+        text="CHOQUE • Aviso da Central de Tags • central-tags-v1"
+    )
+    tags.mark_member_outreach_delivered.assert_awaited_once_with(81, delivery_message_id=901)
+    audit.record.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_tag_outreach_worker_processes_at_most_one_member_per_interval() -> None:
+    guild = SimpleNamespace(id=GUILD_ID)
+    outreach = {"id": 81, "guild_id": GUILD_ID, "discord_id": DISCORD_ID}
+    async def get_setting(_guild_id: int, key: str) -> object:
+        return {
+            "tag_dm_enabled": True,
+            "tag_outreach_preview_discord_id": 395061579101503491,
+            "tag_outreach_rollout_approved": True,
+        }[key]
+
+    settings = SimpleNamespace(
+        get=AsyncMock(side_effect=get_setting),
+        get_panel=AsyncMock(return_value={"channel_id": 111, "message_id": 222}),
+    )
+    tags = SimpleNamespace(
+        recover_member_outreach_claims=AsyncMock(return_value=0),
+        enqueue_member_outreach_preview=AsyncMock(return_value=False),
+        member_outreach_preview_delivered=AsyncMock(return_value=True),
+        enqueue_registered_member_outreach=AsyncMock(return_value=2),
+        claim_next_member_outreach=AsyncMock(return_value=outreach),
+    )
+    cog = object.__new__(TagCommands)
+    cog.bot = SimpleNamespace(check_mode=False, guilds=[guild, SimpleNamespace(id=999)])
+    cog.services = SimpleNamespace(settings=settings, tags=tags)
+    cog.deliver_member_outreach = AsyncMock(return_value=True)
+
+    processed = await cog.process_member_outreach_once()
+
+    assert processed is True
+    tags.enqueue_member_outreach_preview.assert_awaited_once_with(
+        GUILD_ID, 395061579101503491
+    )
+    tags.enqueue_registered_member_outreach.assert_awaited_once_with(GUILD_ID)
+    tags.claim_next_member_outreach.assert_awaited_once_with(
+        GUILD_ID, preview_only=False
+    )
+    cog.deliver_member_outreach.assert_awaited_once_with(guild, outreach)
+
+
+@pytest.mark.asyncio
+async def test_tag_outreach_worker_delivers_preview_before_queuing_any_bulk_member() -> None:
+    guild = SimpleNamespace(id=GUILD_ID)
+    preview = {
+        "id": 80,
+        "guild_id": GUILD_ID,
+        "discord_id": 395061579101503491,
+        "is_preview": 1,
+    }
+
+    async def get_setting(_guild_id: int, key: str) -> object:
+        return {
+            "tag_dm_enabled": True,
+            "tag_outreach_preview_discord_id": 395061579101503491,
+        }[key]
+
+    settings = SimpleNamespace(
+        get=AsyncMock(side_effect=get_setting),
+        get_panel=AsyncMock(return_value={"channel_id": 111, "message_id": 222}),
+    )
+    tags = SimpleNamespace(
+        recover_member_outreach_claims=AsyncMock(return_value=0),
+        enqueue_member_outreach_preview=AsyncMock(return_value=True),
+        member_outreach_preview_delivered=AsyncMock(return_value=False),
+        enqueue_registered_member_outreach=AsyncMock(),
+        claim_next_member_outreach=AsyncMock(return_value=preview),
+    )
+    cog = object.__new__(TagCommands)
+    cog.bot = SimpleNamespace(check_mode=False, guilds=[guild])
+    cog.services = SimpleNamespace(settings=settings, tags=tags)
+    cog.deliver_member_outreach = AsyncMock(return_value=True)
+
+    assert await cog.process_member_outreach_once() is True
+    tags.claim_next_member_outreach.assert_awaited_once_with(
+        GUILD_ID, preview_only=True
+    )
+    cog.deliver_member_outreach.assert_awaited_once_with(guild, preview)
+    tags.enqueue_registered_member_outreach.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tag_outreach_stops_after_preview_until_owner_approval() -> None:
+    guild = SimpleNamespace(id=GUILD_ID)
+
+    async def get_setting(_guild_id: int, key: str) -> object:
+        return {
+            "tag_dm_enabled": True,
+            "tag_outreach_preview_discord_id": 395061579101503491,
+            "tag_outreach_rollout_approved": False,
+        }[key]
+
+    settings = SimpleNamespace(
+        get=AsyncMock(side_effect=get_setting),
+        get_panel=AsyncMock(return_value={"channel_id": 111, "message_id": 222}),
+    )
+    tags = SimpleNamespace(
+        recover_member_outreach_claims=AsyncMock(return_value=0),
+        enqueue_member_outreach_preview=AsyncMock(return_value=False),
+        member_outreach_preview_delivered=AsyncMock(return_value=True),
+        enqueue_registered_member_outreach=AsyncMock(),
+        claim_next_member_outreach=AsyncMock(),
+    )
+    cog = object.__new__(TagCommands)
+    cog.bot = SimpleNamespace(check_mode=False, guilds=[guild])
+    cog.services = SimpleNamespace(settings=settings, tags=tags)
+    cog.deliver_member_outreach = AsyncMock()
+
+    assert await cog.process_member_outreach_once() is False
+    tags.enqueue_registered_member_outreach.assert_not_awaited()
+    tags.claim_next_member_outreach.assert_not_awaited()
+    cog.deliver_member_outreach.assert_not_awaited()
 
 
 @pytest.mark.asyncio

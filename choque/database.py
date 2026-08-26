@@ -4534,6 +4534,35 @@ CREATE INDEX ix_tag_requests_assignment_delivery
 ON tag_requests(guild_id, status, assignment_delivery_status, claimed_at, id);
 """
 
+MIGRATION_054 = """
+-- Campanha privada da Central de Tags para todo vínculo CHOQUE aprovado.
+-- A fila é separada das solicitações: receber o informativo não cria pedido
+-- nem concede cargo. A chave da campanha garante um único envio por membro.
+CREATE TABLE tag_member_outreach (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    member_id INTEGER REFERENCES members(id) ON DELETE RESTRICT,
+    discord_id INTEGER NOT NULL,
+    campaign_key TEXT NOT NULL,
+    is_preview INTEGER NOT NULL DEFAULT 0 CHECK (is_preview IN (0,1)),
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING','PROCESSING','DELIVERED','FAILED','BLOCKED')
+    ),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts>=0),
+    available_at INTEGER NOT NULL,
+    claimed_at INTEGER,
+    delivered_at INTEGER,
+    dm_message_id INTEGER,
+    last_error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (guild_id, discord_id, campaign_key)
+);
+
+CREATE INDEX ix_tag_member_outreach_delivery
+ON tag_member_outreach(status, available_at, id);
+"""
+
 MIGRATIONS = (
     (1, MIGRATION_001),
     (2, MIGRATION_002),
@@ -4588,6 +4617,7 @@ MIGRATIONS = (
     (51, MIGRATION_051),
     (52, MIGRATION_052),
     (53, MIGRATION_053),
+    (54, MIGRATION_054),
 )
 
 

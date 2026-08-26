@@ -103,6 +103,8 @@ class SettingsService:
         "tag_expiration_hours": 72,
         "tag_call_cooldown_seconds": 300,
         "tag_dm_enabled": True,
+        "tag_outreach_preview_discord_id": 395061579101503491,
+        "tag_outreach_rollout_approved": False,
         "status_public_channel_id": None,
         "status_admin_channel_id": None,
         "status_notification_channel_id": None,

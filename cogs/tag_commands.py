@@ -91,6 +91,21 @@ class ErrorModal(discord.ui.Modal):
         await respond_error(interaction, error)
 
 
+class TagMemberOutreachView(discord.ui.View):
+    """Link-only DM control; receiving it cannot mutate tag state."""
+
+    def __init__(self, panel_url: str) -> None:
+        super().__init__(timeout=None)
+        self.add_item(
+            discord.ui.Button(
+                label="Abrir Central de Tags",
+                emoji="🏷️",
+                style=discord.ButtonStyle.link,
+                url=panel_url,
+            )
+        )
+
+
 def request_embed(bot: ChoqueBot, request: dict[str, object]) -> discord.Embed:
     status = str(request["status"])
     waiting_role_scan = str(request.get("intake_source") or "MEMBER_REQUEST") == (
@@ -1510,6 +1525,8 @@ class TagRequestCardView(ErrorView):
 
 
 class TagCommands(commands.Cog):
+    OUTREACH_INTERVAL_SECONDS = 5
+
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = cast("ChoqueBot", bot)
         self.services = self.bot.services
@@ -1519,9 +1536,11 @@ class TagCommands(commands.Cog):
         self.bot.add_view(TagAdminPanelView())
         if not self.bot.check_mode:
             self.confirmation_retry.start()
+            self.member_outreach_delivery.start()
 
     def cog_unload(self) -> None:
         self.confirmation_retry.cancel()
+        self.member_outreach_delivery.cancel()
 
     async def require_member_request_configuration(self, guild: discord.Guild) -> None:
         """Reject a request before it could enter an unsynchronizable queue."""
@@ -1958,6 +1977,168 @@ class TagCommands(commands.Cog):
         for request in await self.services.tags.pending_confirmation_notifications(guild.id):
             delivered += int(await self.deliver_confirmation_notification(guild, request))
         return delivered
+
+    async def _find_member_outreach_message(
+        self, member: discord.Member, campaign_key: str
+    ) -> discord.Message | None:
+        """Recover a send that succeeded immediately before the database commit."""
+        normalized_campaign = campaign_key.strip()
+        if not normalized_campaign:
+            return None
+        marker = f"Aviso da Central de Tags • {normalized_campaign}"
+        dm_channel = await member.create_dm()
+        async for message in dm_channel.history(limit=50):
+            if self.bot.user is not None and int(message.author.id) != int(self.bot.user.id):
+                continue
+            if any(marker in str(embed.footer.text or "") for embed in message.embeds):
+                return message
+        return None
+
+    async def deliver_member_outreach(
+        self, guild: discord.Guild, outreach: dict[str, object]
+    ) -> bool:
+        """Deliver one durable campaign DM without creating a tag request."""
+        outreach_id = int(outreach["id"])
+        target_id = int(outreach["discord_id"])
+        campaign_key = str(
+            outreach.get("campaign_key") or TagService.MEMBER_OUTREACH_CAMPAIGN
+        )
+        panel = await self.services.settings.get_panel(guild.id, "TAG_MEMBER")
+        if not panel:
+            await self.services.tags.mark_member_outreach_failed(
+                outreach_id,
+                error="Painel da Central de Tags ainda não publicado.",
+                retry_after_ms=60_000,
+            )
+            return False
+        panel_url = (
+            f"https://discord.com/channels/{guild.id}/"
+            f"{int(panel['channel_id'])}/{int(panel['message_id'])}"
+        )
+        try:
+            member = guild.get_member(target_id)
+            if member is None:
+                try:
+                    member = await guild.fetch_member(target_id)
+                except discord.NotFound:
+                    if int(outreach.get("is_preview") or 0) != 1:
+                        raise
+                    member = await self.bot.fetch_user(target_id)
+            existing = None
+            if int(outreach.get("attempts") or 0) > 1:
+                existing = await self._find_member_outreach_message(member, campaign_key)
+            if existing is not None:
+                message = existing
+            else:
+                embed = await build_member_panel_embed(self.bot, guild.id)
+                footer = str(getattr(self.bot.config.branding, "footer", "CHOQUE - BGR"))
+                embed.set_footer(
+                    text=f"{footer} • Aviso da Central de Tags • {campaign_key}"
+                )
+                message = await member.send(
+                    "🏷️ **A Central de Tags do CHOQUE está disponível para você.**",
+                    embed=embed,
+                    view=TagMemberOutreachView(panel_url),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+        except (discord.NotFound, discord.Forbidden) as exc:
+            blocked = await self.services.tags.mark_member_outreach_blocked(
+                outreach_id,
+                error=(
+                    "O membro não está mais no servidor."
+                    if isinstance(exc, discord.NotFound)
+                    else "O membro não permite mensagens privadas."
+                ),
+            )
+            if blocked:
+                await self.services.audit.record(
+                    guild.id,
+                    "TAG_MEMBER_OUTREACH_BLOCKED",
+                    target_id=target_id,
+                    reason=str(exc)[:500],
+                    after={"outreach_id": outreach_id},
+                )
+            return False
+        except discord.DiscordException as exc:
+            attempt = max(1, int(outreach.get("attempts") or 1))
+            retry_after_ms = min(300_000, 30_000 * 2 ** min(attempt - 1, 4))
+            await self.services.tags.mark_member_outreach_failed(
+                outreach_id,
+                error=str(exc),
+                retry_after_ms=retry_after_ms,
+            )
+            LOGGER.warning("Falha temporária no aviso de tag %s: %s", outreach_id, exc)
+            return False
+        delivered = await self.services.tags.mark_member_outreach_delivered(
+            outreach_id, delivery_message_id=int(message.id)
+        )
+        if delivered:
+            await self.services.audit.record(
+                guild.id,
+                "TAG_MEMBER_OUTREACH_DELIVERED",
+                target_id=target_id,
+                after={"outreach_id": outreach_id, "message_id": int(message.id)},
+            )
+        return delivered
+
+    async def process_member_outreach_once(self) -> bool:
+        """Send at most one campaign DM globally during this pacing interval."""
+        if self.bot.check_mode:
+            return False
+        await self.services.tags.recover_member_outreach_claims()
+        for guild in self.bot.guilds:
+            if not await self.services.settings.get(guild.id, "tag_dm_enabled"):
+                continue
+            if not await self.services.settings.get_panel(guild.id, "TAG_MEMBER"):
+                continue
+            preview_discord_id = int(
+                await self.services.settings.get(
+                    guild.id, "tag_outreach_preview_discord_id"
+                )
+                or 0
+            )
+            await self.services.tags.enqueue_member_outreach_preview(
+                guild.id, preview_discord_id
+            )
+            preview_delivered = await self.services.tags.member_outreach_preview_delivered(
+                guild.id
+            )
+            if not preview_delivered:
+                outreach = await self.services.tags.claim_next_member_outreach(
+                    guild.id, preview_only=True
+                )
+                if outreach is None:
+                    continue
+                await self.deliver_member_outreach(guild, outreach)
+                return True
+            rollout_approved = bool(
+                await self.services.settings.get(
+                    guild.id, "tag_outreach_rollout_approved"
+                )
+            )
+            if not rollout_approved:
+                continue
+            await self.services.tags.enqueue_registered_member_outreach(guild.id)
+            outreach = await self.services.tags.claim_next_member_outreach(
+                guild.id, preview_only=False
+            )
+            if outreach is None:
+                continue
+            await self.deliver_member_outreach(guild, outreach)
+            return True
+        return False
+
+    @tasks.loop(seconds=OUTREACH_INTERVAL_SECONDS)
+    async def member_outreach_delivery(self) -> None:
+        try:
+            await self.process_member_outreach_once()
+        except Exception:
+            LOGGER.exception("Falha ao processar fila privada da Central de Tags")
+
+    @member_outreach_delivery.before_loop
+    async def before_member_outreach_delivery(self) -> None:
+        await self.bot.wait_until_ready()
+        await self.services.tags.recover_member_outreach_claims()
 
     async def expire_due_requests(self, guild: discord.Guild) -> list[int]:
         """Apply the guild's durable waiting limit during normal recovery.

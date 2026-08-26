@@ -30,6 +30,9 @@ class TagService:
             "PENDENCIA",
         }
     )
+    MEMBER_OUTREACH_CAMPAIGN = "central-tags-v1"
+    MEMBER_OUTREACH_ELIGIBLE_STATUSES = ("ACTIVE", "AWAY", "RESERVE", "SUSPENDED")
+    MEMBER_OUTREACH_MAX_ATTEMPTS = 8
 
     def __init__(
         self,
@@ -1298,6 +1301,223 @@ class TagService:
             )
             await self._enqueue_role_sync(connection, completed, requested_by=0, now=now)
             return self._row(completed)
+
+    async def enqueue_registered_member_outreach(
+        self,
+        guild_id: int,
+        *,
+        campaign_key: str = MEMBER_OUTREACH_CAMPAIGN,
+    ) -> int:
+        """Queue one informational DM for every approved CHOQUE membership.
+
+        Outreach is deliberately independent from ``tag_requests``. Merely
+        receiving the campaign cannot create a request or change Discord roles.
+        """
+        normalized_campaign = campaign_key.strip()
+        if not normalized_campaign:
+            raise ValidationError("A campanha de aviso da Central de Tags é obrigatória.")
+        now = self.clock()
+        placeholders = ",".join("?" for _ in self.MEMBER_OUTREACH_ELIGIBLE_STATUSES)
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                f"""
+                INSERT OR IGNORE INTO tag_member_outreach(
+                    guild_id, member_id, discord_id, campaign_key, is_preview, status,
+                    attempts, available_at, created_at, updated_at
+                )
+                SELECT guild_id, id, discord_id, ?, 0, 'PENDING', 0, ?, ?, ?
+                FROM members
+                WHERE guild_id=? AND status IN ({placeholders})
+                ORDER BY id
+                """,
+                (
+                    normalized_campaign,
+                    now,
+                    now,
+                    now,
+                    guild_id,
+                    *self.MEMBER_OUTREACH_ELIGIBLE_STATUSES,
+                ),
+            )
+            return cursor.rowcount
+
+    async def enqueue_member_outreach_preview(
+        self,
+        guild_id: int,
+        preview_discord_id: int,
+        *,
+        campaign_key: str = MEMBER_OUTREACH_CAMPAIGN,
+    ) -> bool:
+        """Queue the owner's exact canary before any bulk recipient."""
+        if preview_discord_id <= 0:
+            raise ValidationError("O Discord ID da prévia precisa ser válido.")
+        normalized_campaign = campaign_key.strip()
+        if not normalized_campaign:
+            raise ValidationError("A campanha de aviso da Central de Tags é obrigatória.")
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                INSERT OR IGNORE INTO tag_member_outreach(
+                    guild_id, member_id, discord_id, campaign_key, is_preview,
+                    status, attempts, available_at, created_at, updated_at
+                ) VALUES (
+                    ?, (SELECT id FROM members WHERE guild_id=? AND discord_id=?),
+                    ?, ?, 1, 'PENDING', 0, ?, ?, ?
+                )
+                """,
+                (
+                    guild_id,
+                    guild_id,
+                    preview_discord_id,
+                    preview_discord_id,
+                    normalized_campaign,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    async def member_outreach_preview_delivered(
+        self,
+        guild_id: int,
+        *,
+        campaign_key: str = MEMBER_OUTREACH_CAMPAIGN,
+    ) -> bool:
+        row = await self.database.fetchone(
+            """
+            SELECT status FROM tag_member_outreach
+            WHERE guild_id=? AND campaign_key=? AND is_preview=1
+            ORDER BY id LIMIT 1
+            """,
+            (guild_id, campaign_key),
+        )
+        return row is not None and str(row["status"]) == "DELIVERED"
+
+    async def recover_member_outreach_claims(
+        self, *, stale_after_ms: int = 300_000
+    ) -> int:
+        """Return abandoned DM claims to the queue after a restart."""
+        if stale_after_ms <= 0:
+            raise ValidationError("O tempo de recuperação precisa ser positivo.")
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE tag_member_outreach
+                SET status='FAILED', claimed_at=NULL, available_at=?,
+                    last_error='Recuperado após reinício do bot', updated_at=?
+                WHERE status='PROCESSING' AND claimed_at IS NOT NULL AND claimed_at<=?
+                """,
+                (now, now, now - int(stale_after_ms)),
+            )
+            return cursor.rowcount
+
+    async def claim_next_member_outreach(
+        self, guild_id: int, *, preview_only: bool | None = None
+    ) -> dict[str, object] | None:
+        """Atomically claim the oldest eligible DM; at most one caller wins."""
+        now = self.clock()
+        placeholders = ",".join("?" for _ in self.MEMBER_OUTREACH_ELIGIBLE_STATUSES)
+        preview_clause = "" if preview_only is None else "AND o.is_preview=?"
+        preview_params: tuple[int, ...] = () if preview_only is None else (int(preview_only),)
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                f"""
+                SELECT o.id
+                FROM tag_member_outreach o
+                LEFT JOIN members m ON m.id=o.member_id AND m.guild_id=o.guild_id
+                WHERE o.guild_id=? AND o.status IN ('PENDING','FAILED')
+                  AND o.available_at<=? AND o.attempts<?
+                  AND (o.is_preview=1 OR m.status IN ({placeholders}))
+                  {preview_clause}
+                ORDER BY o.available_at, o.id LIMIT 1
+                """,
+                (
+                    guild_id,
+                    now,
+                    self.MEMBER_OUTREACH_MAX_ATTEMPTS,
+                    *self.MEMBER_OUTREACH_ELIGIBLE_STATUSES,
+                    *preview_params,
+                ),
+            )
+            candidate = await cursor.fetchone()
+            if candidate is None:
+                return None
+            outreach_id = int(candidate["id"])
+            cursor = await connection.execute(
+                """
+                UPDATE tag_member_outreach
+                SET status='PROCESSING', attempts=attempts+1, claimed_at=?,
+                    last_error=NULL, updated_at=?
+                WHERE id=? AND status IN ('PENDING','FAILED') AND available_at<=?
+                """,
+                (now, now, outreach_id, now),
+            )
+            if cursor.rowcount != 1:
+                return None
+            cursor = await connection.execute(
+                "SELECT * FROM tag_member_outreach WHERE id=?", (outreach_id,)
+            )
+            claimed = await cursor.fetchone()
+            assert claimed is not None
+            return self._row(claimed)
+
+    async def mark_member_outreach_delivered(
+        self, outreach_id: int, *, delivery_message_id: int
+    ) -> bool:
+        now = self.clock()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE tag_member_outreach
+                SET status='DELIVERED', claimed_at=NULL, delivered_at=?,
+                    dm_message_id=?, last_error=NULL, updated_at=?
+                WHERE id=? AND status='PROCESSING'
+                """,
+                (now, delivery_message_id, now, outreach_id),
+            )
+            return cursor.rowcount == 1
+
+    async def mark_member_outreach_blocked(self, outreach_id: int, *, error: str) -> bool:
+        """Treat forbidden/absent recipients as terminal to avoid invalid-request loops."""
+        now = self.clock()
+        normalized_error = error.strip()[:500] or "Mensagem privada indisponível"
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE tag_member_outreach
+                SET status='BLOCKED', claimed_at=NULL, last_error=?, updated_at=?
+                WHERE id=? AND status='PROCESSING'
+                """,
+                (normalized_error, now, outreach_id),
+            )
+            return cursor.rowcount == 1
+
+    async def mark_member_outreach_failed(
+        self,
+        outreach_id: int,
+        *,
+        error: str,
+        retry_after_ms: int,
+    ) -> bool:
+        """Return a transient Discord failure to the queue after a bounded delay."""
+        if retry_after_ms <= 0:
+            raise ValidationError("O intervalo de nova tentativa precisa ser positivo.")
+        now = self.clock()
+        normalized_error = error.strip()[:500] or "Falha temporária do Discord"
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE tag_member_outreach
+                SET status='FAILED', claimed_at=NULL, available_at=?,
+                    last_error=?, updated_at=?
+                WHERE id=? AND status='PROCESSING'
+                """,
+                (now + int(retry_after_ms), normalized_error, now, outreach_id),
+            )
+            return cursor.rowcount == 1
 
     async def pending_confirmation_notifications(
         self, guild_id: int, *, limit: int = 50
