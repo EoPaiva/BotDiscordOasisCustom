@@ -805,8 +805,10 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     `098fea0` entrega o GREEN. O terceiro corte tornou todas as faixas `MetricStrip` listas de
     descrição com pares semânticos `<dt>/<dd>`, sem alterar visual ou valores; `093a1cf` preserva o
     RED e `d0eecb6` entrega o GREEN. Gate consolidado: 8 testes focados, 60 testes web, `npm audit`
-    sem vulnerabilidades, typecheck, lint e build. Os cortes permanecem somente locais e não
-    publicados.
+    sem vulnerabilidades, typecheck, lint e build. O quarto corte expôs a fila operacional FIFO como
+    `<ol>` nomeada, com itens `<li>`, preservando posição, duração e visual; `03b2bd6` registra o RED
+    e `ff86f4e` entrega o GREEN. Gate atual: 9 testes focados, 61 testes web, typecheck, lint e build.
+    Os cortes permanecem somente locais e não publicados.
 
 58. ⏳ **Prompt Master — Identidade Visual / Design System CHOQUE — registrado na fila.**
     Fonte recebida: `C:\Users\mpaii\.codex\attachments\8f7db861-0f81-4655-a0fc-b3fc90133b12\pasted-text.txt`,

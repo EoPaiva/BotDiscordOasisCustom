@@ -1241,3 +1241,13 @@ Fora do escopo atual: eventos, API e integração MTA.
 - TDD: `093a1cf` registra o contrato RED e `d0eecb6` entrega o GREEN.
 - Gate consolidado do portal: 8 testes focados, **60 testes web**, `npm audit` sem vulnerabilidades,
   typecheck, ESLint e build Next.js. Nenhuma ação de produção foi executada.
+
+# Site CHOQUE — fila FIFO semântica pronta localmente em 2026-08-26
+
+- A fila operacional do dashboard agora usa `<ol>` com nome acessível e um `<li>` por militar. A
+  semântica comunica que posição é relevante, consistente com a regra FIFO já exibida.
+- Número, nome, duração, limite de oito entradas, ordem do backend e visual existente foram
+  preservados; o CSS apenas neutraliza estilos nativos da lista.
+- TDD: `03b2bd6` registra o contrato RED e `ff86f4e` entrega o GREEN.
+- Gate consolidado do portal: 9 testes focados, **61 testes web**, typecheck, ESLint e build Next.js.
+  Nenhuma ação de produção foi executada.

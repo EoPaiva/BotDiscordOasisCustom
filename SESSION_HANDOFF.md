@@ -5,12 +5,12 @@
 
 ## Handoff
 
-**Última atualização:** 2026-08-26 15:48 -03:00
+**Última atualização:** 2026-08-26 15:50 -03:00
 
 **Branch atual:** `codex/phase-b-transfers`
 
 **Último commit funcional:**
-`d0eecb6` — `fix: expose semantic command metrics`
+`ff86f4e` — `fix: expose ordered patrol queue`
 
 **Commit do protocolo:** este arquivo pertence ao commit de documentação imediatamente posterior;
 confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferência impossível.
@@ -44,8 +44,8 @@ O protocolo de continuidade foi instalado na raiz. Depois, a Fase 57 avançou em
 Centro de Comando: `2ca8770`/`20d4153` entregam o drawer móvel acessível;
 `5e36506`/`098fea0` fazem o cabeçalho usar o `generated_at` real da API em um elemento `<time>`, em
 vez do relógio do render; `093a1cf`/`d0eecb6` expõem todas as faixas de métricas como pares
-semânticos `<dt>/<dd>`, preservando visual e conteúdo. Nenhum contrato, URL, RBAC, API ou regra de
-negócio foi alterado.
+semânticos `<dt>/<dd>`, preservando visual e conteúdo; `03b2bd6`/`ff86f4e` tornam a fila FIFO uma
+lista ordenada acessível. Nenhum contrato, URL, RBAC, API ou regra de negócio foi alterado.
 
 ### Ação em andamento
 
@@ -160,8 +160,8 @@ antes de qualquer rollout.
 
 ### Gate do corte local da Fase 57
 
-- 3 testes focados de `app-shell`, 1 de dashboard e 4 de componentes compartilhados passaram.
-- 60 testes Web passaram.
+- 3 testes focados de `app-shell`, 2 de dashboard e 4 de componentes compartilhados passaram.
+- 61 testes Web passaram.
 - Typecheck, ESLint e build Next.js passaram.
 - `npm audit` encontrou 0 vulnerabilidades.
 - `git diff --check` passou antes dos commits.
@@ -211,8 +211,9 @@ npm run build
 - [ ] Com gates verdes e autorização nova, executar merge/push/deploy controlado, validar health,
   migration, Gateway único, duas decisões, outbox e rollback.
 - [ ] Continuar a Fase 57 em outro corte local: ampliar
-  `web/src/app/(command)/dashboard/page.test.tsx` com teste RED que exige a fila FIFO em `<ol>/<li>`;
-  depois ajustar somente a marcação de `queue-list` e o CSS necessário, sem alterar ordem ou dados.
+  `web/src/app/(command)/dashboard/page.test.tsx` com teste RED que exige `inbox-summary` como lista
+  semântica quando `view_inbox` estiver ativo; depois ajustar somente marcação/CSS, sem alterar links,
+  filtros, ordem ou dados.
 - [ ] Consolidar a Fase 58, Design System, sem inventar o trecho ausente do prompt original.
 - [ ] Continuar os blocos restantes do Prompt Master do ecossistema pela ordem da fila oficial.
 
@@ -240,7 +241,7 @@ o rollout depende de gates verdes e de um novo “pode publicar” explícito.
 - Nenhuma variável local foi lida, impressa ou copiada.
 - O protocolo e os cortes da Fase 57 acrescentaram `4a5faba`, `2ca8770`, `20d4153`, `5e36506`,
   `098fea0`, `093a1cf` e `d0eecb6`; confirmar o hash do commit documental final com
-  `git log -1 --oneline`.
+  `git log -1 --oneline`. O corte FIFO acrescentou `03b2bd6` e `ff86f4e`.
 - Um cache antigo de build foi movido para `web/.next-stale-20260826-1542`. A exclusão autorizada
   removeu seu conteúdo comum, mas o Windows/OneDrive reteve cinco diretórios vazios/reparse por ACL;
   eles não aparecem no Git e não afetam build. Não alterar ACL do workspace para removê-los.
