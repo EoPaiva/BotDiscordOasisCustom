@@ -1438,3 +1438,16 @@ Fora do escopo atual: eventos, API e integração MTA.
   `dpl_DPCNG8jUHVzxVzFjncvqzF5CK9Js` ficou `READY`; `/login` e `/status` responderam 200, CSP foi
   validado no alias público e o gate visual passou novamente em produção. Smoke humano de sessão e
   leitor de tela não foi apresentado como concluído.
+
+# Fase 57 — duração semântica da fila FIFO publicada em 2026-08-27
+
+- A duração visível de espera da fila operacional continua com o mesmo cálculo e texto, mas agora é
+  exposta como `<time dateTime="PT…">`, permitindo interpretação automática sem alterar ordem FIFO,
+  API, RBAC ou regra de negócio.
+- TDD `e6b26ae`/`2216250`. Gate focal: 5 testes do dashboard. Gates completos: **91 testes web em 20
+  arquivos**, lint, typecheck, build, `npm audit` sem vulnerabilidades e **8 E2E aprovados**, com 1
+  cenário visual Firefox intencionalmente ignorado.
+- `origin/main` e `private/main` receberam o corte. O deploy Vercel
+  `dpl_8ZDW7nFBeN8FAXcWVpDjnPhpRMtW` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
+  estrito permaneceu ativo. O comportamento autenticado e o leitor de tela real continuam sujeitos
+  a smoke humano separado.

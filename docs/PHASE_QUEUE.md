@@ -825,10 +825,13 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     segundo corte expõe datas das pendências recentes do dashboard em `<time dateTime>` e
     centraliza o formatador ISO defensivo; `c5f7e2c` registra o RED e `88dde3a` entrega o GREEN. O
     décimo terceiro corte mantém a duração visual das patrulhas e a expõe como duração ISO 8601 em
-    `<time dateTime="PT…">`; `9baa176` registra o RED e `78c63d4` entrega o GREEN. Gate deste corte:
-    oito testes focados; gate consolidado: 82 testes web em 19 arquivos, lint, typecheck e build. Os cortes foram integrados
-    à `main` e publicados no portal no deploy `dpl_eZ6MKwqMesq5YDYQbK743DbC7iys`, `READY` em
-    2026-08-27.
+    `<time dateTime="PT…">`; `9baa176` registra o RED e `78c63d4` entrega o GREEN. O décimo quarto
+    corte aplica o mesmo contrato à espera da fila FIFO, preservando texto, cálculo e ordenação;
+    `e6b26ae` registra o RED e `2216250` entrega o GREEN. Gate consolidado atual: 91 testes web em 20
+    arquivos, lint, typecheck, build, `npm audit` sem vulnerabilidades e 8 E2E aprovados com 1 cenário
+    visual Firefox intencionalmente ignorado. Os cortes foram integrados à `main` e o mais recente
+    foi publicado no deploy `dpl_8ZDW7nFBeN8FAXcWVpDjnPhpRMtW`, `READY` em 2026-08-27; `/login` e
+    `/status` responderam HTTP 200 no alias público.
 
 58. ✅ **Prompt Master — Identidade Visual / Design System CHOQUE — concluída e publicada em 2026-08-27.**
     Fonte recebida: `C:\Users\mpaii\.codex\attachments\8f7db861-0f81-4655-a0fc-b3fc90133b12\pasted-text.txt`,

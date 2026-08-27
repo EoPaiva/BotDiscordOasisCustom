@@ -3,7 +3,27 @@
 > Checkpoint operacional atual. O código e o estado real do repositório prevalecem.
 > Estado estrutural permanente: `PROJECT_STATE.md`.
 
-## 0. Checkpoint mais recente — Fase 58 concluída e publicada
+## 0. Checkpoint mais recente — 14º corte da Fase 57 publicado
+
+**Branch:** `main`. **TDD:** `e6b26ae` registra o contrato RED e `2216250` entrega o GREEN. Ambos
+foram enviados para `origin/main` e `private/main`.
+
+**Entregue:** a duração da fila operacional FIFO agora usa `<time dateTime="PT…">`, preservando
+exatamente texto visível, cálculo, posição, API, RBAC e regras de negócio.
+
+**Gates locais:** 5 testes focados do dashboard; 91 testes em 20 arquivos; lint; typecheck; build;
+`npm audit` sem vulnerabilidades; 8 E2E aprovados e 1 cenário visual Firefox intencionalmente
+ignorado.
+
+**Produção técnica:** deploy Vercel `dpl_8ZDW7nFBeN8FAXcWVpDjnPhpRMtW`, `READY` em 2026-08-27,
+com alias `choquebgr.online`. `/login` e `/status` responderam HTTP 200 e o CSP estrito permaneceu
+ativo. Isso é smoke técnico; sessão autenticada e leitor de tela real continuam validações humanas
+distintas.
+
+**Próxima ação exata:** selecionar e executar o próximo corte incompleto da Fase 57 e, depois,
+retomar a Fase 56. Não avançar para a seção “após os Prompts Masters” antes de encerrar os dois.
+
+## 0.1 Checkpoint anterior — Fase 58 concluída e publicada
 
 **Branch:** `main`. **TDD:** `2f284ba` registra os contratos RED e `c704553` entrega o GREEN.
 Ambos foram enviados para `origin/main` e `private/main`.
@@ -32,7 +52,7 @@ incompleto da Fase 57 e depois da Fase 56. Não avançar para a seção “após
 de encerrar esses dois prompts. O limite incompleto da fonte da Fase 58 após `Status com:` permanece
 registrado e não pode ser inventado.
 
-## 0.1 Checkpoint anterior — aviso privado da Central de Tags
+## 0.2 Checkpoint anterior — aviso privado da Central de Tags
 
 O proprietário pediu que todos os membros CHOQUE já aprovados no cadastro recebam o mesmo aviso
 privado da Central de Tags, em fila lenta. Antes da fila geral, o Discord ID
@@ -73,7 +93,7 @@ Unidades Especiais porque o cargo `COMANDO • ROCAM` possui permissões globais
 responsável é byte a byte igual ao anterior ao deploy; o app, API, Gateway e demais módulos seguem
 online. Não alterar permissões do cargo sem autorização específica.
 
-## 0.2 Checkpoint anterior — Controle de Tags
+## 0.3 Checkpoint anterior — Controle de Tags
 
 Esta seção supersede temporariamente a missão e a próxima ação antigas abaixo. O proprietário pediu
 pausa imediata para trocar de computador; por isso o corte foi fechado em commits locais, sem push,
@@ -126,7 +146,7 @@ confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferên
 Na máquina principal, auditar os blocos locais ADV, Cursos, Transferências e Registro de
 Desligamentos contra o checkout que opera o projeto, validar migrations 49–52 numa cópia do banco e
 preparar um rollout controlado. As implementações locais estão concluídas. Enquanto essa etapa externa permanece
-bloqueada, a Fase 57 pode avançar localmente em cortes pequenos e fecháveis; doze cortes do Centro
+bloqueada, a Fase 57 pode avançar localmente em cortes pequenos e fecháveis; quatorze cortes do Centro
 de Comando estão concluídos e não há código parcial neste computador.
 
 ### Critério de conclusão
@@ -142,7 +162,7 @@ de Comando estão concluídos e não há código parcial neste computador.
 
 ### Última ação concluída
 
-O protocolo de continuidade foi instalado na raiz. Depois, a Fase 57 avançou em doze cortes do
+O protocolo de continuidade foi instalado na raiz. Depois, a Fase 57 avançou em quatorze cortes do
 Centro de Comando: `2ca8770`/`20d4153` entregam o drawer móvel acessível;
 `5e36506`/`098fea0` fazem o cabeçalho usar o `generated_at` real da API em um elemento `<time>`, em
 vez do relógio do render; `093a1cf`/`d0eecb6` expõem todas as faixas de métricas como pares
@@ -156,7 +176,9 @@ ligam esses botões ao painel de decisão nomeado com IDs únicos por instância
 adicionam ISO legível por máquina somente aos horários administrativos válidos; `0a45900`/`f13d2b0`
 formatam também os campos detalhados `_at`/`_time` em `<time dateTime>` e eliminam o timestamp bruto;
 `c5f7e2c`/`88dde3a` aplicam o mesmo contrato temporal às pendências recentes do dashboard e extraem
-o formatador ISO seguro compartilhado. Nenhum contrato, URL, RBAC, API ou regra de negócio foi alterado.
+o formatador ISO seguro compartilhado; `9baa176`/`78c63d4` tornam a duração de patrulha legível por
+máquina; e `e6b26ae`/`2216250` fazem o mesmo com a espera da fila FIFO. Nenhum contrato, URL, RBAC,
+API ou regra de negócio foi alterado.
 
 Em seguida, o Registro de Desligamento de Efetivo foi concluído localmente. `25c593c` e `8d7a323`
 preservam os contratos RED; `1526e03` entrega migration 52, política fechada pelo perfil
@@ -165,7 +187,7 @@ declarativo. Nenhum Discord real ou produção foi tocado.
 
 ### Ação em andamento
 
-Nenhuma alteração está em andamento. Transferências, os doze cortes acessíveis da Fase 57 e o
+Nenhuma alteração está em andamento. Transferências, os quatorze cortes acessíveis da Fase 57 e o
 Registro de Desligamentos terminaram em pontos seguros e commitados.
 
 ### PRÓXIMA AÇÃO EXATA
@@ -284,13 +306,13 @@ selecionadas pelo snapshot canônico `ALTO_COMANDO`; não adicionar seletor ou c
 Esses resultados pertencem ao checkpoint local anterior; devem ser repetidos na máquina principal
 antes de qualquer rollout.
 
-### Gate do corte local da Fase 57
+### Gate atual da Fase 57
 
-- 3 testes focados de `app-shell`, 5 de dashboard, 4 de componentes compartilhados e 3 da caixa
-  administrativa passaram.
-- 67 testes Web passaram em 17 arquivos.
+- 5 testes focados do dashboard passaram.
+- 91 testes Web passaram em 20 arquivos.
 - Typecheck, ESLint e build Next.js passaram.
 - `npm audit` encontrou 0 vulnerabilidades.
+- 8 E2E passaram; 1 cenário visual Firefox foi intencionalmente ignorado.
 - `git diff --check` passou antes dos commits.
 
 ### Validação deste checkpoint documental
@@ -340,6 +362,9 @@ npm run build
 - [x] Fase 57 no dashboard: duração de patrulha publicada em `<time dateTime="PT…">`, preservando
   texto, cálculo, efetivo, ordem e dados. TDD `9baa176`/`78c63d4`; 82 testes web, lint, typecheck e
   build verdes; deploy `dpl_eZ6MKwqMesq5YDYQbK743DbC7iys` `READY` em 2026-08-27.
+- [x] Fase 57 no dashboard: espera da fila FIFO publicada em `<time dateTime="PT…">`, preservando
+  texto, cálculo e ordenação. TDD `e6b26ae`/`2216250`; 91 testes web e gates completos verdes;
+  deploy `dpl_8ZDW7nFBeN8FAXcWVpDjnPhpRMtW` `READY` em 2026-08-27.
 - [x] Fase 58 consolidada e publicada em `2f284ba`/`c704553`, sem inventar o trecho ausente do
   prompt original; deploy `dpl_DPCNG8jUHVzxVzFjncvqzF5CK9Js` `READY`.
 - [ ] Continuar os blocos restantes do Prompt Master do ecossistema pela ordem da fila oficial.
