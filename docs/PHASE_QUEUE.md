@@ -836,9 +836,14 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     décimo oitavo faz o mesmo com a coluna `ENTRADA` da fila FIFO; `c8ebb65` registra o RED e
     `5703f8b` entrega o GREEN. Gate consolidado atual: 93 testes web em 21 arquivos, lint, typecheck,
     build, `npm audit` sem vulnerabilidades e 8 E2E aprovados com 1 cenário visual Firefox
-    intencionalmente ignorado. Os cortes foram integrados à `main`; 17 e 18 foram publicados juntos
-    no deploy `dpl_HqFuYxqJM1LeocWRFDtDfR5rr68s`, `READY` em 2026-08-27; `/login` e `/status`
-    responderam HTTP 200 no alias público.
+    intencionalmente ignorado. O décimo nono corte marca como `<time dateTime>` o início factual do
+    briefing em `/changes`; `85dd140` registra o RED e `07880c4` entrega o GREEN. O vigésimo aplica
+    a mesma semântica à coluna `DATA` da Linha de mudanças; `425a69f` registra o RED e `8200b63`
+    entrega o GREEN. Gate consolidado atual: 95 testes web em 22 arquivos, lint, typecheck, build,
+    `npm audit` sem vulnerabilidades e 8 E2E aprovados com 1 cenário visual Firefox intencionalmente
+    ignorado. Os cortes foram integrados à `main`; 19 e 20 foram publicados juntos no deploy
+    `dpl_8DtbyzAS5p83KmJSwPWwMV24dtF4`, `READY` em 2026-08-27; `/login` e `/status` responderam HTTP
+    200 no alias público.
 
 58. ✅ **Prompt Master — Identidade Visual / Design System CHOQUE — concluída e publicada em 2026-08-27.**
     Fonte recebida: `C:\Users\mpaii\.codex\attachments\8f7db861-0f81-4655-a0fc-b3fc90133b12\pasted-text.txt`,

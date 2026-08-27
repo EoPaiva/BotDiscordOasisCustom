@@ -1487,3 +1487,15 @@ Fora do escopo atual: eventos, API e integração MTA.
 - `origin/main` e `private/main` receberam ambos os cortes. O deploy Vercel agrupado
   `dpl_HqFuYxqJM1LeocWRFDtDfR5rr68s` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
   estrito permaneceu ativo. A página autenticada e o leitor de tela real ainda requerem smoke humano.
+
+# Fase 57 — instantes semânticos da Linha de mudanças publicados em 2026-08-27
+
+- O limite factual “Briefing operacional desde” e a coluna `DATA` de cada evento em `/changes` agora
+  usam `<time dateTime="…">`, preservando frase, pontuação, localização, eventos e ordenação.
+- TDD `85dd140`/`07880c4` para o início do briefing e `425a69f`/`8200b63` para os eventos. Gate
+  focal: 2 testes da Linha de mudanças. Gates agrupados: **95 testes web em 22 arquivos**, lint,
+  typecheck, build, `npm audit` sem vulnerabilidades e **8 E2E aprovados**, com 1 cenário visual
+  Firefox intencionalmente ignorado.
+- `origin/main` e `private/main` receberam ambos os cortes. O deploy Vercel agrupado
+  `dpl_8DtbyzAS5p83KmJSwPWwMV24dtF4` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
+  estrito permaneceu ativo. A página autenticada e o leitor de tela real ainda requerem smoke humano.
