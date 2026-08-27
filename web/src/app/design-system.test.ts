@@ -29,4 +29,11 @@ describe("CHOQUE visual contract", () => {
     expect(styles).toContain("env(safe-area-inset-left)");
     expect(styles).toContain("@media (prefers-reduced-motion: reduce)");
   });
+
+  it("keeps recruitment on the approved green command palette instead of the legacy red campaign", () => {
+    expect(styles).toContain("--recruitment-red: var(--color-action-strong)");
+    expect(styles).toContain("--recruitment-red-active: var(--color-action)");
+    expect(styles).not.toContain("#b11226");
+    expect(styles).not.toContain("#cf1730");
+  });
 });
