@@ -19,7 +19,6 @@ from cogs.config_ui import respond_error
 from cogs.member_sync import sync_member_status_roles
 
 HISTORY_PAGE_SIZE = 10
-DISCIPLINE_MEMBER_PAGE_SIZE = 25
 ADV_PAGE_SIZE = 5
 ADV_SEVERITY_LABELS = {
     "LEVE": ("🟢", "Leve"),
@@ -301,8 +300,8 @@ class DisciplineAdminView(AdminView):
         if not rows:
             raise NotFoundError("Não há membros cadastrados elegíveis para esta ação.")
         await interaction.response.send_message(
-            "Selecione um integrante do efetivo cadastrado:",
-            view=DisciplineMemberSelectView(mode, rows),
+            "Pesquise pelo nome e selecione um integrante do efetivo cadastrado:",
+            view=DisciplineMemberSelectView(mode),
             ephemeral=True,
         )
 
@@ -324,8 +323,8 @@ class DisciplineAdminView(AdminView):
         if not rows:
             raise NotFoundError("Não há membros cadastrados elegíveis para exoneração.")
         await interaction.response.send_message(
-            "Selecione somente um integrante do efetivo cadastrado:",
-            view=ExonerationMemberSelectView(rows),
+            "Pesquise pelo nome e selecione somente um integrante do efetivo cadastrado:",
+            view=ExonerationMemberSelectView(),
             ephemeral=True,
         )
 
@@ -372,29 +371,18 @@ async def discipline_candidates(bot: ChoqueBot, guild: discord.Guild):
     ]
 
 
-class DisciplineMemberSelect(discord.ui.Select):
-    def __init__(self, mode: str, rows: list[dict]) -> None:
+class DisciplineMemberSelect(discord.ui.UserSelect):
+    def __init__(self, mode: str) -> None:
         self.mode = mode
         super().__init__(
-            placeholder="Escolha um membro cadastrado",
+            placeholder="Digite ou pesquise o nome do membro",
             min_values=1,
             max_values=1,
-            options=[
-                discord.SelectOption(
-                    label=str(row["mta_nick"])[:100],
-                    value=str(row["discord_id"]),
-                    description=(
-                        f"{row['rank_name'] or 'Sem patente'} • {row['status']}"
-                    )[:100],
-                    emoji="🎖️",
-                )
-                for row in rows
-            ],
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
         actor = await require_admin(interaction)
-        target_id = int(self.values[0])
+        target_id = int(self.values[0].id)
         target = actor.guild.get_member(target_id)
         if not target:
             raise NotFoundError("O membro selecionado não está mais no servidor.")
@@ -440,37 +428,9 @@ class DisciplineMemberSelect(discord.ui.Select):
 
 
 class DisciplineMemberSelectView(AdminView):
-    def __init__(self, mode: str, rows: list[dict], page: int = 0) -> None:
+    def __init__(self, mode: str) -> None:
         super().__init__(timeout=300)
-        self.mode = mode
-        self.rows = rows
-        self.pages = max(1, math.ceil(len(rows) / DISCIPLINE_MEMBER_PAGE_SIZE))
-        self.page = max(0, min(page, self.pages - 1))
-        start = self.page * DISCIPLINE_MEMBER_PAGE_SIZE
-        self.add_item(
-            DisciplineMemberSelect(
-                mode, rows[start : start + DISCIPLINE_MEMBER_PAGE_SIZE]
-            )
-        )
-        self.previous.disabled = self.page == 0
-        self.next.disabled = self.page >= self.pages - 1
-
-    async def show(self, interaction: discord.Interaction, page: int) -> None:
-        await interaction.response.edit_message(
-            content=(
-                "Selecione um integrante do efetivo cadastrado • "
-                f"página {page + 1}/{self.pages}:"
-            ),
-            view=DisciplineMemberSelectView(self.mode, self.rows, page),
-        )
-
-    @discord.ui.button(label="Anterior", emoji="⬅️", style=discord.ButtonStyle.secondary)
-    async def previous(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self.show(interaction, self.page - 1)
-
-    @discord.ui.button(label="Próxima", emoji="➡️", style=discord.ButtonStyle.secondary)
-    async def next(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self.show(interaction, self.page + 1)
+        self.add_item(DisciplineMemberSelect(mode))
 
 
 async def exoneration_candidates(bot: ChoqueBot, guild: discord.Guild):
@@ -485,7 +445,7 @@ async def exoneration_candidates(bot: ChoqueBot, guild: discord.Guild):
           AND EXISTS (
               SELECT 1 FROM registration_gate_records g
               WHERE g.guild_id=m.guild_id AND g.discord_id=m.discord_id
-                AND g.status='REGISTERED'
+                AND g.status='REGISTERED' AND g.member_id=m.id
           )
         ORDER BY COALESCE(r.level, 0) DESC, m.mta_nick COLLATE NOCASE
         """,
@@ -498,31 +458,29 @@ async def exoneration_candidates(bot: ChoqueBot, guild: discord.Guild):
     ]
 
 
-class ExonerationMemberSelect(discord.ui.Select):
-    def __init__(self, rows: list) -> None:
+class ExonerationMemberSelect(discord.ui.UserSelect):
+    def __init__(self) -> None:
         super().__init__(
-            placeholder="Escolha um membro do efetivo",
+            placeholder="Digite ou pesquise o nome do membro",
             min_values=1,
             max_values=1,
-            options=[
-                discord.SelectOption(
-                    label=str(row["mta_nick"])[:100],
-                    value=str(row["discord_id"]),
-                    description=(
-                        f"{row['rank_name'] or 'Sem patente'} • {row['status']}"
-                    )[:100],
-                    emoji="🎖️",
-                )
-                for row in rows[:25]
-            ],
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
         actor = await require_admin(interaction)
-        target_id = int(self.values[0])
+        target_id = int(self.values[0].id)
         target = actor.guild.get_member(target_id)
-        record = await get_bot(interaction).services.members.get(actor.guild.id, target_id)
-        if not target or target.bot or not record:
+        bot = get_bot(interaction)
+        record = await bot.services.members.get(actor.guild.id, target_id)
+        gate = await bot.services.registration_gate.status(actor.guild.id, target_id)
+        if (
+            not target
+            or target.bot
+            or not record
+            or not gate
+            or str(gate["status"]) != "REGISTERED"
+            or int(gate["member_id"] or 0) != int(record["id"])
+        ):
             raise NotFoundError("O membro selecionado não pertence ao efetivo cadastrado.")
         if str(record["status"]) not in {"ACTIVE", "AWAY", "RESERVE", "SUSPENDED"}:
             raise ConflictError("Este membro não está elegível para exoneração.")
@@ -538,9 +496,9 @@ class ExonerationMemberSelect(discord.ui.Select):
 
 
 class ExonerationMemberSelectView(AdminView):
-    def __init__(self, rows: list) -> None:
+    def __init__(self) -> None:
         super().__init__(timeout=300)
-        self.add_item(ExonerationMemberSelect(rows))
+        self.add_item(ExonerationMemberSelect())
 
 
 class ExonerationConfirmView(AdminView):
@@ -1272,8 +1230,8 @@ class DisciplineCommands(commands.Cog):
         if not rows:
             raise NotFoundError("Não há membros cadastrados elegíveis para exoneração.")
         await interaction.response.send_message(
-            "Selecione somente um integrante do efetivo cadastrado:",
-            view=ExonerationMemberSelectView(rows),
+            "Pesquise pelo nome e selecione somente um integrante do efetivo cadastrado:",
+            view=ExonerationMemberSelectView(),
             ephemeral=True,
         )
 

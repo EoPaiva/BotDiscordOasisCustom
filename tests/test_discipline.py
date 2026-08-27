@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import discord
 import pytest
 
 from choque.config import Branding
 from choque.errors import ConflictError
 from cogs.discipline_commands import (
+    DisciplineMemberSelectView,
+    ExonerationMemberSelectView,
     build_adv_dashboard_embeds,
     discipline_candidates,
     exoneration_candidates,
@@ -16,6 +19,17 @@ from cogs.discipline_commands import (
 from .conftest import CALL_A, DISCORD_ID, GUILD_ID
 
 DAY_MS = 86_400_000
+
+
+@pytest.mark.asyncio
+async def test_discipline_member_menus_use_native_searchable_user_selects() -> None:
+    discipline_select = DisciplineMemberSelectView("WARNING").children[0]
+    exoneration_select = ExonerationMemberSelectView().children[0]
+
+    assert discipline_select.type is discord.ComponentType.user_select
+    assert exoneration_select.type is discord.ComponentType.user_select
+    assert discipline_select.placeholder == "Digite ou pesquise o nome do membro"
+    assert exoneration_select.placeholder == "Digite ou pesquise o nome do membro"
 
 
 @pytest.mark.asyncio
@@ -45,6 +59,20 @@ async def test_exoneration_candidates_include_only_registered_non_bot_effective_
         unit="BGR",
         rank_id=None,
         actor_id=900,
+    )
+    primary = await service_bundle["database"].fetchone(
+        "SELECT id FROM members WHERE guild_id=? AND discord_id=?",
+        (GUILD_ID, DISCORD_ID),
+    )
+    now = service_bundle["clock"]()
+    await service_bundle["database"].execute(
+        """
+        INSERT INTO registration_gate_records(
+            guild_id, discord_id, status, access_tier, member_id,
+            source, created_at, updated_at
+        ) VALUES (?, ?, 'REGISTERED', 'MEMBER', ?, 'SYSTEM_RECONCILIATION', ?, ?)
+        """,
+        (GUILD_ID, DISCORD_ID + 2, int(primary["id"]), now, now),
     )
     discord_members = {
         DISCORD_ID: SimpleNamespace(bot=False),
