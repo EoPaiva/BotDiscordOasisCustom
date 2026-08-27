@@ -30,9 +30,10 @@ describe("CHOQUE visual contract", () => {
     expect(styles).toContain("@media (prefers-reduced-motion: reduce)");
   });
 
-  it("keeps recruitment on the approved green command palette instead of the legacy red campaign", () => {
-    expect(styles).toContain("--recruitment-red: var(--color-action-strong)");
-    expect(styles).toContain("--recruitment-red-active: var(--color-action)");
+  it("keeps recruitment on the approved green command palette without legacy red token names", () => {
+    expect(styles).toContain("--recruitment-accent-strong: var(--color-action-strong)");
+    expect(styles).toContain("--recruitment-accent: var(--color-action)");
+    expect(styles).not.toContain("--recruitment-red");
     expect(styles).not.toContain("#b11226");
     expect(styles).not.toContain("#cf1730");
     expect(styles).not.toContain("rgba(177,18,38");
@@ -44,5 +45,12 @@ describe("CHOQUE visual contract", () => {
     expect(styles).toContain("select:focus-visible");
     expect(styles).toContain("accent-color: var(--color-action)");
     expect(styles).toContain("[aria-invalid=\"true\"]");
+  });
+
+  it("defines a shared operational state surface and semantic feedback tokens", () => {
+    expect(styles).toContain("--color-danger-text:");
+    expect(styles).toContain("--color-warning-text:");
+    expect(styles).toContain(".command-state");
+    expect(styles).toContain(".command-state-guidance");
   });
 });

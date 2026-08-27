@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { DataTable, EmptyState, MetricStrip, Status } from "./ui";
+import { CommandState, DataTable, EmptyState, MetricStrip, Status } from "./ui";
 
 describe("shared command center components", () => {
   it("maps operational states to an explicit visual status", () => {
@@ -32,5 +32,24 @@ describe("shared command center components", () => {
     expect(view.container.querySelector("dl.metric-strip")).toBeInTheDocument();
     expect(screen.getByText("EM PATRULHA").closest("dt")).toBeInTheDocument();
     expect(screen.getByText("4").closest("dd")).toBeInTheDocument();
+  });
+
+  it("explains operational states with an outcome and a next action", () => {
+    render(
+      <CommandState
+        code="SYS / FALHA"
+        title="Comunicação interrompida"
+        happened="O serviço não respondeu."
+        next="Tente novamente em alguns instantes."
+        reference="ABC123"
+        tone="danger"
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.getByText("O que aconteceu").closest("dt")).toBeInTheDocument();
+    expect(screen.getByText("O serviço não respondeu.").closest("dd")).toBeInTheDocument();
+    expect(screen.getByText("Próxima ação").closest("dt")).toBeInTheDocument();
+    expect(screen.getByText("Referência ABC123")).toBeInTheDocument();
   });
 });
