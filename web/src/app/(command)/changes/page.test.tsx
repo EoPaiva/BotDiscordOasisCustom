@@ -26,4 +26,26 @@ describe("changes briefing", () => {
     expect(since).toHaveAttribute("dateTime", "2026-08-27T05:29:00.000Z");
     expect(since).toHaveTextContent("27 de ago., 02:29");
   });
+
+  it("exposes event timestamps as machine-readable time", async () => {
+    api.commandCenterFetch.mockResolvedValue({
+      period_days: 7,
+      since: Date.parse("2026-08-20T05:29:00.000Z"),
+      counts: {},
+      events: [{
+        id: 1,
+        created_at: Date.parse("2026-08-27T05:29:00.000Z"),
+        event_type: "PROMOTION",
+        aggregate_type: "MEMBER",
+        aggregate_id: 7,
+      }],
+    });
+
+    const view = render(await ChangesPage());
+    const timeline = view.getByRole("region", { name: "Linha de mudanças" });
+    const eventTime = timeline.querySelector("tbody time");
+
+    expect(eventTime).toHaveAttribute("dateTime", "2026-08-27T05:29:00.000Z");
+    expect(eventTime).toHaveTextContent("27 de ago., 02:29");
+  });
 });
