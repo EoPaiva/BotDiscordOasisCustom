@@ -35,5 +35,14 @@ describe("CHOQUE visual contract", () => {
     expect(styles).toContain("--recruitment-red-active: var(--color-action)");
     expect(styles).not.toContain("#b11226");
     expect(styles).not.toContain("#cf1730");
+    expect(styles).not.toContain("rgba(177,18,38");
+    expect(styles).not.toContain("rgba(207,23,48");
+  });
+
+  it("defines consistent operational form feedback without relying on color alone", () => {
+    expect(styles).toContain("input:user-invalid");
+    expect(styles).toContain("select:focus-visible");
+    expect(styles).toContain("accent-color: var(--color-action)");
+    expect(styles).toContain("[aria-invalid=\"true\"]");
   });
 });
