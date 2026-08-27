@@ -96,7 +96,7 @@ export default async function DashboardPage() {
         <section className="command-section">
           <SectionHeader index="04" title="Fila operacional" meta="Ordem FIFO" />
           {data.queue.length ? <ol aria-label="Fila operacional em ordem FIFO" className="queue-list">{data.queue.slice(0, 8).map((entry, index) => (
-            <li key={String(entry.id)}><code>{String(index + 1).padStart(2, "0")}</code><strong>{String(entry.mta_nick ?? entry.discord_id)}</strong><span>{duration(data.generated_at - Number(entry.queue_entered_at ?? data.generated_at))}</span></li>
+            <li key={String(entry.id)}><code>{String(index + 1).padStart(2, "0")}</code><strong>{String(entry.mta_nick ?? entry.discord_id)}</strong><time dateTime={isoDuration(data.generated_at - Number(entry.queue_entered_at ?? data.generated_at))}>{duration(data.generated_at - Number(entry.queue_entered_at ?? data.generated_at))}</time></li>
           ))}</ol> : <EmptyState title="Fila vazia" detail="Nenhum militar aguarda formação de patrulha." />}
         </section>
         {data.capabilities.view_changes && <section className="command-section briefing-sector">
