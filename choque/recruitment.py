@@ -16,6 +16,7 @@ import aiosqlite
 from .audit import AuditService
 from .database import Database
 from .errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
+from .source_cutover import block_source_cutover_writes
 from .time_utils import utc_now_ms
 
 ACTIVE_APPLICATION_STATUSES = {
@@ -151,6 +152,7 @@ class RecruitmentService:
         self.clock = clock
         self.analysis_service = None
 
+    @block_source_cutover_writes("Recrutamento")
     async def ensure_defaults(self, guild_id: int, actor_id: int | None = None) -> dict[str, int]:
         now = self.clock()
         async with self.database.transaction() as connection:
@@ -542,6 +544,7 @@ class RecruitmentService:
             "cooldown_until": cooldown["ends_at"] if cooldown else None,
         }
 
+    @block_source_cutover_writes("Recrutamento")
     async def start_application(
         self,
         guild_id: int,
@@ -674,6 +677,7 @@ class RecruitmentService:
             raise ConflictError("Já existe candidatura ativa para este Discord ou ID BGR.") from exc
         return dict(await self.database.fetchone("SELECT * FROM recruitment_applications WHERE id=?", (application_id,)))
 
+    @block_source_cutover_writes("Recrutamento")
     async def submit_direct_indication(
         self,
         guild_id: int,
@@ -991,6 +995,7 @@ class RecruitmentService:
                 (self.clock(), row["id"]),
             )
 
+    @block_source_cutover_writes("Recrutamento")
     async def start_question(
         self, guild_id: int, discord_id: int, application_id: int, application_question_id: int
     ) -> dict[str, object]:
@@ -1109,6 +1114,7 @@ class RecruitmentService:
         )
         return hmac.compare_digest(expected, token)
 
+    @block_source_cutover_writes("Recrutamento")
     async def save_answer(
         self,
         guild_id: int,
@@ -1220,6 +1226,7 @@ class RecruitmentService:
             return list(dict.fromkeys(answer))
         raise ValidationError("Tipo de questão não suportado.")
 
+    @block_source_cutover_writes("Recrutamento")
     async def record_integrity_event(
         self,
         guild_id: int,
@@ -1259,6 +1266,7 @@ class RecruitmentService:
                 normalized, self.clock(), duration_ms=duration_ms,
             )
 
+    @block_source_cutover_writes("Recrutamento")
     async def submit_application(
         self, guild_id: int, discord_id: int, application_id: int, expected_version: int
     ) -> dict[str, object]:
@@ -1391,6 +1399,7 @@ class RecruitmentService:
                     },
                 )
 
+    @block_source_cutover_writes("Recrutamento")
     async def withdraw_application(
         self,
         guild_id: int,
@@ -1445,6 +1454,7 @@ class RecruitmentService:
             )
         )
 
+    @block_source_cutover_writes("Recrutamento")
     async def block_candidate(
         self,
         guild_id: int,
@@ -1488,6 +1498,7 @@ class RecruitmentService:
             )
         return block_id
 
+    @block_source_cutover_writes("Recrutamento")
     async def revoke_block(self, guild_id: int, block_id: int, actor_id: int) -> None:
         async with self.database.transaction() as connection:
             cursor = await connection.execute(
@@ -1664,6 +1675,7 @@ class RecruitmentService:
             self.database.fetchall("SELECT * FROM recruitment_history WHERE application_id=? ORDER BY created_at,id", (application_id,)),
         )
 
+    @block_source_cutover_writes("Recrutamento")
     async def add_adaptation(
         self,
         guild_id: int,
@@ -1745,6 +1757,7 @@ class RecruitmentService:
             "integrity_events": integrity_events or [],
         }
 
+    @block_source_cutover_writes("Recrutamento")
     async def assign(
         self, guild_id: int, application_id: int, reviewer_id: int, expected_version: int
     ) -> dict[str, object]:
@@ -1755,6 +1768,7 @@ class RecruitmentService:
         )
         return result
 
+    @block_source_cutover_writes("Recrutamento")
     async def schedule_interview(
         self,
         guild_id: int,
@@ -1811,6 +1825,7 @@ class RecruitmentService:
             )
         return dict(await self.database.fetchone("SELECT * FROM recruitment_applications WHERE id=?", (application_id,)))
 
+    @block_source_cutover_writes("Recrutamento")
     async def evaluate_interview(
         self,
         guild_id: int,
@@ -1878,6 +1893,7 @@ class RecruitmentService:
                 )
         return dict(await self.database.fetchone("SELECT * FROM recruitment_applications WHERE id=?", (application_id,)))
 
+    @block_source_cutover_writes("Recrutamento")
     async def decide(
         self,
         guild_id: int,
@@ -2598,6 +2614,7 @@ class RecruitmentService:
                 return dict(row) if row else None
         return None
 
+    @block_source_cutover_writes("Recrutamento")
     async def add_note(
         self, guild_id: int, application_id: int, author_id: int, note: str
     ) -> int:
@@ -2627,6 +2644,7 @@ class RecruitmentService:
             )
             return int(cursor.lastrowid)
 
+    @block_source_cutover_writes("Recrutamento")
     async def update_campaign(
         self, guild_id: int, campaign_id: int, actor_id: int, values: Mapping[str, object]
     ) -> dict[str, object]:
@@ -2767,6 +2785,7 @@ class RecruitmentService:
             raise ValidationError("Questão dependente não encontrada.")
         return {"question": dependency, "equals": value}
 
+    @block_source_cutover_writes("Recrutamento")
     async def create_question(
         self, guild_id: int, actor_id: int, values: Mapping[str, object]
     ) -> dict[str, object]:
@@ -2841,6 +2860,7 @@ class RecruitmentService:
             )
         )
 
+    @block_source_cutover_writes("Recrutamento")
     async def update_group(
         self, guild_id: int, group_id: int, actor_id: int, values: Mapping[str, object]
     ) -> dict[str, object]:
@@ -2884,6 +2904,7 @@ class RecruitmentService:
             )
         )
 
+    @block_source_cutover_writes("Recrutamento")
     async def update_question(
         self, guild_id: int, question_id: int, actor_id: int, values: Mapping[str, object]
     ) -> dict[str, object]:
@@ -2945,6 +2966,7 @@ class RecruitmentService:
             )
         return dict(await self.database.fetchone("SELECT * FROM recruitment_questions WHERE id=?", (question_id,)))
 
+    @block_source_cutover_writes("Recrutamento")
     async def publish_form(self, guild_id: int, actor_id: int) -> int:
         now = self.clock()
         async with self.database.transaction() as connection:

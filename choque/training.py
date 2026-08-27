@@ -10,6 +10,7 @@ from .database import Database
 from .errors import ConflictError, NotFoundError, ValidationError
 from .models import MemberStatus
 from .settings import SettingsService
+from .source_cutover import block_source_cutover_writes
 from .time_utils import utc_now_ms
 
 DAY_MS = 86_400_000
@@ -63,6 +64,7 @@ class TrainingService:
         normalized = (value or "").strip()
         return normalized or None
 
+    @block_source_cutover_writes("Treinamentos")
     async def create_training(
         self,
         guild_id: int,
@@ -140,6 +142,7 @@ class TrainingService:
             "status": "OPEN",
         }
 
+    @block_source_cutover_writes("Treinamentos")
     async def attach_message(
         self, guild_id: int, training_id: int, channel_id: int, message_id: int
     ) -> None:
@@ -206,6 +209,7 @@ class TrainingService:
             """
         )
 
+    @block_source_cutover_writes("Treinamentos")
     async def enroll(self, guild_id: int, training_id: int, discord_id: int) -> dict[str, object]:
         now = self.clock()
         async with self.database.transaction() as connection:
@@ -295,6 +299,7 @@ class TrainingService:
             "capacity": int(training["capacity"]),
         }
 
+    @block_source_cutover_writes("Treinamentos")
     async def cancel_enrollment(
         self, guild_id: int, training_id: int, discord_id: int
     ) -> dict[str, object]:
@@ -379,6 +384,7 @@ class TrainingService:
             (guild_id, training_id),
         )
 
+    @block_source_cutover_writes("Treinamentos")
     async def close_enrollment(
         self, guild_id: int, training_id: int, actor_id: int
     ) -> dict[str, object]:
@@ -402,6 +408,7 @@ class TrainingService:
             )
         return {"training_id": training_id, "status": "CLOSED"}
 
+    @block_source_cutover_writes("Treinamentos")
     async def decide_participant(
         self,
         guild_id: int,
@@ -520,6 +527,7 @@ class TrainingService:
             "performance": performance,
         }
 
+    @block_source_cutover_writes("Treinamentos")
     async def complete_training(
         self, guild_id: int, training_id: int, actor_id: int
     ) -> dict[str, object]:
@@ -671,6 +679,7 @@ class TrainingService:
             "failed": failed,
         }
 
+    @block_source_cutover_writes("Treinamentos")
     async def cancel_training(
         self, guild_id: int, training_id: int, actor_id: int, reason: str
     ) -> dict[str, object]:
@@ -723,6 +732,7 @@ class TrainingService:
             (guild_id, limit),
         )
 
+    @block_source_cutover_writes("Cursos")
     async def import_catalog_course(
         self,
         guild_id: int,
@@ -878,6 +888,7 @@ class TrainingService:
             (guild_id, course_id),
         )
 
+    @block_source_cutover_writes("Cursos")
     async def configure_course_panel_channel(
         self, guild_id: int, course_id: int, channel_id: int, actor_id: int
     ) -> dict[str, object]:
@@ -1130,6 +1141,7 @@ class TrainingService:
         )
         return self._public_eligibility(result)
 
+    @block_source_cutover_writes("Cursos")
     async def apply_to_course(
         self,
         guild_id: int,
@@ -1219,6 +1231,7 @@ class TrainingService:
             (guild_id, limit),
         )
 
+    @block_source_cutover_writes("Cursos")
     async def decide_course_application(
         self,
         guild_id: int,

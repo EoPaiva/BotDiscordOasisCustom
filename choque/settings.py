@@ -204,6 +204,13 @@ class SettingsService:
         "recruitment_ai_final_assisted_after_interview": True,
         "recruitment_ai_discord_notice": False,
         "recruitment_ai_show_score": True,
+        # Cutover Recrutamento/Cursos -> DC2.  A origem permanece ativa por
+        # padrão; a flag só é ligada pelo arquivador após preflight e snapshot.
+        "recruitment_courses_dc2_cutover_enabled": False,
+        "recruitment_courses_dc2_source_guild_id": None,
+        "recruitment_courses_dc2_target_guild_id": None,
+        "recruitment_courses_dc2_maintenance_lock": None,
+        "recruitment_courses_archive_reader_role_ids": [],
         "security_lockdown": False,
         "security_lockdown_reason": None,
         "security_lockdown_changed_at": None,

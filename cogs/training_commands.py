@@ -11,6 +11,7 @@ from discord.ext import commands
 from choque.course_catalog_seed import COURSE_DISPLAY_NAMES, HISTORICAL_COURSES
 from choque.embeds import branded_embed
 from choque.errors import NotFoundError, PermissionDenied, ValidationError
+from choque.source_cutover import source_cutover_is_read_only
 from choque.time_utils import discord_timestamp
 from cogs.config_ui import respond_error
 
@@ -1253,6 +1254,10 @@ class TrainingCommands(commands.Cog):
         if self.bot.check_mode:
             return
         for guild in self.bot.guilds:
+            if await source_cutover_is_read_only(self.services.database, guild.id):
+                # O arquivamento preserva todos os registros e mensagens da
+                # origem. Evite apenas restaurar/republicar os painéis legados.
+                continue
             channel_id = await self.services.settings.get(guild.id, "training_panel_channel_id")
             channel = guild.get_channel(int(channel_id)) if channel_id else None
             if isinstance(channel, discord.TextChannel):

@@ -163,7 +163,10 @@ async def test_recruitment_recovery_does_not_publish_disabled_ticket_panels() ->
         modules=SimpleNamespace(is_enabled=AsyncMock(side_effect=module_enabled)),
         settings=SimpleNamespace(get=AsyncMock(return_value=None)),
         tickets=SimpleNamespace(tickets_requiring_rooms=AsyncMock(return_value=[])),
-        database=SimpleNamespace(fetchall=AsyncMock(return_value=[])),
+        database=SimpleNamespace(
+            fetchone=AsyncMock(return_value=None),
+            fetchall=AsyncMock(return_value=[]),
+        ),
     )
     cog = TicketCommands.__new__(TicketCommands)
     cog.bot = SimpleNamespace(check_mode=False, guilds=[guild], user=None)

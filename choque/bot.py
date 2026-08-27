@@ -32,6 +32,7 @@ from .security import SecurityService
 from .services import Services
 from .settings import SettingsService
 from .shifts import ShiftService
+from .source_cutover import source_cutover_is_read_only, validated_source_cutover
 from .special_units import SpecialUnitService
 from .status import StatusService
 from .tags import TagService
@@ -150,8 +151,13 @@ class ChoqueBot(commands.Bot):
         )
         if self.guild_id:
             await permissions.ensure_defaults(self.guild_id)
-            await recruitment.ensure_defaults(self.guild_id)
-            await recruitment_analysis.ensure_defaults(self.guild_id)
+            cutover = await validated_source_cutover(database, self.guild_id)
+            if cutover.active and cutover.target_guild_id:
+                await recruitment.ensure_defaults(cutover.target_guild_id)
+                await recruitment_analysis.ensure_defaults(cutover.target_guild_id)
+            elif not await source_cutover_is_read_only(database, self.guild_id):
+                await recruitment.ensure_defaults(self.guild_id)
+                await recruitment_analysis.ensure_defaults(self.guild_id)
             await financial_aid.ensure_defaults(self.guild_id)
         self.web_action_worker = WebActionWorker(
             database,

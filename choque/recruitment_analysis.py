@@ -20,6 +20,7 @@ from .audit import AuditService
 from .database import Database
 from .errors import ConflictError, NotFoundError, ValidationError
 from .settings import SettingsService
+from .source_cutover import block_source_cutover_writes, require_source_cutover_writable
 from .time_utils import utc_now_ms
 
 LOGGER = logging.getLogger(__name__)
@@ -560,6 +561,7 @@ class RecruitmentAnalysisService:
         self.provider = provider or build_recruitment_analysis_provider()
         self.clock = clock
 
+    @block_source_cutover_writes("Recrutamento")
     async def ensure_defaults(self, guild_id: int, actor_id: int | None = None) -> dict[str, int]:
         now = self.clock()
         async with self.database.transaction() as connection:
@@ -665,6 +667,7 @@ class RecruitmentAnalysisService:
         }
         return {**values, **versions}
 
+    @block_source_cutover_writes("Recrutamento")
     async def update_configuration(
         self, guild_id: int, actor_id: int | None, values: Mapping[str, bool]
     ) -> dict[str, object]:
@@ -707,6 +710,11 @@ class RecruitmentAnalysisService:
         analysis_type: str = "PRE_INTERVIEW",
         connection: aiosqlite.Connection | None = None,
     ) -> int | None:
+        # Chamadas internas podem compartilhar a transação de candidatura. O
+        # gate externo já foi aplicado pelo RecruitmentService nesse caso;
+        # chamadas administrativas sem conexão própria são validadas aqui.
+        if connection is None:
+            await require_source_cutover_writable(self.database, guild_id, "Recrutamento")
         reason = request_reason.upper()
         kind = analysis_type.upper()
         if reason not in {
@@ -845,6 +853,7 @@ class RecruitmentAnalysisService:
             connection=connection,
         )
 
+    @block_source_cutover_writes("Recrutamento")
     async def supersede_legacy_active_jobs(
         self, guild_id: int, actor_id: int | None = None
     ) -> dict[str, int]:
@@ -1489,6 +1498,7 @@ class RecruitmentAnalysisService:
             "show_score": show_score,
         }
 
+    @block_source_cutover_writes("Recrutamento")
     async def record_feedback(
         self,
         guild_id: int,
@@ -1599,6 +1609,7 @@ class RecruitmentAnalysisService:
             "weight_total": sum(int(row["weight"]) for row in criteria),
         }
 
+    @block_source_cutover_writes("Recrutamento")
     async def create_rubric_draft(self, guild_id: int, actor_id: int) -> dict[str, object]:
         await self.ensure_defaults(guild_id, actor_id)
         existing = await self.database.fetchone(
@@ -1652,6 +1663,7 @@ class RecruitmentAnalysisService:
             )
         return await self.rubric(guild_id)
 
+    @block_source_cutover_writes("Recrutamento")
     async def update_rubric_draft(
         self,
         guild_id: int,
@@ -1734,6 +1746,7 @@ class RecruitmentAnalysisService:
             "versions": [dict(row) for row in versions],
         }
 
+    @block_source_cutover_writes("Recrutamento")
     async def create_context_draft(self, guild_id: int, actor_id: int) -> dict[str, object]:
         await self.ensure_defaults(guild_id, actor_id)
         existing = await self.database.fetchone(
@@ -1780,6 +1793,7 @@ class RecruitmentAnalysisService:
             )
         return await self.context(guild_id)
 
+    @block_source_cutover_writes("Recrutamento")
     async def update_context_draft(
         self,
         guild_id: int,
@@ -1807,6 +1821,7 @@ class RecruitmentAnalysisService:
             )
         return await self.context(guild_id)
 
+    @block_source_cutover_writes("Recrutamento")
     async def publish_context(
         self, guild_id: int, actor_id: int, context_id: int
     ) -> dict[str, object]:
@@ -1867,6 +1882,7 @@ class RecruitmentAnalysisService:
             )
         return await self.context(guild_id)
 
+    @block_source_cutover_writes("Recrutamento")
     async def publish_rubric(self, guild_id: int, actor_id: int, rubric_id: int) -> dict[str, object]:
         now = self.clock()
         async with self.database.transaction() as connection:

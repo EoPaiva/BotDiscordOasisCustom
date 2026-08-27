@@ -12,6 +12,7 @@ from .database import Database
 from .errors import ConflictError, NotFoundError, ValidationError
 from .members import MemberService
 from .settings import SettingsService
+from .source_cutover import require_source_cutover_writable
 from .time_utils import utc_now_ms
 
 TICKET_TYPES = {"CANDIDACY", "TRANSFER", "REPORT", "OTHER"}
@@ -156,6 +157,8 @@ class TicketService:
         normalized = ticket_type.upper()
         if normalized not in TICKET_TYPES:
             raise ValidationError("Tipo de atendimento inválido.")
+        if normalized == "CANDIDACY":
+            await require_source_cutover_writable(self.database, guild_id, "Recrutamento")
         self._validate_payload(normalized, payload)
         if normalized == "REPORT" and subject_discord_id == discord_id:
             raise ValidationError("Selecione outra pessoa como alvo da denúncia.")

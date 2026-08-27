@@ -14,6 +14,7 @@ from discord.ext import commands
 from choque.channel_names import format_channel_name
 from choque.embeds import branded_embed
 from choque.errors import PermissionDenied, ValidationError
+from choque.source_cutover import source_cutover_is_read_only
 from choque.tickets import (
     TICKET_LABELS,
     TICKET_PRIORITY_LABELS,
@@ -2498,6 +2499,9 @@ class TicketCommands(commands.Cog):
             "RECRUITMENT_ADMIN": ("recruitment_queue_channel_id", "RECRUITMENT"),
         }
         for guild in self.bot.guilds:
+            source_layout_archived = await source_cutover_is_read_only(
+                self.services.database, guild.id
+            )
             recruitment_enabled = await self.services.modules.is_enabled(
                 guild.id, "RECRUITMENT"
             )
@@ -2512,7 +2516,9 @@ class TicketCommands(commands.Cog):
                     self.bot.user.id if self.bot.user else None,
                 )
             module_states = {
-                "RECRUITMENT": recruitment_enabled,
+                # O histórico/painéis continuam registrados no banco, mas um
+                # restart não recria controles na origem depois do cutover.
+                "RECRUITMENT": recruitment_enabled and not source_layout_archived,
                 "TICKETS": tickets_enabled,
             }
             for panel_type, (setting_key, module_key) in targets.items():
