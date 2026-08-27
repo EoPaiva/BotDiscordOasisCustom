@@ -1,15 +1,15 @@
 import type { Metadata } from "next";
-import { Barlow_Condensed, IBM_Plex_Mono, Source_Sans_3 } from "next/font/google";
+import { IBM_Plex_Mono, Inter, Rajdhani } from "next/font/google";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";
 
-const bodyFont = Source_Sans_3({
+const bodyFont = Inter({
   variable: "--font-body",
   subsets: ["latin"],
 });
 
-const titleFont = Barlow_Condensed({
+const titleFont = Rajdhani({
   variable: "--font-title",
   subsets: ["latin"],
   weight: ["500", "600", "700"],

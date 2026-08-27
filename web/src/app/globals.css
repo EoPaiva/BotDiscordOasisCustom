@@ -1,34 +1,79 @@
 @import "tailwindcss";
 
 :root {
-  --ink-950: #0b0e0c;
-  --ink-900: #0f1310;
-  --surface-800: #111612;
-  --surface-700: #161c17;
-  --surface-600: #1c231d;
-  --line: #2a322b;
-  --line-strong: #3a443b;
-  --olive: #667157;
-  --olive-active: #7c8969;
-  --khaki: #b3a77f;
-  --steel: #8c9690;
-  --text: #e6e9e4;
-  --text-muted: #9da69e;
-  --text-dim: #707a72;
-  --success: #71906d;
-  --warning: #b28a42;
-  --danger: #a94f43;
-  --info: #718791;
+  /* Contrato visual CHOQUE: fonte única para cor, geometria, ritmo e movimento. */
+  --color-background: #080f12;
+  --color-background-secondary: #11181b;
+  --color-surface: #1a2126;
+  --color-surface-elevated: #2a3138;
+  --color-border: rgba(58, 64, 72, .58);
+  --color-border-strong: rgba(86, 94, 104, .72);
+  --color-text: #f6f6f6;
+  --color-text-muted: #a0a7b1;
+  --color-text-dim: #737c86;
+  --color-action: #2ecc71;
+  --color-action-strong: #185b38;
+  --color-action-deep: #0f3d29;
+  --color-success: #2ecc71;
+  --color-warning: #d3a64d;
+  --color-danger: #cf5b55;
+  --color-info: #6f9fbd;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --radius-control: 2px;
+  --radius-module: 4px;
+  --radius-panel: 6px;
+  --motion-fast: 160ms;
+  --motion-standard: 220ms;
+  --shadow-panel: 0 18px 48px rgba(0, 0, 0, .22);
+  --z-base: 0;
+  --z-topbar: 20;
+  --z-navigation: 30;
+  --z-modal: 50;
+
+  /* Aliases de compatibilidade durante a migração progressiva dos módulos. */
+  --ink-950: var(--color-background);
+  --ink-900: var(--color-background-secondary);
+  --surface-900: #0c1417;
+  --surface-800: var(--color-surface);
+  --surface-700: var(--color-surface-elevated);
+  --surface-600: #343c44;
+  --line: var(--color-border);
+  --line-strong: var(--color-border-strong);
+  --olive: var(--color-action-strong);
+  --olive-active: var(--color-action);
+  --khaki: #8fc5a4;
+  --steel: #8d98a2;
+  --text: var(--color-text);
+  --text-main: var(--color-text);
+  --text-muted: var(--color-text-muted);
+  --text-dim: var(--color-text-dim);
+  --success: var(--color-success);
+  --warning: var(--color-warning);
+  --danger: var(--color-danger);
+  --info: var(--color-info);
+  --accent: var(--color-action);
   --sidebar-width: 246px;
   --topbar-height: 58px;
 }
 
 * { box-sizing: border-box; }
-html { background: var(--ink-950); color-scheme: dark; }
+html { background: var(--color-background); color-scheme: dark; }
 body {
   margin: 0;
   min-height: 100vh;
-  background: linear-gradient(rgba(255,255,255,.015) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.012) 1px, transparent 1px), var(--ink-950);
+  background:
+    radial-gradient(circle at 82% 12%, rgba(46, 204, 113, .035), transparent 26rem),
+    linear-gradient(rgba(160, 167, 177, .018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(160, 167, 177, .014) 1px, transparent 1px),
+    var(--color-background);
   background-size: 32px 32px;
   color: var(--text);
   font-family: var(--font-body), sans-serif;
@@ -37,8 +82,8 @@ body {
 button, input, select, textarea { font: inherit; }
 a { color: inherit; text-decoration: none; }
 code { font-family: var(--font-mono), monospace; }
-:focus-visible { outline: 2px solid var(--khaki); outline-offset: 3px; }
-::selection { background: var(--olive); color: #fff; }
+:focus-visible { outline: 2px solid var(--color-action); outline-offset: 3px; }
+::selection { background: var(--color-action-strong); color: var(--color-text); }
 
 .app-shell { min-height: 100vh; }
 .sidebar { position: fixed; z-index: 30; inset: 0 auto 0 0; display: flex; width: var(--sidebar-width); flex-direction: column; border-right: 1px solid var(--line); background: #0d110e; }
