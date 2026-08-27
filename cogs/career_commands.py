@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, cast
 import discord
 from discord.ext import commands, tasks
 
-from choque.dismissals import dismissal_public_reason
+from choque.dismissals import backfill_historical_dismissals, dismissal_public_reason
 from choque.embeds import branded_embed
 from choque.errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
 from choque.models import PersonnelActionType
@@ -804,6 +804,16 @@ class CareerCommands(commands.Cog):
                     row["id"],
                 )
 
+    async def _backfill_historical_dismissals(self, guild: discord.Guild) -> None:
+        async with self.bot.services.database.transaction() as connection:
+            inserted = await backfill_historical_dismissals(connection, guild.id)
+        if inserted:
+            LOGGER.info(
+                "Desligamentos históricos adicionados à fila durável: guild=%s total=%s",
+                guild.id,
+                inserted,
+            )
+
     async def _deliver_notification(self, row: dict[str, object]) -> None:
         now = self.bot.services.career.clock()
         notification_id = int(row["id"])
@@ -949,6 +959,10 @@ class CareerCommands(commands.Cog):
                 await self._initialize_guild(guild)
             except Exception:
                 LOGGER.exception("Falha ao restaurar o núcleo de carreira e oficialato")
+            try:
+                await self._backfill_historical_dismissals(guild)
+            except Exception:
+                LOGGER.exception("Falha ao enfileirar desligamentos históricos")
             try:
                 await self._refresh_delivered_dismissals(guild)
             except Exception:

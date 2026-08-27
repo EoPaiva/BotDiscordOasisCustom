@@ -11,6 +11,7 @@ from choque.database import Database
 from choque.dismissals import (
     HIGH_COMMAND_DISMISSAL_REASON,
     STANDARD_DISMISSAL_REASON,
+    backfill_historical_dismissals,
 )
 from choque.models import (
     AdministrativeRequestType,
@@ -151,6 +152,43 @@ async def test_direct_member_status_dismissal_also_enqueues_public_record(
     assert payload["source"] == "DIRECT_STATUS_CHANGE"
     assert payload["public_reason"] == STANDARD_DISMISSAL_REASON
     assert "Motivo interno" not in notifications[0]["payload_json"]
+
+
+@pytest.mark.asyncio
+async def test_historical_dismissal_backfill_is_idempotent(service_bundle) -> None:
+    now = service_bundle["clock"]()
+    database = service_bundle["database"]
+    member = await database.fetchone(
+        "SELECT id FROM members WHERE guild_id=? AND discord_id=?",
+        (GUILD_ID, DISCORD_ID),
+    )
+    await database.execute(
+        "UPDATE members SET status='DISMISSED' WHERE id=?",
+        (int(member["id"]),),
+    )
+    punishment_id = await database.execute(
+        """
+        INSERT INTO punishments(
+            guild_id, member_id, discord_id, punishment_type, reason,
+            previous_member_status, starts_at, status, created_by, created_at
+        ) VALUES (?, ?, ?, 'DISMISSAL', ?, 'ACTIVE', ?, 'ACTIVE', ?, ?)
+        """,
+        (GUILD_ID, int(member["id"]), DISCORD_ID, "Registro histórico", now, 999, now),
+    )
+
+    async with database.transaction() as connection:
+        assert await backfill_historical_dismissals(connection, GUILD_ID) == 1
+    async with database.transaction() as connection:
+        assert await backfill_historical_dismissals(connection, GUILD_ID) == 0
+
+    notification = await database.fetchone(
+        """
+        SELECT payload_json FROM career_notifications
+        WHERE notification_type='DISMISSAL' AND subject_id=?
+        """,
+        (punishment_id,),
+    )
+    assert json.loads(notification["payload_json"])["character_id"] == "77"
 
 
 def test_dismissal_embed_is_formal_and_uses_recorded_timestamp() -> None:
