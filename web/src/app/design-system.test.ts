@@ -22,4 +22,11 @@ describe("CHOQUE visual contract", () => {
     expect(layout).toContain("IBM_Plex_Mono");
     expect(layout).not.toContain("Source_Sans_3");
   });
+
+  it("keeps operational controls touch-safe, explicit and usable on reduced-motion devices", () => {
+    expect(styles).toContain("min-height: 44px");
+    expect(styles).toContain('.button[aria-busy="true"]');
+    expect(styles).toContain("env(safe-area-inset-left)");
+    expect(styles).toContain("@media (prefers-reduced-motion: reduce)");
+  });
 });
