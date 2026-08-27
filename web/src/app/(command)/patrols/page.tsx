@@ -18,11 +18,11 @@ export default async function PatrolsPage() {
     <div className="split-operational">
       <section className="command-section">
         <SectionHeader index="01" title="Operações em andamento" />
-        {data.active.length ? <div className="patrol-list">{data.active.map((row) => <article className="patrol-record" key={String(row.id)}>
+        {data.active.length ? <ul aria-label="Patrulhas em andamento" className="patrol-list">{data.active.map((row) => <li key={String(row.id)}><article className="patrol-record">
           <div className="patrol-code"><span>PTR</span><strong>{String(row.sequence_number).padStart(3, "0")}</strong></div>
           <div className="patrol-body"><header><Status value={row.status} /><code>{String(row.voice_channel_name ?? `CALL ${String(row.voice_channel_id)}`)}</code></header><p>{String(row.member_count ?? 0)} militares na call</p><p>{row.member_names ? <><strong>{String(row.member_names).split(" | ").join(" • ")}</strong></> : <>Comandante: <strong>{row.commander_discord_id ? `[${String(row.commander_rank_prefix ?? row.commander_rank_name ?? "")}] ${String(row.commander_mta_nick ?? row.commander_discord_id)}` : "Não definido"}</strong></>}</p></div>
           <div className="patrol-time"><strong>{duration(data.generated_at - Number(row.started_at ?? data.generated_at))}</strong><span>desde {dateTime(Number(row.started_at))}</span></div>
-        </article>)}</div> : <EmptyState title="Nenhuma patrulha ativa" detail="A central segue monitorando a call de espera." />}
+        </article></li>)}</ul> : <EmptyState title="Nenhuma patrulha ativa" detail="A central segue monitorando a call de espera." />}
       </section>
       <section className="command-section">
         <SectionHeader index="02" title="Fila FIFO" meta={`${data.queue.length} aguardando`} />
