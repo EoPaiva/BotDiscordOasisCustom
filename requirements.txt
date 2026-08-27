@@ -1,6 +1,6 @@
 discord.py==2.7.1
 python-dotenv==1.2.2
-aiosqlite==0.21.0
+aiosqlite==0.22.1
 tzdata==2025.2
 qrcode[pil]==8.2
 fastapi==0.141.1
