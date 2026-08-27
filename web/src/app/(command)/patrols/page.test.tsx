@@ -34,8 +34,12 @@ describe("patrols command center", () => {
 
     expect(patrols.tagName).toBe("UL");
     expect(within(patrols).getAllByRole("listitem")).toHaveLength(1);
-    expect(within(patrols).getByRole("article")).toBeInTheDocument();
+    const patrol = within(patrols).getByRole("article");
+    expect(patrol).toBeInTheDocument();
     expect(within(patrols).getByText("ROCAM 01")).toBeInTheDocument();
     expect(within(patrols).getByText("[CAP] Sentinela")).toBeInTheDocument();
+    const patrolDuration = patrol.querySelector(".patrol-time time");
+    expect(patrolDuration).toHaveAttribute("dateTime", "PT1M");
+    expect(patrolDuration).toHaveTextContent("1m");
   });
 });
