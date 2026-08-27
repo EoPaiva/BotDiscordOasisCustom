@@ -1475,3 +1475,15 @@ Fora do escopo atual: eventos, API e integração MTA.
 - `origin/main` e `private/main` receberam o corte. O deploy Vercel
   `dpl_HjGzeCa13MLxChutQDKMVHSTnnF5` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
   estrito permaneceu ativo. A página autenticada e o leitor de tela real ainda requerem smoke humano.
+
+# Fase 57 — instantes semânticos da Central de Patrulhas publicados em 2026-08-27
+
+- O horário textual “desde” de cada operação ativa e a coluna `ENTRADA` da fila FIFO agora usam
+  `<time dateTime="…">`, preservando localização, texto, ordenação, cálculo e dados.
+- TDD `4a42580`/`74bf8c7` para o início da operação e `c8ebb65`/`5703f8b` para a entrada FIFO. Gate
+  focal: 2 testes da Central de Patrulhas. Gates agrupados: **93 testes web em 21 arquivos**, lint,
+  typecheck, build, `npm audit` sem vulnerabilidades e **8 E2E aprovados**, com 1 cenário visual
+  Firefox intencionalmente ignorado.
+- `origin/main` e `private/main` receberam ambos os cortes. O deploy Vercel agrupado
+  `dpl_HqFuYxqJM1LeocWRFDtDfR5rr68s` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
+  estrito permaneceu ativo. A página autenticada e o leitor de tela real ainda requerem smoke humano.

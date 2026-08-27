@@ -3,19 +3,20 @@
 > Checkpoint operacional atual. O código e o estado real do repositório prevalecem.
 > Estado estrutural permanente: `PROJECT_STATE.md`.
 
-## 0. Checkpoint mais recente — 16º corte da Fase 57 publicado
+## 0. Checkpoint mais recente — cortes 17 e 18 da Fase 57 publicados
 
-**Branch:** `main`. **TDD:** `2a227e6` registra o contrato RED e `b5f45bc` entrega o GREEN. Ambos
-foram enviados para `origin/main` e `private/main`.
+**Branch:** `main`. **TDD:** `4a42580`/`74bf8c7` cobrem o instante “desde” e
+`c8ebb65`/`5703f8b` cobrem a entrada FIFO. Todos foram enviados para `origin/main` e `private/main`.
 
-**Entregue:** a duração de cada operação ativa em `/patrols` agora usa `<time dateTime="PT…">`,
-preservando texto, cálculo, timestamp “desde”, URL, API, RBAC e regras de negócio.
+**Entregue:** o instante “desde” de cada operação ativa e a coluna `ENTRADA` da fila FIFO em
+`/patrols` agora usam `<time dateTime="…">`, preservando texto, cálculo, ordenação, URL, API, RBAC
+e regras de negócio.
 
-**Gates locais:** 1 teste focado da Central de Patrulhas; 92 testes em 21 arquivos; lint; typecheck; build;
+**Gates locais:** 2 testes focados da Central de Patrulhas; 93 testes em 21 arquivos; lint; typecheck; build;
 `npm audit` sem vulnerabilidades; 8 E2E aprovados e 1 cenário visual Firefox intencionalmente
 ignorado.
 
-**Produção técnica:** deploy Vercel `dpl_HjGzeCa13MLxChutQDKMVHSTnnF5`, `READY` em 2026-08-27,
+**Produção técnica:** deploy Vercel `dpl_HqFuYxqJM1LeocWRFDtDfR5rr68s`, `READY` em 2026-08-27,
 com alias `choquebgr.online`. `/login` e `/status` responderam HTTP 200 e o CSP estrito permaneceu
 ativo. Isso é smoke técnico; sessão autenticada e leitor de tela real continuam validações humanas
 distintas.
@@ -146,7 +147,7 @@ confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferên
 Na máquina principal, auditar os blocos locais ADV, Cursos, Transferências e Registro de
 Desligamentos contra o checkout que opera o projeto, validar migrations 49–52 numa cópia do banco e
 preparar um rollout controlado. As implementações locais estão concluídas. Enquanto essa etapa externa permanece
-bloqueada, a Fase 57 pode avançar localmente em cortes pequenos e fecháveis; dezesseis cortes do Centro
+bloqueada, a Fase 57 pode avançar localmente em cortes pequenos e fecháveis; dezoito cortes do Centro
 de Comando estão concluídos e não há código parcial neste computador.
 
 ### Critério de conclusão
@@ -162,7 +163,7 @@ de Comando estão concluídos e não há código parcial neste computador.
 
 ### Última ação concluída
 
-O protocolo de continuidade foi instalado na raiz. Depois, a Fase 57 avançou em dezesseis cortes do
+O protocolo de continuidade foi instalado na raiz. Depois, a Fase 57 avançou em dezoito cortes do
 Centro de Comando: `2ca8770`/`20d4153` entregam o drawer móvel acessível;
 `5e36506`/`098fea0` fazem o cabeçalho usar o `generated_at` real da API em um elemento `<time>`, em
 vez do relógio do render; `093a1cf`/`d0eecb6` expõem todas as faixas de métricas como pares
@@ -179,7 +180,9 @@ formatam também os campos detalhados `_at`/`_time` em `<time dateTime>` e elimi
 o formatador ISO seguro compartilhado; `9baa176`/`78c63d4` tornam a duração de patrulha legível por
 máquina; `e6b26ae`/`2216250` fazem o mesmo com a espera da fila FIFO; e `d4829d9`/`4b08fb1`
 expõem a coleção ativa da Central de Patrulhas como lista nomeada; e `2a227e6`/`b5f45bc` tornam a
-duração das fichas legível por máquina. Nenhum contrato, URL, RBAC, API ou regra de negócio foi alterado.
+duração das fichas legível por máquina; `4a42580`/`74bf8c7` fazem o mesmo com o instante “desde”; e
+`c8ebb65`/`5703f8b` cobrem a coluna `ENTRADA` da fila FIFO. Nenhum contrato, URL, RBAC, API ou regra
+de negócio foi alterado.
 
 Em seguida, o Registro de Desligamento de Efetivo foi concluído localmente. `25c593c` e `8d7a323`
 preservam os contratos RED; `1526e03` entrega migration 52, política fechada pelo perfil
@@ -188,7 +191,7 @@ declarativo. Nenhum Discord real ou produção foi tocado.
 
 ### Ação em andamento
 
-Nenhuma alteração está em andamento. Transferências, os dezesseis cortes acessíveis da Fase 57 e o
+Nenhuma alteração está em andamento. Transferências, os dezoito cortes acessíveis da Fase 57 e o
 Registro de Desligamentos terminaram em pontos seguros e commitados.
 
 ### PRÓXIMA AÇÃO EXATA
@@ -372,6 +375,9 @@ npm run build
 - [x] Fase 57 na Central de Patrulhas: duração operacional publicada em `<time dateTime="PT…">`.
   TDD `2a227e6`/`b5f45bc`; 92 testes web e gates completos verdes; deploy
   `dpl_HjGzeCa13MLxChutQDKMVHSTnnF5` `READY` em 2026-08-27.
+- [x] Fase 57 na Central de Patrulhas: instante “desde” e entrada FIFO publicados em `<time
+  dateTime>`. TDD `4a42580`/`74bf8c7` e `c8ebb65`/`5703f8b`; 93 testes web e gates completos
+  verdes; deploy agrupado `dpl_HqFuYxqJM1LeocWRFDtDfR5rr68s` `READY` em 2026-08-27.
 - [x] Fase 58 consolidada e publicada em `2f284ba`/`c704553`, sem inventar o trecho ausente do
   prompt original; deploy `dpl_DPCNG8jUHVzxVzFjncvqzF5CK9Js` `READY`.
 - [ ] Continuar os blocos restantes do Prompt Master do ecossistema pela ordem da fila oficial.
