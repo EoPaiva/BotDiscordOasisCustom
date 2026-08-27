@@ -308,9 +308,9 @@ npm run build
 
 - [ ] Com gates verdes e autorização nova, executar merge/push/deploy controlado, validar health,
   migration, Gateway único, duas decisões, outbox e rollback.
-- [ ] Continuar a Fase 57 no dashboard: ampliar
-  `web/src/app/(command)/dashboard/page.test.tsx` com RED que exige duração de patrulha em
-  `<time dateTime="PT…">`; preservar texto, cálculo, efetivo, ordem e dados.
+- [x] Fase 57 no dashboard: duração de patrulha publicada em `<time dateTime="PT…">`, preservando
+  texto, cálculo, efetivo, ordem e dados. TDD `9baa176`/`78c63d4`; 82 testes web, lint, typecheck e
+  build verdes; deploy `dpl_eZ6MKwqMesq5YDYQbK743DbC7iys` `READY` em 2026-08-27.
 - [ ] Consolidar a Fase 58, Design System, sem inventar o trecho ausente do prompt original.
 - [ ] Continuar os blocos restantes do Prompt Master do ecossistema pela ordem da fila oficial.
 

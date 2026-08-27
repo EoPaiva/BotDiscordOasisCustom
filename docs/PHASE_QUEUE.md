@@ -823,9 +823,12 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     primeiro corte formata campos detalhados `_at`/`_time` válidos como `<time dateTime>` e
     impede timestamps brutos no dossiê; `0a45900` registra o RED e `f13d2b0` entrega o GREEN. O décimo
     segundo corte expõe datas das pendências recentes do dashboard em `<time dateTime>` e
-    centraliza o formatador ISO defensivo; `c5f7e2c` registra o RED e `88dde3a` entrega o GREEN. Gate
-    atual: 15 testes focados, 67 testes web em 17 arquivos, audit, typecheck, lint e build. Os cortes
-    permanecem somente locais e não publicados.
+    centraliza o formatador ISO defensivo; `c5f7e2c` registra o RED e `88dde3a` entrega o GREEN. O
+    décimo terceiro corte mantém a duração visual das patrulhas e a expõe como duração ISO 8601 em
+    `<time dateTime="PT…">`; `9baa176` registra o RED e `78c63d4` entrega o GREEN. Gate deste corte:
+    oito testes focados; gate consolidado: 82 testes web em 19 arquivos, lint, typecheck e build. Os cortes foram integrados
+    à `main` e publicados no portal no deploy `dpl_eZ6MKwqMesq5YDYQbK743DbC7iys`, `READY` em
+    2026-08-27.
 
 58. 🔄 **Prompt Master — Identidade Visual / Design System CHOQUE — fase visual ativa.**
     Fonte recebida: `C:\Users\mpaii\.codex\attachments\8f7db861-0f81-4655-a0fc-b3fc90133b12\pasted-text.txt`,
@@ -857,8 +860,9 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     O segundo corte completou os estados de interação, alvos de toque, carregamento, movimento reduzido
     e áreas seguras móveis. O terceiro substituiu a campanha vermelha legada do recrutamento pela
     paleta verde/grafite aprovada e foi revisado por capturas integrais em desktop e 390 px. Gates:
-    71 testes web, lint, typecheck e build. Checkpoints privados: `f120110`, `4dae614` e `7d27c5d`;
-    nenhum rollout na Discloud foi executado.
+    71 testes web, lint, typecheck e build. Checkpoints `f120110`, `4dae614` e `7d27c5d`, agora
+    integrados à `main` e presentes no portal publicado. A consolidação das superfícies restantes
+    continua ativa; nenhum trecho ausente do prompt pode ser inventado.
 
 ## Ordem operacional após os Prompts Masters
 
