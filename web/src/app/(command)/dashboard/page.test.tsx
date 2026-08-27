@@ -148,7 +148,10 @@ describe("command dashboard snapshot", () => {
 
     expect(patrols.tagName).toBe("UL");
     expect(within(patrols).getAllByRole("listitem")).toHaveLength(1);
-    expect(within(patrols).getByRole("article")).toHaveTextContent("Sentinela");
+    const patrol = within(patrols).getByRole("article");
+    expect(patrol).toHaveTextContent("Sentinela");
     expect(within(patrols).getByText("CALL ALFA")).toBeInTheDocument();
+    expect(patrol.querySelector(".patrol-time time")).toHaveAttribute("dateTime", "PT1M");
+    expect(patrol.querySelector(".patrol-time time")).toHaveTextContent("1m");
   });
 });
