@@ -1,6 +1,6 @@
 import { PageHeader, SectionHeader, Status } from "@/components/ui";
 import { commandCenterFetch } from "@/lib/api";
-import { dateTime } from "@/lib/format";
+import { dateTime, isoDateTime } from "@/lib/format";
 
 import { setMaintenance } from "../actions";
 
@@ -16,9 +16,8 @@ export default async function MaintenancePage() {
     <section className="command-section"><SectionHeader index="01" title="Estado dos módulos" />
       <div className="module-register">{modules.map((moduleKey) => {
         const state = byModule[moduleKey]; const active = Boolean(state?.active);
-        return <article key={moduleKey}><header><div><code>{moduleKey}</code><h3>{moduleKey.replaceAll("_", " ")}</h3></div><Status value={active ? "MAINTENANCE" : "OPERATIONAL"} /></header>{active && <dl><div><dt>Motivo</dt><dd>{String(state.reason ?? "Ajustes internos")}</dd></div><div><dt>Desde</dt><dd>{dateTime(Number(state.enabled_at))}</dd></div></dl>}<form action={setMaintenance}><input type="hidden" name="moduleKey" value={moduleKey} /><input type="hidden" name="active" value={String(!active)} />{!active && <label>Motivo<input name="reason" minLength={3} required placeholder="Motivo da manutenção" /></label>}<button className={`button ${active ? "button-primary" : "button-danger"}`} type="submit">{active ? "Retornar à operação" : "Ativar manutenção"}</button></form></article>;
+        return <article key={moduleKey}><header><div><code>{moduleKey}</code><h3>{moduleKey.replaceAll("_", " ")}</h3></div><Status value={active ? "MAINTENANCE" : "OPERATIONAL"} /></header>{active && <dl><div><dt>Motivo</dt><dd>{String(state.reason ?? "Ajustes internos")}</dd></div><div><dt>Desde</dt><dd><time dateTime={isoDateTime(state.enabled_at)}>{dateTime(Number(state.enabled_at))}</time></dd></div></dl>}<form action={setMaintenance}><input type="hidden" name="moduleKey" value={moduleKey} /><input type="hidden" name="active" value={String(!active)} />{!active && <label>Motivo<input name="reason" minLength={3} required placeholder="Motivo da manutenção" /></label>}<button className={`button ${active ? "button-primary" : "button-danger"}`} type="submit">{active ? "Retornar à operação" : "Ativar manutenção"}</button></form></article>;
       })}</div>
     </section>
   </>;
 }
-
