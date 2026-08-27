@@ -103,12 +103,23 @@ async function authenticatedCommandCenterFetch<T>(
   if (!identity) throw new CommandCenterApiError("Sessão Discord necessária.", 401, "auth");
   const correlationId = randomUUID();
   const target = normalizeCommandCenterPath(path);
-  const response = await fetch(`${configuration.apiUrl}${target}`, {
-    ...init,
-    cache: "no-store",
-    signal: init.signal ?? AbortSignal.timeout(15_000),
-    headers: signedRequestHeaders(target, init, configuration, correlationId, identity),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${configuration.apiUrl}${target}`, {
+      ...init,
+      cache: "no-store",
+      signal: init.signal ?? AbortSignal.timeout(15_000),
+      headers: signedRequestHeaders(target, init, configuration, correlationId, identity),
+    });
+  } catch (error) {
+    throw new CommandCenterApiError(
+      error instanceof DOMException && error.name === "TimeoutError"
+        ? "A API demorou mais que o esperado. Tente novamente em instantes."
+        : "A API está temporariamente indisponível. Tente novamente em instantes.",
+      503,
+      correlationId,
+    );
+  }
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
     throw new CommandCenterApiError(

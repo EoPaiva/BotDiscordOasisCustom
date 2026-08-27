@@ -1761,9 +1761,21 @@ class RecruitmentService:
     async def assign(
         self, guild_id: int, application_id: int, reviewer_id: int, expected_version: int
     ) -> dict[str, object]:
+        existing = await self.database.fetchone(
+            "SELECT * FROM recruitment_applications WHERE guild_id=? AND id=?",
+            (guild_id, application_id),
+        )
+        if not existing:
+            raise NotFoundError("Candidatura não encontrada.")
+        self._prevent_self_review(existing, reviewer_id)
+        if existing["status"] == "UNDER_REVIEW" and existing["assigned_to"] is not None:
+            if int(existing["assigned_to"]) == reviewer_id:
+                return dict(existing)
+            raise ConflictError("Esta candidatura já está atribuída a outro responsável.")
         result = await self._transition(
             guild_id, application_id, reviewer_id, expected_version,
-            allowed={"SUBMITTED", "UNDER_REVIEW"}, target="UNDER_REVIEW", action="APPLICATION_ASSIGNED",
+            allowed={"SUBMITTED", "UNDER_REVIEW"}, target="UNDER_REVIEW",
+            action="APPLICATION_ASSIGNED",
             assignments={"assigned_to": reviewer_id, "assigned_at": self.clock()},
         )
         return result
@@ -2057,24 +2069,71 @@ class RecruitmentService:
             if not rank:
                 raise ConflictError("Configure uma patente inicial antes de aprovar.")
             rank_id = rank["id"]
-        await connection.execute(
+        cursor = await connection.execute(
             """
-            INSERT INTO members(
-                guild_id, discord_id, discord_nick, mta_nick, character_id, rank_id,
-                unit, status, joined_at, last_activity_at, created_at, updated_at,
-                origin_recruitment_application_id
-            ) VALUES (?, ?, ?, ?, ?, ?, 'BGR', 'ACTIVE', ?, ?, ?, ?, ?)
-            ON CONFLICT(guild_id, discord_id) DO UPDATE SET
-                mta_nick=excluded.mta_nick, character_id=excluded.character_id,
-                rank_id=excluded.rank_id, status='ACTIVE', updated_at=excluded.updated_at,
-                origin_recruitment_application_id=excluded.origin_recruitment_application_id
+            SELECT id, character_id FROM members
+            WHERE guild_id=? AND discord_id=?
+            LIMIT 1
+            """,
+            (application["guild_id"], application["discord_id"]),
+        )
+        discord_member = await cursor.fetchone()
+        if (
+            discord_member
+            and str(discord_member["character_id"] or "").strip()
+            and str(discord_member["character_id"]).strip().casefold()
+            != str(application["bgr_id"]).strip().casefold()
+        ):
+            raise ConflictError(
+                "Este Discord já está vinculado a outro ID in-game. "
+                "Revise a identidade existente antes de aprovar esta candidatura."
+            )
+        cursor = await connection.execute(
+            """
+            SELECT id, discord_id FROM members
+            WHERE guild_id=?
+              AND lower(trim(character_id))=lower(trim(?))
+              AND discord_id<>?
+            LIMIT 1
             """,
             (
-                application["guild_id"], application["discord_id"], application["discord_username"],
-                application["candidate_nick"], application["bgr_id"], rank_id,
-                now, now, now, now, application["id"],
+                application["guild_id"],
+                application["bgr_id"],
+                application["discord_id"],
             ),
         )
+        conflicting_member = await cursor.fetchone()
+        if conflicting_member:
+            raise ConflictError(
+                "O ID in-game informado já está vinculado a outro perfil. "
+                "Revise a identidade existente antes de aprovar esta candidatura."
+            )
+        try:
+            await connection.execute(
+                """
+                INSERT INTO members(
+                    guild_id, discord_id, discord_nick, mta_nick, character_id, rank_id,
+                    unit, status, joined_at, last_activity_at, created_at, updated_at,
+                    origin_recruitment_application_id
+                ) VALUES (?, ?, ?, ?, ?, ?, 'BGR', 'ACTIVE', ?, ?, ?, ?, ?)
+                ON CONFLICT(guild_id, discord_id) DO UPDATE SET
+                    mta_nick=excluded.mta_nick, character_id=excluded.character_id,
+                    rank_id=excluded.rank_id, status='ACTIVE', updated_at=excluded.updated_at,
+                    origin_recruitment_application_id=excluded.origin_recruitment_application_id
+                """,
+                (
+                    application["guild_id"], application["discord_id"], application["discord_username"],
+                    application["candidate_nick"], application["bgr_id"], rank_id,
+                    now, now, now, now, application["id"],
+                ),
+            )
+        except aiosqlite.IntegrityError as exc:
+            if "ux_members_bgr_identity" in str(exc):
+                raise ConflictError(
+                    "O ID in-game informado já está vinculado a outro perfil. "
+                    "Revise a identidade existente antes de aprovar esta candidatura."
+                ) from exc
+            raise
         cursor = await connection.execute(
             "SELECT id FROM members WHERE guild_id=? AND discord_id=?",
             (application["guild_id"], application["discord_id"]),

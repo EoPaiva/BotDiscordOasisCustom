@@ -25,11 +25,7 @@ async function commandCenterFetch<T>(path: string, init: RequestInit = {}): Prom
   try {
     return await requestCommandCenter<T>(path, init);
   } catch (error) {
-    if (
-      error instanceof CommandCenterApiError
-      && error.status === 401
-      && error.message === "Autenticação recente necessária. Entre novamente."
-    ) {
+    if (error instanceof CommandCenterApiError && error.status === 401) {
       redirect(`/login?reauth=1&returnTo=${encodeURIComponent(returnPathFor(path))}`);
     }
     throw error;
@@ -41,14 +37,45 @@ const versioned = z.object({
   expectedVersion: z.coerce.number().int().positive(),
 });
 
-export async function assignRecruitmentApplication(formData: FormData) {
+export type RecruitmentActionState = {
+  kind: "idle" | "success" | "error";
+  message: string;
+  reference?: string;
+};
+
+function recruitmentActionFailure(error: unknown): RecruitmentActionState | null {
+  if (!(error instanceof CommandCenterApiError)) return null;
+  return {
+    kind: "error",
+    message: error.status >= 500
+      ? "Não foi possível concluir agora. O sistema pode estar sendo atualizado; aguarde alguns segundos e tente novamente."
+      : error.message,
+    reference: error.correlationId,
+  };
+}
+
+export async function assignRecruitmentApplication(
+  _previousState: RecruitmentActionState,
+  formData: FormData,
+): Promise<RecruitmentActionState> {
   const input = versioned.parse(Object.fromEntries(formData));
-  await commandCenterFetch(`/v1/admin/recruitment/applications/${input.applicationId}/assign`, {
-    method: "POST",
-    body: JSON.stringify({ expected_version: input.expectedVersion }),
-  });
+  try {
+    await commandCenterFetch(`/v1/admin/recruitment/applications/${input.applicationId}/assign`, {
+      method: "POST",
+      body: JSON.stringify({ expected_version: input.expectedVersion }),
+    });
+  } catch (error) {
+    const failure = recruitmentActionFailure(error);
+    if (failure) {
+      revalidatePath(`/recruitment/${input.applicationId}`);
+      revalidatePath("/recruitment");
+      return failure;
+    }
+    throw error;
+  }
   revalidatePath(`/recruitment/${input.applicationId}`);
   revalidatePath("/recruitment");
+  return { kind: "success", message: "Candidatura assumida com sucesso." };
 }
 
 const interviewSchema = versioned.extend({
@@ -106,22 +133,41 @@ const decisionSchema = versioned.extend({
   confirmation: z.literal("CONFIRMAR"),
 });
 
-export async function decideRecruitmentApplication(formData: FormData) {
+export async function decideRecruitmentApplication(
+  _previousState: RecruitmentActionState,
+  formData: FormData,
+): Promise<RecruitmentActionState> {
   const input = decisionSchema.parse(Object.fromEntries(formData));
-  await commandCenterFetch(
-    `/v1/admin/recruitment/applications/${input.applicationId}/${input.decision}`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        expected_version: input.expectedVersion,
-        internal_reason: input.internalReason,
-        candidate_message: input.candidateMessage,
-      }),
-    },
-  );
+  try {
+    await commandCenterFetch(
+      `/v1/admin/recruitment/applications/${input.applicationId}/${input.decision}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          expected_version: input.expectedVersion,
+          internal_reason: input.internalReason,
+          candidate_message: input.candidateMessage,
+        }),
+      },
+    );
+  } catch (error) {
+    const failure = recruitmentActionFailure(error);
+    if (failure) {
+      revalidatePath(`/recruitment/${input.applicationId}`);
+      revalidatePath("/recruitment");
+      return failure;
+    }
+    throw error;
+  }
   revalidatePath(`/recruitment/${input.applicationId}`);
   revalidatePath("/recruitment");
   revalidatePath("/recruits");
+  return {
+    kind: "success",
+    message: input.decision === "approve"
+      ? "Candidatura aprovada com sucesso."
+      : "Candidatura reprovada com sucesso.",
+  };
 }
 
 const noteSchema = z.object({

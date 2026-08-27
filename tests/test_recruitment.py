@@ -546,6 +546,156 @@ async def test_submission_assignment_and_human_approval_are_atomic_and_idempoten
 
 
 @pytest.mark.asyncio
+async def test_approval_blocks_existing_bgr_identity_without_partial_decision(
+    recruitment_bundle,
+) -> None:
+    service = recruitment_bundle["service"]
+    database = recruitment_bundle["database"]
+    clock = recruitment_bundle["clock"]
+    rank_id = recruitment_bundle["rank_id"]
+    await database.execute(
+        """
+        INSERT INTO members(
+            guild_id, discord_id, discord_nick, mta_nick, character_id, rank_id,
+            unit, status, joined_at, created_at, updated_at
+        ) VALUES (?, ?, 'owner', 'Existing_Owner', '1842', ?, 'BGR', 'ACTIVE', ?, ?, ?)
+        """,
+        (GUILD_ID, CANDIDATE_ID + 99, rank_id, clock(), clock(), clock()),
+    )
+    application = await _start(service)
+    await database.execute(
+        """
+        UPDATE recruitment_application_questions
+        SET status='SUBMITTED', final_answer_json='"Resposta de teste"', submitted_at=?
+        WHERE application_id=?
+        """,
+        (clock(), application["id"]),
+    )
+    await service.submit_application(GUILD_ID, CANDIDATE_ID, int(application["id"]), 1)
+    assigned = await service.assign(GUILD_ID, int(application["id"]), ADMIN_ID, 2)
+
+    with pytest.raises(ConflictError, match="ID in-game informado já está vinculado"):
+        await service.decide(
+            GUILD_ID,
+            int(application["id"]),
+            ADMIN_ID,
+            int(assigned["version"]),
+            approved=True,
+            internal_reason="Requisitos conferidos",
+            candidate_message="Aprovado.",
+        )
+
+    current = await database.fetchone(
+        "SELECT status, stage, version, decided_at, decided_by FROM recruitment_applications WHERE id=?",
+        (application["id"],),
+    )
+    created_member = await database.fetchone(
+        "SELECT id FROM members WHERE guild_id=? AND discord_id=?",
+        (GUILD_ID, CANDIDATE_ID),
+    )
+    assert dict(current) == {
+        "status": "UNDER_REVIEW",
+        "stage": "REVIEW",
+        "version": int(assigned["version"]),
+        "decided_at": None,
+        "decided_by": None,
+    }
+    assert created_member is None
+
+
+@pytest.mark.asyncio
+async def test_approval_does_not_replace_existing_bgr_for_same_discord(
+    recruitment_bundle,
+) -> None:
+    service = recruitment_bundle["service"]
+    database = recruitment_bundle["database"]
+    clock = recruitment_bundle["clock"]
+    rank_id = recruitment_bundle["rank_id"]
+    application = await _start(service)
+    await database.execute(
+        """
+        INSERT INTO members(
+            guild_id, discord_id, discord_nick, mta_nick, character_id, rank_id,
+            unit, status, joined_at, created_at, updated_at
+        ) VALUES (?, ?, 'candidate', 'Existing_Identity', '9999', ?, 'BGR', 'ACTIVE', ?, ?, ?)
+        """,
+        (GUILD_ID, CANDIDATE_ID, rank_id, clock(), clock(), clock()),
+    )
+    await database.execute(
+        """
+        UPDATE recruitment_application_questions
+        SET status='SUBMITTED', final_answer_json='"Resposta de teste"', submitted_at=?
+        WHERE application_id=?
+        """,
+        (clock(), application["id"]),
+    )
+    await service.submit_application(GUILD_ID, CANDIDATE_ID, int(application["id"]), 1)
+    assigned = await service.assign(GUILD_ID, int(application["id"]), ADMIN_ID, 2)
+
+    with pytest.raises(ConflictError, match="Discord já está vinculado a outro ID in-game"):
+        await service.decide(
+            GUILD_ID,
+            int(application["id"]),
+            ADMIN_ID,
+            int(assigned["version"]),
+            approved=True,
+            internal_reason="Requisitos conferidos",
+            candidate_message="Aprovado.",
+        )
+
+    member = await database.fetchone(
+        "SELECT character_id FROM members WHERE guild_id=? AND discord_id=?",
+        (GUILD_ID, CANDIDATE_ID),
+    )
+    current = await database.fetchone(
+        "SELECT status, version, decided_at FROM recruitment_applications WHERE id=?",
+        (application["id"],),
+    )
+    assert member["character_id"] == "9999"
+    assert dict(current) == {
+        "status": "UNDER_REVIEW",
+        "version": int(assigned["version"]),
+        "decided_at": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_assignment_is_idempotent_for_owner_and_blocks_takeover(
+    recruitment_bundle,
+) -> None:
+    service = recruitment_bundle["service"]
+    database = recruitment_bundle["database"]
+    application = await _start(service)
+    await database.execute(
+        "UPDATE recruitment_applications SET status='UNDER_REVIEW', version=2 WHERE id=?",
+        (application["id"],),
+    )
+    assigned = await service.assign(GUILD_ID, int(application["id"]), ADMIN_ID, 2)
+
+    repeated = await service.assign(
+        GUILD_ID,
+        int(application["id"]),
+        ADMIN_ID,
+        int(assigned["version"]),
+    )
+    with pytest.raises(ConflictError, match="já está atribuída a outro responsável"):
+        await service.assign(
+            GUILD_ID,
+            int(application["id"]),
+            ADMIN_ID + 1,
+            int(assigned["version"]),
+        )
+
+    current = await database.fetchone(
+        "SELECT assigned_to, version FROM recruitment_applications WHERE id=?",
+        (application["id"],),
+    )
+    assert repeated["assigned_to"] == ADMIN_ID
+    assert int(current["assigned_to"]) == ADMIN_ID
+    assert int(current["version"]) == int(assigned["version"])
+
+
+@pytest.mark.asyncio
 async def test_rec_approval_imports_registration_into_canonical_guild(
     recruitment_bundle,
 ) -> None:

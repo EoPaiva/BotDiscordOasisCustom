@@ -29,6 +29,8 @@ vi.mock("@/lib/api", () => ({
 
 import { assignRecruitmentApplication, decideRecruitmentApplication } from "./actions";
 
+const initialState = { kind: "idle" as const, message: "" };
+
 describe("recruitment server actions", () => {
   beforeEach(() => {
     mocks.requestCommandCenter.mockReset();
@@ -44,11 +46,43 @@ describe("recruitment server actions", () => {
     formData.set("applicationId", "20");
     formData.set("expectedVersion", "1");
 
-    await expect(assignRecruitmentApplication(formData)).rejects.toThrow(
+    await expect(assignRecruitmentApplication(initialState, formData)).rejects.toThrow(
       "REDIRECT:/login?reauth=1&returnTo=%2Frecruitment%2F20",
     );
     expect(mocks.redirect).toHaveBeenCalledWith("/login?reauth=1&returnTo=%2Frecruitment%2F20");
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("returns an expected conflict instead of crashing the recruitment route", async () => {
+    mocks.requestCommandCenter.mockRejectedValue(
+      new mocks.ApiError("Transição de candidatura inválida.", 409, "corr-conflict"),
+    );
+    const formData = new FormData();
+    formData.set("applicationId", "96");
+    formData.set("expectedVersion", "1");
+
+    await expect(assignRecruitmentApplication(initialState, formData)).resolves.toEqual({
+      kind: "error",
+      message: "Transição de candidatura inválida.",
+      reference: "corr-conflict",
+    });
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/recruitment/96");
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/recruitment");
+  });
+
+  it("keeps assignment on the dossier while the API is updating", async () => {
+    mocks.requestCommandCenter.mockRejectedValue(
+      new mocks.ApiError("Falha ao processar a operação.", 500, "corr-rollout-assign"),
+    );
+    const formData = new FormData();
+    formData.set("applicationId", "95");
+    formData.set("expectedVersion", "3");
+
+    await expect(assignRecruitmentApplication(initialState, formData)).resolves.toEqual({
+      kind: "error",
+      message: "Não foi possível concluir agora. O sistema pode estar sendo atualizado; aguarde alguns segundos e tente novamente.",
+      reference: "corr-rollout-assign",
+    });
   });
 
   it("uses the same safe recovery for final approval and rejection", async () => {
@@ -63,9 +97,53 @@ describe("recruitment server actions", () => {
     formData.set("candidateMessage", "Sua candidatura foi aprovada.");
     formData.set("confirmation", "CONFIRMAR");
 
-    await expect(decideRecruitmentApplication(formData)).rejects.toThrow(
+    await expect(decideRecruitmentApplication(initialState, formData)).rejects.toThrow(
       "REDIRECT:/login?reauth=1&returnTo=%2Frecruitment%2F20",
     );
     expect(mocks.redirect).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an identity conflict without crashing the dossier", async () => {
+    mocks.requestCommandCenter.mockRejectedValue(
+      new mocks.ApiError(
+        "O ID in-game informado já está vinculado a outro perfil.",
+        409,
+        "corr-identity",
+      ),
+    );
+    const formData = new FormData();
+    formData.set("applicationId", "95");
+    formData.set("expectedVersion", "3");
+    formData.set("decision", "approve");
+    formData.set("internalReason", "Revisão humana concluída.");
+    formData.set("candidateMessage", "Sua candidatura foi aprovada.");
+    formData.set("confirmation", "CONFIRMAR");
+
+    await expect(decideRecruitmentApplication(initialState, formData)).resolves.toEqual({
+      kind: "error",
+      message: "O ID in-game informado já está vinculado a outro perfil.",
+      reference: "corr-identity",
+    });
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/recruitment/95");
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/recruitment");
+  });
+
+  it("keeps approval on the dossier when an older backend returns 500", async () => {
+    mocks.requestCommandCenter.mockRejectedValue(
+      new mocks.ApiError("Falha ao processar a operação.", 500, "corr-rollout-approve"),
+    );
+    const formData = new FormData();
+    formData.set("applicationId", "95");
+    formData.set("expectedVersion", "3");
+    formData.set("decision", "approve");
+    formData.set("internalReason", "Revisão humana concluída.");
+    formData.set("candidateMessage", "Sua candidatura foi aprovada.");
+    formData.set("confirmation", "CONFIRMAR");
+
+    await expect(decideRecruitmentApplication(initialState, formData)).resolves.toEqual({
+      kind: "error",
+      message: "Não foi possível concluir agora. O sistema pode estar sendo atualizado; aguarde alguns segundos e tente novamente.",
+      reference: "corr-rollout-approve",
+    });
   });
 });
