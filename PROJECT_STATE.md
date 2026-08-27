@@ -240,8 +240,8 @@ handoff.
 
 - Auditoria na máquina principal dos blocos locais, seguida de eventual rollout somente após gates e
   autorização explícita.
-- Reformulação visual do site e consolidação do design system permanecem registradas como frentes
-  ativas na fila oficial.
+- A Fase 58 de identidade visual e design system foi concluída e publicada; a reformulação funcional
+  restante da Fase 57 continua ativa na fila oficial.
 
 ### Planejado
 

@@ -3,7 +3,36 @@
 > Checkpoint operacional atual. O código e o estado real do repositório prevalecem.
 > Estado estrutural permanente: `PROJECT_STATE.md`.
 
-## 0. Checkpoint mais recente — aviso privado da Central de Tags
+## 0. Checkpoint mais recente — Fase 58 concluída e publicada
+
+**Branch:** `main`. **TDD:** `2f284ba` registra os contratos RED e `c704553` entrega o GREEN.
+Ambos foram enviados para `origin/main` e `private/main`.
+
+**Entregue:** estados compartilhados de erro, vazio e carregamento; mensagens públicas sem detalhes
+internos; classificação de status sem falso positivo; 25 tabelas com captions contextuais únicos;
+feedback de botões/formulários; contraste e responsividade; anúncios assistivos focados; e CSP por
+nonce compatível com Next.js 16, sem liberar `unsafe-inline`/`unsafe-eval` em produção. O hash de
+estilo autoriza somente `color:transparent`, valor fixo emitido pelo `next/image`.
+
+**Gates locais:** 91 testes em 20 arquivos, lint, typecheck, build, `npm audit --omit=dev` com zero
+vulnerabilidades, 8 E2E aprovados e 1 cenário visual Firefox intencionalmente ignorado. Login,
+recrutamento e acesso negado foram capturados em 1440 e 390 px; as seis medições deram
+`scrollWidth - clientWidth = 0`. QA visual e revisão de código independentes passaram; os três
+achados do reviewer foram corrigidos e revalidados.
+
+**Produção técnica:** deploy Vercel `dpl_DPCNG8jUHVzxVzFjncvqzF5CK9Js`, `READY` em 2026-08-27,
+com aliases `choquebgr.online`, `www.choquebgr.online` e `web-plum-tau-82.vercel.app`. `/login` e
+`/status` responderam 200; o header CSP contém nonce, `strict-dynamic` e o hash estreito, sem
+`unsafe-inline`/`unsafe-eval`. O gate visual 1440/390 passou novamente no domínio público e não
+foram encontrados logs de erro no deploy. Isso é smoke técnico; login humano real e uso assistivo
+com leitor de tela continuam validações externas distintas.
+
+**Próxima ação exata:** voltar aos Prompts Masters ainda ativos, começando pelo próximo corte
+incompleto da Fase 57 e depois da Fase 56. Não avançar para a seção “após os Prompts Masters” antes
+de encerrar esses dois prompts. O limite incompleto da fonte da Fase 58 após `Status com:` permanece
+registrado e não pode ser inventado.
+
+## 0.1 Checkpoint anterior — aviso privado da Central de Tags
 
 O proprietário pediu que todos os membros CHOQUE já aprovados no cadastro recebam o mesmo aviso
 privado da Central de Tags, em fila lenta. Antes da fila geral, o Discord ID
@@ -44,7 +73,7 @@ Unidades Especiais porque o cargo `COMANDO • ROCAM` possui permissões globais
 responsável é byte a byte igual ao anterior ao deploy; o app, API, Gateway e demais módulos seguem
 online. Não alterar permissões do cargo sem autorização específica.
 
-## 0.1 Checkpoint anterior — Controle de Tags
+## 0.2 Checkpoint anterior — Controle de Tags
 
 Esta seção supersede temporariamente a missão e a próxima ação antigas abaixo. O proprietário pediu
 pausa imediata para trocar de computador; por isso o corte foi fechado em commits locais, sem push,
@@ -311,7 +340,8 @@ npm run build
 - [x] Fase 57 no dashboard: duração de patrulha publicada em `<time dateTime="PT…">`, preservando
   texto, cálculo, efetivo, ordem e dados. TDD `9baa176`/`78c63d4`; 82 testes web, lint, typecheck e
   build verdes; deploy `dpl_eZ6MKwqMesq5YDYQbK743DbC7iys` `READY` em 2026-08-27.
-- [ ] Consolidar a Fase 58, Design System, sem inventar o trecho ausente do prompt original.
+- [x] Fase 58 consolidada e publicada em `2f284ba`/`c704553`, sem inventar o trecho ausente do
+  prompt original; deploy `dpl_DPCNG8jUHVzxVzFjncvqzF5CK9Js` `READY`.
 - [ ] Continuar os blocos restantes do Prompt Master do ecossistema pela ordem da fila oficial.
 
 ### BACKLOG

@@ -830,7 +830,7 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     à `main` e publicados no portal no deploy `dpl_eZ6MKwqMesq5YDYQbK743DbC7iys`, `READY` em
     2026-08-27.
 
-58. 🔄 **Prompt Master — Identidade Visual / Design System CHOQUE — fase visual ativa.**
+58. ✅ **Prompt Master — Identidade Visual / Design System CHOQUE — concluída e publicada em 2026-08-27.**
     Fonte recebida: `C:\Users\mpaii\.codex\attachments\8f7db861-0f81-4655-a0fc-b3fc90133b12\pasted-text.txt`,
     SHA-256 `78C71E32434F0B6B1DC711B51E2BC872A5406B47E043817BD7624038ADFA5221`. A imagem tática
     encaminhada junto é a referência visual obrigatória. A referência prioritária foi renovada pelo
@@ -861,8 +861,17 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     e áreas seguras móveis. O terceiro substituiu a campanha vermelha legada do recrutamento pela
     paleta verde/grafite aprovada e foi revisado por capturas integrais em desktop e 390 px. Gates:
     71 testes web, lint, typecheck e build. Checkpoints `f120110`, `4dae614` e `7d27c5d`, agora
-    integrados à `main` e presentes no portal publicado. A consolidação das superfícies restantes
-    continua ativa; nenhum trecho ausente do prompt pode ser inventado.
+    integrados à `main` e presentes no portal publicado. O corte final consolidou estados de erro,
+    vazio e carregamento; semântica e nomes únicos das 25 tabelas; estados de botões e formulários;
+    contraste; responsividade; anúncios assistivos; e mensagens públicas sem detalhes internos. O
+    CSP por nonce continuou estrito e ganhou somente o hash exato do estilo fixo emitido por
+    `next/image`, sem `unsafe-inline` ou `unsafe-eval` em produção. TDD `2f284ba`/`c704553`; gates:
+    91 testes web em 20 arquivos, lint, typecheck, build, auditoria sem vulnerabilidades e 8 E2E
+    aprovados com 1 captura Firefox intencionalmente ignorada. Capturas reais de login,
+    recrutamento e acesso negado passaram em 1440 e 390 px com `scrollWidth - clientWidth = 0` e
+    revisão visual independente. O mesmo gate passou no domínio de produção. Deploy
+    `dpl_DPCNG8jUHVzxVzFjncvqzF5CK9Js` `READY`, aliases e rotas públicas HTTP 200. A fase está
+    concluída no limite da fonte recebida; nenhum trecho ausente após `Status com:` foi inventado.
 
 ## Ordem operacional após os Prompts Masters
 

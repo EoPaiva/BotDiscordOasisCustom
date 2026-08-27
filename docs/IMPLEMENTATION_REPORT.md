@@ -1418,3 +1418,23 @@ Fora do escopo atual: eventos, API e integração MTA.
 - Além da atualização do resumo fixado, uma nova postagem diária separada foi criada no canal com
   somente as seis entregas de 26/08/2026. A identidade estável da publicação impede duplicação em
   novas execuções, que passam a editar apenas essa postagem diária.
+
+# Fase 58 — Identidade Visual / Design System concluída e publicada em 2026-08-27
+
+- `CommandState`, `LoadingState`, `EmptyState`, `Status` e `DataTable` consolidam estados de erro,
+  carregamento, vazio, severidade e tabelas sem remover regras, URLs, dados ou RBAC existentes.
+- Erros públicos não exibem mais mensagens internas. Todas as 25 tabelas possuem caption contextual
+  obrigatório e único por página; polling de acesso anuncia somente degradação, sem repetir
+  `CHECKING`/`CURRENT` a cada cinco segundos.
+- O CSP continua baseado em nonce e `strict-dynamic`. A compatibilidade com `next/image` usa apenas
+  `style-src-attr 'unsafe-hashes'` com o SHA-256 exato de `color:transparent`; produção não libera
+  `unsafe-inline` nem `unsafe-eval`. O loading foi separado do módulo de ícones para manter todos os
+  chunks automáticos nonceados.
+- TDD `2f284ba`/`c704553`. Gates finais: **91 testes web em 20 arquivos**, lint, typecheck, build,
+  auditoria sem vulnerabilidades, **8 E2E aprovados** e 1 captura Firefox ignorada por desenho.
+  Screenshots de login, recrutamento e acesso negado em 1440/390 passaram com overflow horizontal
+  exatamente zero; QA visual e revisão de código independentes passaram após três correções.
+- `origin/main` e `private/main` receberam o corte. Deploy Vercel
+  `dpl_DPCNG8jUHVzxVzFjncvqzF5CK9Js` ficou `READY`; `/login` e `/status` responderam 200, CSP foi
+  validado no alias público e o gate visual passou novamente em produção. Smoke humano de sessão e
+  leitor de tela não foi apresentado como concluído.
