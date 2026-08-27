@@ -827,15 +827,66 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     atual: 15 testes focados, 67 testes web em 17 arquivos, audit, typecheck, lint e build. Os cortes
     permanecem somente locais e não publicados.
 
-58. ⏳ **Prompt Master — Identidade Visual / Design System CHOQUE — registrado na fila.**
+58. 🔄 **Prompt Master — Identidade Visual / Design System CHOQUE — fase visual ativa.**
     Fonte recebida: `C:\Users\mpaii\.codex\attachments\8f7db861-0f81-4655-a0fc-b3fc90133b12\pasted-text.txt`,
     SHA-256 `78C71E32434F0B6B1DC711B51E2BC872A5406B47E043817BD7624038ADFA5221`. A imagem tática
-    encaminhada junto é a referência visual obrigatória. O contrato exige military tech institucional,
-    base preto/grafite, verde funcional controlado, superfícies sólidas, tipografia condensada,
-    design tokens, acessibilidade, performance e UX `ver → entender → agir`, sem remover qualquer
-    função. O arquivo recebido termina incompleto na seção 65, após `Status com:`; esse limite foi
-    registrado sem inventar conteúdo. A execução visual entra depois dos blocos funcionais locais em
-    andamento e continua proibida de rollout na Discloud sem autorização explícita.
+    encaminhada junto é a referência visual obrigatória. A referência prioritária foi renovada pelo
+    proprietário em 2026-08-26 com o mosaico de telas CHOQUE: interface institucional escura,
+    cabeçalho compacto com brasão, tipografia condensada em caixa alta, verde oliva controlado para
+    ações e estados positivos, painéis grafite com bordas discretas, tabelas e métricas densas,
+    navegação lateral operacional e imagens militares tratadas em baixo contraste. As superfícies de
+    recrutamento, processo seletivo, candidatura, ADV, painel de comando, analytics e Neural Core
+    devem ficar o mais próximas possível dessa referência, sem copiar texto/dados simulados como se
+    fossem produção. O detalhamento complementar recebido define: visual *military tech* moderno,
+    profissional e funcional; contraste alto, detalhes fortes e hierarquia organizacional; nunca
+    aparência de game/cyberpunk. A experiência deve ser intuitiva, com informação clara e forte,
+    fluxos óbvios e rápidos, sensação premium, responsividade, acessibilidade e consistência.
+    Aplicar `ver → entender → agir`, uma ação principal por tela, progresso sempre visível, feedback
+    imediato, mínimo esforço cognitivo e simplicidade impressionante.
+
+    As referências obrigatórias abrangem landing de recrutamento, painel administrativo, etapas de
+    recrutamento, tela de avaliação, confirmação de candidatura e versões mobile. O design system
+    deve padronizar paleta preto/grafite/verde militar, tipografia Rajdhani nos títulos e Inter no
+    corpo, botão primário/secundário/desabilitado, checkboxes, inputs normal/focado, badges e
+    indicadores de progresso. O contrato exige design tokens, acessibilidade, performance e UX sem
+    remover qualquer função. O arquivo recebido termina incompleto na seção 65, após `Status com:`;
+    esse limite foi registrado sem inventar conteúdo. A execução visual entra depois dos blocos
+    funcionais locais em andamento e continua proibida de rollout na Discloud sem autorização
+    explícita. O primeiro corte consolidou os tokens canônicos de cor, espaço, raio, movimento,
+    sombra e camadas, além de Rajdhani para títulos, Inter para interface e IBM Plex Mono para dados.
+    O segundo corte completou os estados de interação, alvos de toque, carregamento, movimento reduzido
+    e áreas seguras móveis. O terceiro substituiu a campanha vermelha legada do recrutamento pela
+    paleta verde/grafite aprovada e foi revisado por capturas integrais em desktop e 390 px. Gates:
+    71 testes web, lint, typecheck e build. Checkpoints privados: `f120110`, `4dae614` e `7d27c5d`;
+    nenhum rollout na Discloud foi executado.
+
+## Ordem operacional após os Prompts Masters
+
+Os itens abaixo foram reclassificados pelo proprietário em 2026-08-26. Os registros anteriores
+permanecem como histórico técnico; esta seção é a referência operacional de prioridade.
+
+### Concluídos ou validados
+
+- Central de Auxílio Financeiro, Metas, Transparência e Honrarias.
+- Revisão dos canais e painéis persistentes já publicados.
+- Notificações institucionais de promoção e rebaixamento.
+- Validação humana do Dashboard de Recrutamento, ADV, Cursos, Transferências, Desligamentos e
+  AGUARDANDO SET.
+- Campanha de DM de Tags para os membros elegíveis.
+- Correção das permissões globais do cargo `COMANDO • ROCAM`.
+
+### Pendências ativas, após os Prompts Masters
+
+1. Revisar a compactação estrutural do Discord antes de iniciar qualquer trabalho nela.
+2. Revisar a dívida de segurança antes de definir ou executar medidas corretivas.
+3. Migração única para PostgreSQL/Supabase, após ensaio e autorização.
+4. Empacotamento e publicação definitiva na Discloud.
+
+### Fora da fila ativa
+
+- Integração MTA: integração futura entre o servidor de jogo MTA, uma API e o bot/Discord. Poderá
+  vincular personagem e Discord, validar patente/facção/serviço, sincronizar hierarquia e registrar
+  operações. Não é trabalho atual e não deve começar sem uma decisão de escopo específica.
 
 59. ✅ **Registro militar automático de desligamentos — concluído localmente, sem rollout.**
     Fonte integral preservada em `docs/source-prompts/17-dismissal-records-original.md`, SHA-256
