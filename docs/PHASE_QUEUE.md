@@ -848,11 +848,14 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     sem vulnerabilidades e 8 E2E aprovados com 1 cenário visual Firefox intencionalmente ignorado. O
     lote vigésimo terceiro/vigésimo quarto cobre, em `/security`, o instante `Desde` do lockdown e a
     coluna `DATA` dos eventos recentes. `32b4bbf` registra ambos os contratos RED e `a7314c6` entrega
-    o GREEN sem tocar nas ações sensíveis. Gate consolidado atual: 99 testes web em 25 arquivos,
-    lint, typecheck, build, `npm audit` sem vulnerabilidades e 8 E2E aprovados com 1 cenário visual
-    Firefox intencionalmente ignorado. Os cortes foram integrados à `main` e publicados no deploy
-    `dpl_BkSZCWmRcqrW4xvgVgea9vaqqgZW`, `READY` em 2026-08-27; `/login` e `/status` responderam HTTP
-    200 no alias público.
+    o GREEN sem tocar nas ações sensíveis. O vigésimo quinto corte nomeia o formulário e os dois
+    controles de filtro de `/officer-candidacies` para navegação assistiva, sem alterar parâmetros,
+    busca, URLs, RBAC ou apresentação; `057f3b1` registra o RED e `8347a0f` entrega o GREEN. Gate
+    consolidado atual: 100 testes web em 26 arquivos, lint, typecheck, build, `npm audit` sem
+    vulnerabilidades e 8 E2E aprovados com 1 cenário visual Firefox intencionalmente ignorado. Os
+    cortes foram integrados à `main` e publicados no deploy `dpl_GzivhujHQhE3YfMeczQQmawfUsDU`,
+    `READY` em 2026-08-27; `/login` e `/status` responderam HTTP 200 no alias público e o CSP estrito
+    permaneceu ativo.
 
 58. ✅ **Prompt Master — Identidade Visual / Design System CHOQUE — concluída e publicada em 2026-08-27.**
     Fonte recebida: `C:\Users\mpaii\.codex\attachments\8f7db861-0f81-4655-a0fc-b3fc90133b12\pasted-text.txt`,

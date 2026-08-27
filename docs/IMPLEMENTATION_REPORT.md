@@ -1524,3 +1524,17 @@ Fora do escopo atual: eventos, API e integração MTA.
 - `origin/main` e `private/main` receberam o lote. O deploy Vercel
   `dpl_BkSZCWmRcqrW4xvgVgea9vaqqgZW` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
   estrito permaneceu ativo. A tela autenticada e o leitor de tela real ainda requerem smoke humano.
+
+# Fase 57 — filtros acessíveis de candidaturas ao Oficialato publicados em 2026-08-27
+
+- O formulário de filtros de `/officer-candidacies` agora possui o nome acessível `Filtros das
+  candidaturas ao Oficialato`; o seletor de status e o campo de ID do responsável também possuem
+  nomes próprios. Foram adicionados somente três atributos ARIA, preservando nomes de campo,
+  parâmetros, busca, regex, URL, RBAC, layout e comportamento.
+- TDD `057f3b1`/`8347a0f` cobre formulário, combobox, textbox e botão pelos seus papéis e nomes
+  acessíveis. Gates: **100 testes web em 26 arquivos**, lint, typecheck, build, `npm audit` sem
+  vulnerabilidades e **8 E2E aprovados**, com 1 cenário visual Firefox intencionalmente ignorado.
+- `origin/main` e `private/main` receberam o corte. O deploy Vercel
+  `dpl_GzivhujHQhE3YfMeczQQmawfUsDU` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
+  manteve `strict-dynamic` sem `unsafe-inline` nem `unsafe-eval`. A tela autenticada e o leitor de
+  tela real ainda requerem smoke humano.
