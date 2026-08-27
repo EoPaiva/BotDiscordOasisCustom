@@ -841,8 +841,13 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     a mesma semântica à coluna `DATA` da Linha de mudanças; `425a69f` registra o RED e `8200b63`
     entrega o GREEN. Gate consolidado atual: 95 testes web em 22 arquivos, lint, typecheck, build,
     `npm audit` sem vulnerabilidades e 8 E2E aprovados com 1 cenário visual Firefox intencionalmente
-    ignorado. Os cortes foram integrados à `main`; 19 e 20 foram publicados juntos no deploy
-    `dpl_8DtbyzAS5p83KmJSwPWwMV24dtF4`, `READY` em 2026-08-27; `/login` e `/status` responderam HTTP
+    ignorado. O vigésimo primeiro corte marca o campo `Desde` de módulos ativos em `/maintenance`;
+    `c15202b` registra o RED e `e019266` entrega o GREEN. O vigésimo segundo faz o mesmo com `Último
+    sync` em `/profile`, preservando o fallback textual; `34843f8` registra o RED e `756371d` entrega
+    o GREEN. Gate consolidado atual: 97 testes web em 24 arquivos, lint, typecheck, build, `npm audit`
+    sem vulnerabilidades e 8 E2E aprovados com 1 cenário visual Firefox intencionalmente ignorado. Os
+    cortes foram integrados à `main`; 21 e 22 foram publicados juntos no deploy
+    `dpl_Cmxd8P8muVj3Nc2U3CmnQsHHHwjC`, `READY` em 2026-08-27; `/login` e `/status` responderam HTTP
     200 no alias público.
 
 58. ✅ **Prompt Master — Identidade Visual / Design System CHOQUE — concluída e publicada em 2026-08-27.**

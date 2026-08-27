@@ -1499,3 +1499,16 @@ Fora do escopo atual: eventos, API e integração MTA.
 - `origin/main` e `private/main` receberam ambos os cortes. O deploy Vercel agrupado
   `dpl_8DtbyzAS5p83KmJSwPWwMV24dtF4` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
   estrito permaneceu ativo. A página autenticada e o leitor de tela real ainda requerem smoke humano.
+
+# Fase 57 — instantes semânticos de manutenção e perfil publicados em 2026-08-27
+
+- O campo `Desde` de módulos ativos em `/maintenance` e o campo `Último sync` em `/profile` agora
+  usam `<time dateTime="…">`; o fallback “Aguardando primeira sincronização” continua inalterado.
+  Nenhuma ação de manutenção ou sincronização foi executada ou modificada.
+- TDD `c15202b`/`e019266` para manutenção e `34843f8`/`756371d` para perfil. O lint detectou a variável
+  de teste reservada `module`; `4f63f20` a renomeia e a repetição focal/lint passou. Gates agrupados:
+  **97 testes web em 24 arquivos**, lint, typecheck, build, `npm audit` sem vulnerabilidades e **8 E2E
+  aprovados**, com 1 cenário visual Firefox intencionalmente ignorado.
+- `origin/main` e `private/main` receberam ambos os cortes. O deploy Vercel agrupado
+  `dpl_Cmxd8P8muVj3Nc2U3CmnQsHHHwjC` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
+  estrito permaneceu ativo. As páginas autenticadas e o leitor de tela real ainda requerem smoke humano.
