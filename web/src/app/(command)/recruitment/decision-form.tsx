@@ -40,11 +40,11 @@ export function RecruitmentDecisionForm({
       )}
       <label>
         Motivo interno
-        <textarea name="internalReason" required rows={3} />
+        <textarea maxLength={2000} minLength={3} name="internalReason" required rows={3} />
       </label>
       <label>
         Mensagem ao candidato
-        <textarea name="candidateMessage" required rows={3} />
+        <textarea maxLength={2000} minLength={3} name="candidateMessage" required rows={3} />
       </label>
       <label>
         Confirmação

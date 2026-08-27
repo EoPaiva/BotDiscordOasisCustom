@@ -128,6 +128,42 @@ describe("recruitment server actions", () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/recruitment");
   });
 
+  it.each(["approve", "reject"] as const)(
+    "returns invalid final-decision fields inline instead of crashing the dossier for %s",
+    async (decision) => {
+      const formData = new FormData();
+      formData.set("applicationId", "95");
+      formData.set("expectedVersion", "3");
+      formData.set("decision", decision);
+      formData.set("internalReason", "   ");
+      formData.set("candidateMessage", "");
+      formData.set("confirmation", "CONFIRMAR");
+
+      await expect(decideRecruitmentApplication(initialState, formData)).resolves.toEqual({
+        kind: "error",
+        message: "Preencha o motivo interno e a mensagem ao candidato com 3 a 2.000 caracteres cada.",
+      });
+      expect(mocks.requestCommandCenter).not.toHaveBeenCalled();
+      expect(mocks.revalidatePath).not.toHaveBeenCalled();
+    },
+  );
+
+  it("returns an invalid confirmation inline instead of throwing a Zod error", async () => {
+    const formData = new FormData();
+    formData.set("applicationId", "95");
+    formData.set("expectedVersion", "3");
+    formData.set("decision", "approve");
+    formData.set("internalReason", "Revisão humana concluída.");
+    formData.set("candidateMessage", "Sua candidatura foi aprovada.");
+    formData.set("confirmation", "confirmar");
+
+    await expect(decideRecruitmentApplication(initialState, formData)).resolves.toEqual({
+      kind: "error",
+      message: "Digite CONFIRMAR no campo de confirmação antes de concluir a decisão.",
+    });
+    expect(mocks.requestCommandCenter).not.toHaveBeenCalled();
+  });
+
   it("keeps approval on the dossier when an older backend returns 500", async () => {
     mocks.requestCommandCenter.mockRejectedValue(
       new mocks.ApiError("Falha ao processar a operação.", 500, "corr-rollout-approve"),

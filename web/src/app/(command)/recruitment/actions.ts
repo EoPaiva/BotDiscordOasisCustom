@@ -133,11 +133,33 @@ const decisionSchema = versioned.extend({
   confirmation: z.literal("CONFIRMAR"),
 });
 
+function decisionValidationFailure(error: z.ZodError): RecruitmentActionState {
+  const invalidFields = new Set(error.issues.map((issue) => String(issue.path[0] ?? "")));
+  if (invalidFields.has("internalReason") || invalidFields.has("candidateMessage")) {
+    return {
+      kind: "error",
+      message: "Preencha o motivo interno e a mensagem ao candidato com 3 a 2.000 caracteres cada.",
+    };
+  }
+  if (invalidFields.has("confirmation")) {
+    return {
+      kind: "error",
+      message: "Digite CONFIRMAR no campo de confirmação antes de concluir a decisão.",
+    };
+  }
+  return {
+    kind: "error",
+    message: "Os dados da decisão são inválidos. Recarregue o dossiê e tente novamente.",
+  };
+}
+
 export async function decideRecruitmentApplication(
   _previousState: RecruitmentActionState,
   formData: FormData,
 ): Promise<RecruitmentActionState> {
-  const input = decisionSchema.parse(Object.fromEntries(formData));
+  const parsed = decisionSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return decisionValidationFailure(parsed.error);
+  const input = parsed.data;
   try {
     await commandCenterFetch(
       `/v1/admin/recruitment/applications/${input.applicationId}/${input.decision}`,
