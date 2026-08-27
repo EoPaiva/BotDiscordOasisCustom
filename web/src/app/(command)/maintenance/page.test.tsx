@@ -22,8 +22,8 @@ describe("maintenance command center", () => {
     });
 
     render(await MaintenancePage());
-    const module = screen.getByRole("heading", { name: "PATROLS" }).closest("article");
-    const sinceField = within(module as HTMLElement).getByText("Desde").closest("div");
+    const moduleCard = screen.getByRole("heading", { name: "PATROLS" }).closest("article");
+    const sinceField = within(moduleCard as HTMLElement).getByText("Desde").closest("div");
     const since = sinceField?.querySelector("dd time");
 
     expect(since).toHaveAttribute("dateTime", "2026-08-27T05:29:00.000Z");
