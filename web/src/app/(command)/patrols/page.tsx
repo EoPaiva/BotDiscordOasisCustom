@@ -29,7 +29,7 @@ export default async function PatrolsPage() {
         <DataTable caption="Fila de patrulha" rows={data.queue} columns={[
           { key: "id", label: "POS", render: (row) => <code>{String(row.id).padStart(2, "0")}</code> },
           { key: "mta_nick", label: "MEMBRO", render: (row) => <strong>{String(row.mta_nick ?? row.discord_id)}</strong> },
-          { key: "queue_entered_at", label: "ENTRADA", render: (row) => dateTime(Number(row.queue_entered_at)) },
+          { key: "queue_entered_at", label: "ENTRADA", render: (row) => <time dateTime={isoDateTime(row.queue_entered_at)}>{dateTime(Number(row.queue_entered_at))}</time> },
           { key: "status", label: "STATUS", render: (row) => <Status value={row.status} /> },
         ]} />
       </section>
