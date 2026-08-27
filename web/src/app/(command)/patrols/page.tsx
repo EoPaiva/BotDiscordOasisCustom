@@ -1,7 +1,7 @@
 import { DataTable, EmptyState, MetricStrip, PageHeader, SectionHeader, Status } from "@/components/ui";
 import { LiveDataRefresh } from "@/components/live-data-refresh";
 import { commandCenterFetch } from "@/lib/api";
-import { dateTime, duration } from "@/lib/format";
+import { dateTime, duration, isoDuration } from "@/lib/format";
 
 type Row = Record<string, unknown>;
 
@@ -21,7 +21,7 @@ export default async function PatrolsPage() {
         {data.active.length ? <ul aria-label="Patrulhas em andamento" className="patrol-list">{data.active.map((row) => <li key={String(row.id)}><article className="patrol-record">
           <div className="patrol-code"><span>PTR</span><strong>{String(row.sequence_number).padStart(3, "0")}</strong></div>
           <div className="patrol-body"><header><Status value={row.status} /><code>{String(row.voice_channel_name ?? `CALL ${String(row.voice_channel_id)}`)}</code></header><p>{String(row.member_count ?? 0)} militares na call</p><p>{row.member_names ? <><strong>{String(row.member_names).split(" | ").join(" • ")}</strong></> : <>Comandante: <strong>{row.commander_discord_id ? `[${String(row.commander_rank_prefix ?? row.commander_rank_name ?? "")}] ${String(row.commander_mta_nick ?? row.commander_discord_id)}` : "Não definido"}</strong></>}</p></div>
-          <div className="patrol-time"><strong>{duration(data.generated_at - Number(row.started_at ?? data.generated_at))}</strong><span>desde {dateTime(Number(row.started_at))}</span></div>
+          <div className="patrol-time"><strong><time dateTime={isoDuration(data.generated_at - Number(row.started_at ?? data.generated_at))}>{duration(data.generated_at - Number(row.started_at ?? data.generated_at))}</time></strong><span>desde {dateTime(Number(row.started_at))}</span></div>
         </article></li>)}</ul> : <EmptyState title="Nenhuma patrulha ativa" detail="A central segue monitorando a call de espera." />}
       </section>
       <section className="command-section">
