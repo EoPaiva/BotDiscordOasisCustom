@@ -57,6 +57,9 @@ describe("command dashboard snapshot", () => {
     expect(queue.tagName).toBe("OL");
     expect(within(queue).getAllByRole("listitem")).toHaveLength(1);
     expect(within(queue).getByText("Sentinela")).toBeInTheDocument();
+    const queueDuration = queue.querySelector("time");
+    expect(queueDuration).toHaveAttribute("dateTime", "PT1M");
+    expect(queueDuration).toHaveTextContent("1m");
   });
 
   it("exposes recent administrative items as a semantic list", async () => {
