@@ -41,5 +41,8 @@ describe("patrols command center", () => {
     const patrolDuration = patrol.querySelector(".patrol-time time");
     expect(patrolDuration).toHaveAttribute("dateTime", "PT1M");
     expect(patrolDuration).toHaveTextContent("1m");
+    const patrolStartedAt = patrol.querySelector(".patrol-time span time");
+    expect(patrolStartedAt).toHaveAttribute("dateTime", "2026-08-27T05:29:00.000Z");
+    expect(patrolStartedAt).toHaveTextContent("27 de ago., 02:29");
   });
 });
