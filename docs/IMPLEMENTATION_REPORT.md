@@ -1451,3 +1451,15 @@ Fora do escopo atual: eventos, API e integração MTA.
   `dpl_8ZDW7nFBeN8FAXcWVpDjnPhpRMtW` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
   estrito permaneceu ativo. O comportamento autenticado e o leitor de tela real continuam sujeitos
   a smoke humano separado.
+
+# Fase 57 — lista semântica da Central de Patrulhas publicada em 2026-08-27
+
+- A coleção de patrulhas ativas em `/patrols` agora é uma `<ul aria-label="Patrulhas em andamento">`
+  com um `<li>` por operação. Cada cartão continua sendo o mesmo `<article className="patrol-record">`;
+  dados, duração, visual, API, URL e RBAC não foram alterados.
+- TDD `d4829d9`/`4b08fb1`. Gate focal: 1 teste da Central de Patrulhas. Gates completos: **92 testes
+  web em 21 arquivos**, lint, typecheck, build, `npm audit` sem vulnerabilidades e **8 E2E
+  aprovados**, com 1 cenário visual Firefox intencionalmente ignorado.
+- `origin/main` e `private/main` receberam o corte. O deploy Vercel
+  `dpl_5LmpUcqayK3kNBg9VePNNRE5nVZt` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
+  estrito permaneceu ativo. A página autenticada e o leitor de tela real ainda requerem smoke humano.
