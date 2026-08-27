@@ -2,7 +2,7 @@ import { Clock3, Network, ShieldCheck, UserRound } from "lucide-react";
 
 import { MetricStrip, PageHeader, SectionHeader, Status } from "@/components/ui";
 import { getAccessContext } from "@/lib/api";
-import { dateTime } from "@/lib/format";
+import { dateTime, isoDateTime } from "@/lib/format";
 
 export default async function ProfilePage() {
   const context = await getAccessContext();
@@ -27,7 +27,7 @@ export default async function ProfilePage() {
           <div><dt><UserRound size={15} aria-hidden="true" /> Militar</dt><dd>{member.mta_nick}</dd></div>
           <div><dt><ShieldCheck size={15} aria-hidden="true" /> Patente</dt><dd>{member.rank?.name ?? member.rank_name ?? "Não definida"}</dd></div>
           <div><dt><Network size={15} aria-hidden="true" /> Cargo funcional</dt><dd>{member.primary_position?.name ?? "Não definido"}</dd></div>
-          <div><dt><Clock3 size={15} aria-hidden="true" /> Último sync</dt><dd>{member.discord_synced_at ? dateTime(member.discord_synced_at) : "Aguardando primeira sincronização"}</dd></div>
+          <div><dt><Clock3 size={15} aria-hidden="true" /> Último sync</dt><dd>{member.discord_synced_at ? <time dateTime={isoDateTime(member.discord_synced_at)}>{dateTime(member.discord_synced_at)}</time> : "Aguardando primeira sincronização"}</dd></div>
         </dl>
       </section>
       <section className="command-section">
