@@ -2,7 +2,8 @@
 param(
     [string]$App = 'choque-bgr-api',
     [switch]$DeployWeb,
-    [int]$OnlineTimeoutSeconds = 180
+    [int]$OnlineTimeoutSeconds = 180,
+    [int]$StabilitySeconds = 45
 )
 
 $ErrorActionPreference = 'Stop'
@@ -60,19 +61,27 @@ if ($LASTEXITCODE -ne 0) {
 
 $deadline = [DateTime]::UtcNow.AddSeconds($OnlineTimeoutSeconds)
 $online = $false
+$onlineSince = $null
 do {
     $status = (& discloud app status $App 2>&1 | Out-String)
     if ($LASTEXITCODE -eq 0 -and $status -match "(?m)^$([regex]::Escape($App))\s+Online\s") {
-        $online = $true
-        break
+        if ($null -eq $onlineSince) {
+            $onlineSince = [DateTime]::UtcNow
+        }
+        if (([DateTime]::UtcNow - $onlineSince).TotalSeconds -ge $StabilitySeconds) {
+            $online = $true
+            break
+        }
+    } else {
+        $onlineSince = $null
     }
     Start-Sleep -Seconds 5
 } while ([DateTime]::UtcNow -lt $deadline)
 
 if (-not $online) {
-    throw "Backend não ficou Online dentro do prazo. Backup: $backupRoot"
+    throw "Backend não permaneceu Online por $StabilitySeconds segundos dentro do prazo. Backup: $backupRoot"
 }
-Write-Output "RECRUITMENT_ROLLOUT backend=online backup=$backupRoot"
+Write-Output "RECRUITMENT_ROLLOUT backend=stable stability_seconds=$StabilitySeconds backup=$backupRoot"
 
 if (-not $DeployWeb) {
     Write-Output 'RECRUITMENT_ROLLOUT web=skipped use=-DeployWeb'
