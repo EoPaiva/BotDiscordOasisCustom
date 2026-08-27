@@ -829,11 +829,13 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     corte aplica o mesmo contrato à espera da fila FIFO, preservando texto, cálculo e ordenação;
     `e6b26ae` registra o RED e `2216250` entrega o GREEN. O décimo quinto corte expõe as patrulhas
     ativas da Central de Patrulhas como `<ul>` nomeada, com um `<li>` por operação e o `<article>`
-    interno preservado; `d4829d9` registra o RED e `4b08fb1` entrega o GREEN. Gate consolidado atual:
-    92 testes web em 21 arquivos, lint, typecheck, build, `npm audit` sem vulnerabilidades e 8 E2E
-    aprovados com 1 cenário visual Firefox intencionalmente ignorado. Os cortes foram integrados à
-    `main` e o mais recente foi publicado no deploy `dpl_5LmpUcqayK3kNBg9VePNNRE5nVZt`, `READY`
-    em 2026-08-27; `/login` e `/status` responderam HTTP 200 no alias público.
+    interno preservado; `d4829d9` registra o RED e `4b08fb1` entrega o GREEN. O décimo sexto corte
+    preserva a duração visual da mesma ficha e a expõe como `<time dateTime="PT…">`;
+    `2a227e6` registra o RED e `b5f45bc` entrega o GREEN. Gate consolidado atual: 92 testes web em 21
+    arquivos, lint, typecheck, build, `npm audit` sem vulnerabilidades e 8 E2E aprovados com 1 cenário
+    visual Firefox intencionalmente ignorado. Os cortes foram integrados à `main` e o mais recente
+    foi publicado no deploy `dpl_HjGzeCa13MLxChutQDKMVHSTnnF5`, `READY` em 2026-08-27; `/login` e
+    `/status` responderam HTTP 200 no alias público.
 
 58. ✅ **Prompt Master — Identidade Visual / Design System CHOQUE — concluída e publicada em 2026-08-27.**
     Fonte recebida: `C:\Users\mpaii\.codex\attachments\8f7db861-0f81-4655-a0fc-b3fc90133b12\pasted-text.txt`,

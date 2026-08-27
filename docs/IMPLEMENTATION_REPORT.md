@@ -1463,3 +1463,15 @@ Fora do escopo atual: eventos, API e integração MTA.
 - `origin/main` e `private/main` receberam o corte. O deploy Vercel
   `dpl_5LmpUcqayK3kNBg9VePNNRE5nVZt` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
   estrito permaneceu ativo. A página autenticada e o leitor de tela real ainda requerem smoke humano.
+
+# Fase 57 — duração semântica da Central de Patrulhas publicada em 2026-08-27
+
+- A duração visível de cada operação ativa em `/patrols` continua com o mesmo texto e cálculo, mas
+  agora é exposta como `<time dateTime="PT…">`. O timestamp textual “desde” não foi alterado.
+- TDD `2a227e6`/`b5f45bc`. Gate focal: 1 teste da Central de Patrulhas. Gates completos: **92 testes
+  web em 21 arquivos**, lint, typecheck, build, `npm audit` sem vulnerabilidades e **8 E2E
+  aprovados**, com 1 cenário visual Firefox intencionalmente ignorado. Uma primeira inicialização E2E
+  concorrente ao build foi descartada por lock do Next.js; a repetição isolada passou.
+- `origin/main` e `private/main` receberam o corte. O deploy Vercel
+  `dpl_HjGzeCa13MLxChutQDKMVHSTnnF5` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
+  estrito permaneceu ativo. A página autenticada e o leitor de tela real ainda requerem smoke humano.
