@@ -18,7 +18,7 @@ export default async function MembersPage() {
     ]} />
     <section className="command-section">
       <SectionHeader index="01" title="Relação do efetivo" meta="Selecione um membro para abrir o dossiê" />
-      <DataTable rows={rows} columns={[
+      <DataTable caption="Relação do efetivo" rows={rows} columns={[
         { key: "discord_id", label: "IDENTIFICAÇÃO", render: (row) => <Link className="member-link" href={`/members/${String(row.discord_id)}`}><strong>{String(row.rank_prefix ?? "")} {String(row.mta_nick)}</strong><code>ID {String(row.character_id ?? "—")}</code></Link> },
         { key: "rank_name", label: "PATENTE" },
         { key: "status", label: "STATUS", render: (row) => <Status value={row.status} /> },

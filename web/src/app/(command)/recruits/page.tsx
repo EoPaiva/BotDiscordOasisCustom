@@ -26,7 +26,7 @@ export default async function RecruitsPage() {
       { label: "PENDENTES", value: recruits.filter((item) => !item.eligible_for_effective_review).length, tone: "warning" },
     ]} />
     <section className="command-section"><SectionHeader index="01" title="Quadro de formação" meta={recruits.length ? "Selecione um recruta para abrir o dossiê" : "Leitura direta do efetivo cadastrado"} />
-      {rows.length ? <DataTable rows={rows} rowKey="discord_id" columns={[
+      {rows.length ? <DataTable caption="Quadro de formação" rows={rows} rowKey="discord_id" columns={[
         { key: "mta_nick", label: "RECRUTA", render: (row) => <Link className="member-link" href={`/members/${String(row.discord_id)}`}><strong>{String(row.mta_nick)}</strong><code>{String(row.discord_id)}</code></Link> },
         { key: "days_in_corporation", label: "DIAS" },
         { key: "valid_hours_ms", label: "HORAS", render: (row) => duration(Number(row.valid_hours_ms)) },

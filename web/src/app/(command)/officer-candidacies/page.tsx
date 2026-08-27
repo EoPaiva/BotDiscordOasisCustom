@@ -28,7 +28,7 @@ export default async function OfficerCandidaciesPage({ searchParams }: PageProps
     ]} />
     <section className="command-section"><SectionHeader index="01" title="Fila dos responsáveis por upamento" meta="Dados internos e relatório consultivo" />
       <form className="recruitment-filters"><select defaultValue={status} name="status"><option value="">Todos os status</option>{["SUBMITTED", "IN_REVIEW", "INTERVIEW_REQUIRED", "APPROVED_CONDITIONAL", "APPROVED", "REJECTED", "RETURNED"].map((item) => <option key={item}>{item}</option>)}</select><input defaultValue={assignedTo} name="assigned_to" inputMode="numeric" pattern="[0-9]*" placeholder="ID do responsável" /><button className="button button-secondary compact" type="submit">Filtrar</button></form>
-      {applications.length ? <DataTable rows={applications} rowKey="id" columns={[
+      {applications.length ? <DataTable caption="Candidaturas de oficiais" rows={applications} rowKey="id" columns={[
         { key: "id", label: "FICHA", render: (row) => <Link className="member-link" href={`/officer-candidacies/${String(row.id)}`}><strong>OF-{String(row.id).padStart(5, "0")}</strong><code>abrir análise</code></Link> },
         { key: "mta_nick", label: "MILITAR", render: (row) => <strong>{String(row.mta_nick)}</strong> },
         { key: "rank_name", label: "PATENTE" },

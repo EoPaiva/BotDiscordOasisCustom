@@ -10,7 +10,7 @@ export default async function ChangesPage() {
     <PageHeader code="INT / 01" title="O que mudou?" description={`Briefing operacional desde ${dateTime(data.since)}.`} />
     <MetricStrip items={Object.entries(data.counts).slice(0, 7).map(([key, value]) => ({ label: label(key), value }))} />
     <section className="command-section"><SectionHeader index="01" title="Linha de mudanças" meta={`${data.events.length} eventos`} />
-      <DataTable rows={data.events} columns={[
+      <DataTable caption="Linha de mudanças" rows={data.events} columns={[
         { key: "created_at", label: "DATA", render: (row) => dateTime(Number(row.created_at)) },
         { key: "event_type", label: "EVENTO", render: (row) => <strong>{label(row.event_type)}</strong> },
         { key: "aggregate_type", label: "DOMÍNIO", render: (row) => label(row.aggregate_type) },
@@ -19,4 +19,3 @@ export default async function ChangesPage() {
     </section>
   </>;
 }
-

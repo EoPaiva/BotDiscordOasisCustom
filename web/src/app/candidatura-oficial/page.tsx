@@ -3,7 +3,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { CommandCenterApiError, commandCenterFetch } from "@/lib/api";
+import { CommandState } from "@/components/ui";
+import { commandCenterFetch } from "@/lib/api";
 import { duration, label } from "@/lib/format";
 import { getDiscordIdentity } from "@/lib/identity";
 import { buildLoginUrl } from "@/lib/login-return";
@@ -90,11 +91,15 @@ export default async function OfficerApplicationPage() {
       commandCenterFetch<Questionnaire>("/v1/officer-candidacy/questionnaire"),
       commandCenterFetch<ApplicationDetail | null>("/v1/officer-candidacy/application"),
     ]);
-  } catch (error) {
-    const message = error instanceof CommandCenterApiError
-      ? error.message
-      : "A candidatura ao oficialato está temporariamente indisponível.";
-    return <main className="recruitment-shell"><section className="command-section"><h1>Candidatura ao Oficialato</h1><p>{message}</p><Link className="button button-secondary" href="/">Voltar</Link></section></main>;
+  } catch {
+    return <main className="recruitment-shell standalone-state"><CommandState
+      actions={<Link className="button button-secondary" href="/">Voltar</Link>}
+      code="OFI / CONEXÃO"
+      happened="Os dados da candidatura ao Oficialato não puderam ser carregados. Nenhuma resposta foi alterada."
+      next="Tente novamente em alguns instantes ou volte ao Centro de Comando."
+      title="Oficialato indisponível"
+      tone="danger"
+    /></main>;
   }
 
   const application = current?.application;

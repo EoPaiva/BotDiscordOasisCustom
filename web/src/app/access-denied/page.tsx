@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { CommandState } from "@/components/ui";
+
 export default async function AccessDeniedPage({
   searchParams,
 }: {
@@ -9,14 +11,22 @@ export default async function AccessDeniedPage({
   const permissionRevoked = reason === "permission-revoked";
   return (
     <main className="standalone-state">
-      <span className="technical-index">AUT / 403</span>
-      <h1>{permissionRevoked ? "Acesso atualizado" : "Acesso não autorizado"}</h1>
-      <p>{permissionRevoked
-        ? "Seus cargos Discord mudaram e você não possui mais acesso à área que estava aberta."
-        : "A conta Discord foi reconhecida, mas não corresponde a um membro autorizado."}</p>
-      <Link className="button button-secondary" href={permissionRevoked ? "/dashboard" : "/login"}>
-        {permissionRevoked ? "Voltar ao Centro de Comando" : "Voltar à identificação"}
-      </Link>
+      <CommandState
+        actions={(
+          <Link className="button button-secondary" href={permissionRevoked ? "/dashboard" : "/login"}>
+            {permissionRevoked ? "Voltar ao Centro de Comando" : "Voltar à identificação"}
+          </Link>
+        )}
+        code="AUT / 403"
+        happened={permissionRevoked
+          ? "Seus cargos Discord mudaram e a área que estava aberta deixou de fazer parte do seu acesso."
+          : "A conta Discord foi reconhecida, mas não corresponde a um membro autorizado."}
+        next={permissionRevoked
+          ? "Retorne ao Centro de Comando; a navegação será atualizada conforme suas permissões atuais."
+          : "Volte à identificação ou procure um responsável se seu cadastro deveria estar ativo."}
+        title={permissionRevoked ? "Acesso atualizado" : "Acesso não autorizado"}
+        tone="warning"
+      />
     </main>
   );
 }

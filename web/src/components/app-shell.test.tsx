@@ -104,6 +104,25 @@ describe("AppShell live authorization", () => {
     expect(screen.getAllByText("Comando").length).toBeGreaterThan(0);
   });
 
+  it("announces only a degraded access check instead of every polling transition", async () => {
+    const context = normalizeAccessContext({
+      member: { discord_id: 20, mta_nick: "Sentinela", status: "ACTIVE" },
+      access: { profile: "MEMBRO", profile_name: "Membro", permissions: [], authorization_version: 2 },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network unavailable")));
+
+    const view = render(<AppShell context={context}><div>Centro</div></AppShell>);
+    const liveRegion = view.container.querySelector('[aria-live="polite"]');
+    expect(view.container.querySelector(".system-state")).not.toHaveAttribute("aria-live");
+    expect(liveRegion).toHaveTextContent("");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+
+    expect(liveRegion).toHaveTextContent("Revalidação de acesso pendente.");
+  });
+
   it("exposes an accessible mobile drawer and restores focus after Escape", () => {
     const context = normalizeAccessContext({
       member: { discord_id: 20, mta_nick: "Sentinela", status: "ACTIVE" },

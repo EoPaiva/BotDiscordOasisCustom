@@ -52,6 +52,7 @@ export function RecruitmentDecisionForm({
       </label>
       <div>
         <button
+          aria-busy={pending}
           className="button button-primary"
           disabled={pending}
           name="decision"
@@ -61,6 +62,7 @@ export function RecruitmentDecisionForm({
           {pending ? "Processando…" : "Aprovar"}
         </button>
         <button
+          aria-busy={pending}
           className="button button-danger"
           disabled={pending}
           name="decision"

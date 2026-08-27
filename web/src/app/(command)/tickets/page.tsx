@@ -54,7 +54,7 @@ export default async function TicketOperationsPage() {
     ]} />
 
     <section className="command-section"><SectionHeader index="01" title="Fila operacional" meta="Prioridade e responsável vêm do estado transacional" />
-      <DataTable rows={data.tickets} columns={[
+      <DataTable caption="Fila operacional de tickets" rows={data.tickets} columns={[
         { key: "id", label: "PROTOCOLO", render: (row) => <strong>TCK-{String(row.id).padStart(4, "0")}</strong> },
         { key: "ticket_type", label: "TIPO", render: (row) => label(row.ticket_type) },
         { key: "status", label: "SITUAÇÃO", render: (row) => <Status value={row.status} /> },

@@ -224,6 +224,7 @@ export function CandidateQuestion({
         <h2>Avaliação concluída</h2>
         <p>Revise o protocolo e envie a candidatura para a fila do comando.</p>
         <button
+          aria-busy={pending}
           className="button button-primary"
           disabled={pending}
           onClick={() => startTransition(async () => {
@@ -252,6 +253,7 @@ export function CandidateQuestion({
         <p>O enunciado será liberado somente após o início. O cronômetro é controlado pelo servidor e não reinicia ao atualizar a página.</p>
         <div className="ready-time"><Clock3 size={18} /><strong>{Math.ceil((ready.time_seconds ?? 0) / 60)} min</strong><span>tempo estimado</span></div>
         <button
+          aria-busy={pending}
           className="button button-primary"
           disabled={pending}
           onClick={() => startTransition(async () => {
@@ -358,7 +360,7 @@ export function CandidateQuestion({
         </div>
         <footer className="question-actions">
           <span role="status"><Save size={13} /> {notice || "Autosave a cada 3 segundos"}</span>
-          <button className="button button-primary" disabled={pending || expired || advancing} onClick={() => startTransition(async () => {
+          <button aria-busy={pending || advancing} className="button button-primary" disabled={pending || expired || advancing} onClick={() => startTransition(async () => {
             const result = await saveRecruitmentAnswer({
               applicationId,
               questionId: question.id,

@@ -12,7 +12,7 @@ export default async function ReadinessPage() {
     <MetricStrip items={Object.entries(counts).map(([key, value]) => ({ label: label(key), value }))} />
     <section className="command-section">
       <SectionHeader index="01" title="Efetivo operacional" meta={`${data.members.length} registros`} />
-      <DataTable rows={data.members} columns={[
+      <DataTable caption="Efetivo operacional" rows={data.members} columns={[
         { key: "mta_nick", label: "IDENTIFICAÇÃO", render: (row) => <strong>{String(row.mta_nick ?? row.discord_id)}</strong> },
         { key: "rank_name", label: "PATENTE" },
         { key: "status", label: "SITUAÇÃO", render: (row) => <Status value={row.status} /> },
@@ -23,4 +23,3 @@ export default async function ReadinessPage() {
     </section>
   </>;
 }
-

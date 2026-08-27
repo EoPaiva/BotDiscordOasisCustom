@@ -12,7 +12,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 
-import { CommandCenterApiError, recruitmentCandidateFetch, recruitmentPublicFetch } from "@/lib/api";
+import { recruitmentCandidateFetch, recruitmentPublicFetch } from "@/lib/api";
 import { getRecruitmentCandidateIdentity } from "@/lib/identity";
 
 import { startRecruitmentApplication } from "./actions";
@@ -79,8 +79,8 @@ export default async function RecruitmentLandingPage() {
   try {
     campaign = (await recruitmentPublicFetch<{ campaign: Campaign | null }>("/v1/recruitment/current")).campaign;
     if (identity) eligibility = await recruitmentCandidateFetch<Eligibility>("/v1/recruitment/eligibility");
-  } catch (error) {
-    unavailable = error instanceof CommandCenterApiError ? error.message : "Portal temporariamente indisponível.";
+  } catch {
+    unavailable = "A Central de Recrutamento não respondeu. Nenhuma candidatura foi iniciada ou alterada.";
   }
   const open = campaign?.status === "OPEN";
   const activeApplication = eligibility?.active_application;
@@ -179,7 +179,7 @@ export default async function RecruitmentLandingPage() {
               <div><span>CAMPANHA</span><strong>{campaign?.name ?? "Nenhuma campanha ativa"}</strong></div>
             </div>
             {unavailable ? (
-              <div className="candidate-blocked"><strong>Portal indisponível</strong><p>{unavailable}</p></div>
+              <div className="candidate-blocked" role="alert"><strong>Portal indisponível</strong><p>{unavailable}</p><p>Atualize a página em alguns instantes antes de tentar novamente.</p></div>
             ) : activeApplication ? (
               <div className="candidate-login">
                 <ClipboardCheck size={28} />

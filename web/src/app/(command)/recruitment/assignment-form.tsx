@@ -38,7 +38,7 @@ export function RecruitmentAssignmentForm({
           {state.reference ? ` Referência ${state.reference}.` : ""}
         </p>
       )}
-      <button className="button button-secondary" disabled={pending} type="submit">
+      <button aria-busy={pending} className="button button-secondary" disabled={pending} type="submit">
         {pending ? "Assumindo…" : "Assumir análise"}
       </button>
     </form>

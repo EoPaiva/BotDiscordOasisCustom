@@ -18,7 +18,7 @@ export default async function ShiftsPage() {
     ]} />
     <section className="command-section">
       <SectionHeader index="01" title="Sessões recentes" />
-      <DataTable rows={rows} columns={[
+      <DataTable caption="Sessões recentes" rows={rows} columns={[
         { key: "id", label: "SESSÃO", render: (row) => <code>PT-{String(row.id).padStart(5, "0")}</code> },
         { key: "mta_nick", label: "MEMBRO", render: (row) => <strong>{String(row.mta_nick)}</strong> },
         { key: "started_at", label: "INÍCIO", render: (row) => dateTime(Number(row.started_at)) },
@@ -30,4 +30,3 @@ export default async function ShiftsPage() {
     </section>
   </>;
 }
-

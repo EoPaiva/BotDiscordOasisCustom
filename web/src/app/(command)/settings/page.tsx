@@ -90,7 +90,7 @@ export default async function SettingsPage() {
         <label>Conta para patrulha<select name="countsTowardPatrol" defaultValue="true"><option value="true">Sim</option><option value="false">Não</option></select></label>
         <button className="button button-primary" type="submit">Autorizar call</button>
       </form>
-      <DataTable rows={data.voice_channels} rowKey="channel_id" columns={[
+      <DataTable caption="Canais de voz configurados" rows={data.voice_channels} rowKey="channel_id" columns={[
         { key: "channel_id", label: "ID", render: (row) => <code>{String(row.channel_id)}</code> },
         { key: "label", label: "CALL" },
         { key: "service_allowed", label: "SERVIÇO", render: (row) => <Status value={row.service_allowed ? "ALLOWED" : "BLOCKED"} /> },

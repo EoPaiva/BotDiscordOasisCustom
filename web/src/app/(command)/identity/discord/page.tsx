@@ -282,7 +282,7 @@ export default async function DiscordIdentityPage({
         </label>
         <button className="button button-primary" type="submit" disabled={!permissionData.catalog.length || !permissionSubjects}><KeyRound size={15} aria-hidden="true" /> Salvar regra</button>
       </form>
-      <DataTable rows={permissionData.rules} rowKey="_key" columns={[
+      <DataTable caption="Regras de permissão Discord" rows={permissionData.rules} rowKey="_key" columns={[
         { key: "subject_name", label: "SUJEITO", render: (item) => <span className={permissionStyles.subject}><strong>{String(item.subject_name)}</strong><code>{String(item.subject_type)}:{String(item.subject_id)}</code></span> },
         { key: "permission", label: "PERMISSÃO", render: (item) => <code className={permissionStyles.permissionCode}>{String(item.permission)}</code> },
         { key: "effect", label: "EFEITO", render: (item) => <StatusLabel label={String(item.effect)} tone={item.effect === "DENY" ? "danger" : "success"} /> },
@@ -332,7 +332,7 @@ export default async function DiscordIdentityPage({
           <button className="button button-primary" type="submit">Aplicar reconciliação</button>
         </form>
       )}
-      <DataTable rows={jobItems} columns={[
+      <DataTable caption="Itens do job Discord" rows={jobItems} columns={[
         { key: "discord_id", label: "MEMBRO", render: (item) => <code>{String(item.discord_id)}</code> },
         { key: "result", label: "RESULTADO", render: (item) => <Status value={item.result} /> },
         { key: "rank", label: "PATENTE", render: (item) => String(asSnapshot(item.after ?? item.after_json).rank_name ?? asSnapshot(item.after ?? item.after_json).rank ?? "—") },
@@ -343,7 +343,7 @@ export default async function DiscordIdentityPage({
 
     {canReconcile && jobs.length > 0 && <section className="command-section discord-section">
       <SectionHeader index={canConfigure ? "05" : "03"} title="Execuções recentes" />
-      <DataTable rows={jobs} columns={[
+      <DataTable caption="Execuções recentes de jobs" rows={jobs} columns={[
         { key: "id", label: "JOB", render: (item) => <a className="text-link inline" href={`/identity/discord?job=${String(item.id)}`}>#{String(item.id)}</a> },
         { key: "mode", label: "MODO", render: (item) => label(item.mode) },
         { key: "status", label: "STATUS", render: (item) => <Status value={item.status} /> },

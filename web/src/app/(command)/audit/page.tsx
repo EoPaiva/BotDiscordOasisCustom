@@ -9,7 +9,7 @@ export default async function AuditPage() {
   return <>
     <PageHeader code="INT / 03" title="Auditoria do sistema" description="Trilha cronológica de ações, decisões, automações e reconciliações." />
     <section className="command-section"><SectionHeader index="01" title="Registros recentes" meta={`${rows.length} eventos`} />
-      <DataTable rows={rows} columns={[
+      <DataTable caption="Registros recentes de auditoria" rows={rows} columns={[
         { key: "created_at", label: "DATA", render: (row) => dateTime(Number(row.created_at)) },
         { key: "action", label: "AÇÃO", render: (row) => <strong>{label(row.action)}</strong> },
         { key: "actor_id", label: "RESPONSÁVEL", render: (row) => <code>{String(row.actor_id ?? "SISTEMA")}</code> },
@@ -21,4 +21,3 @@ export default async function AuditPage() {
     </section>
   </>;
 }
-

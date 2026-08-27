@@ -116,14 +116,14 @@ export default async function MemberPage({ params }: { params: Promise<{ id: str
           <div className="timeline">{data.dossier.personnel_actions.length ? data.dossier.personnel_actions.map((row) => <div key={String(row.id)}><time>{dateTime(Number(row.created_at))}</time><span /><div><strong>{label(row.action_type)}</strong><p>{String(row.reason ?? "Sem observação")}</p></div></div>) : <p className="muted">Nenhuma movimentação registrada.</p>}</div>
         </section>
         <section className="command-section dossier-section"><SectionHeader index="04" title="Qualificações" />
-          <DataTable rows={data.dossier.qualifications} columns={[
+          <DataTable caption="Qualificações do membro" rows={data.dossier.qualifications} columns={[
             { key: "course_name", label: "CURSO", render: (row) => <strong>{String(row.course_name)}</strong> },
             { key: "result", label: "RESULTADO", render: (row) => <Status value={row.result} /> },
             { key: "recorded_at", label: "REGISTRO", render: (row) => dateTime(Number(row.recorded_at)) },
           ]} />
         </section>
         <section className="command-section dossier-section"><SectionHeader index="05" title="Disciplina e integridade" />
-          <DataTable rows={[...data.dossier.punishments, ...data.dossier.flags]} columns={[
+          <DataTable caption="Disciplina e integridade do membro" rows={[...data.dossier.punishments, ...data.dossier.flags]} columns={[
             { key: "id", label: "REGISTRO", render: (row) => <code>#{String(row.id)}</code> },
             { key: "punishment_type", label: "TIPO", render: (row) => label(row.punishment_type ?? row.flag_type) },
             { key: "status", label: "STATUS", render: (row) => <Status value={row.status} /> },

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("recruitment portal keeps its public military layout without exposing data", async ({ page }) => {
   await page.goto("/recrutamento");
-  await expect(page).toHaveTitle(/Centro de Comando/);
+  await expect(page).toHaveTitle(/Recrutamento/);
   await expect(
     page.getByRole("heading", { name: /Seu primeiro passo começa pela postura/i }),
   ).toBeVisible();

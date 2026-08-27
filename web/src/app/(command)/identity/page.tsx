@@ -16,7 +16,7 @@ export default async function IdentityPage() {
       { label: "EXIGEM REVISÃO", value: review, tone: review ? "danger" : undefined },
     ]} />
     <section className="command-section"><SectionHeader index="01" title="Achados para análise" />
-      <DataTable rows={data.findings} columns={[
+      <DataTable caption="Achados de identidade" rows={data.findings} columns={[
         { key: "id", label: "ACHADO", render: (row) => <code>INT-{String(row.id).padStart(4, "0")}</code> },
         { key: "mta_nick", label: "MEMBRO" },
         { key: "finding_type", label: "TIPO", render: (row) => label(row.finding_type) },
@@ -26,4 +26,3 @@ export default async function IdentityPage() {
     </section>
   </>;
 }
-

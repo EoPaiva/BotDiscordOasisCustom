@@ -55,7 +55,7 @@ export default async function RegistrationGatePage() {
     ]} />
 
     <section className="command-section"><SectionHeader index="01" title="Cadastros para revisão" meta="Decisões humanas, transacionais e auditadas" />
-      <DataTable rows={data.records} columns={[
+      <DataTable caption="Cadastros para revisão" rows={data.records} columns={[
         { key: "id", label: "PROTOCOLO", render: (row) => <strong>CAD-{String(row.id).padStart(4, "0")}</strong> },
         { key: "discord_id", label: "DISCORD", render: (row) => <code>{String(row.discord_id)}</code> },
         { key: "mta_nick", label: "NICK BGR" },
@@ -95,7 +95,7 @@ export default async function RegistrationGatePage() {
     </section>
 
     <section className="command-section"><SectionHeader index="03" title="Integridade das permissões" meta={`${classificationCounts.ONBOARDING_VISIBLE?.length ?? 0} recursos de entrada • ${classificationCounts.MEMBER_ONLY?.length ?? 0} internos • ${classificationCounts.STAFF_ONLY?.length ?? 0} staff`} />
-      <DataTable rows={data.findings} columns={[
+      <DataTable caption="Achados de integridade" rows={data.findings} columns={[
         { key: "finding_type", label: "ACHADO", render: (row) => <Status value={row.finding_type} /> },
         { key: "resource_id", label: "RECURSO", render: (row) => <code>{String(row.resource_id ?? "—")}</code> },
         { key: "discord_id", label: "USUÁRIO", render: (row) => <code>{String(row.discord_id ?? "—")}</code> },

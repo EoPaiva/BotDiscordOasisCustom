@@ -16,7 +16,13 @@ export default defineConfig({
     reuseExistingServer: true,
     timeout: 180_000,
     env: {
+      AUTH_DISCORD_ID: "",
+      AUTH_DISCORD_SECRET: "",
       AUTH_SECRET: "playwright-local-secret-not-for-production",
+      AUTH_URL: "http://127.0.0.1:3000",
+      COMMAND_CENTER_API_URL: "http://127.0.0.1:9",
+      VERCEL: "",
+      VERCEL_URL: "",
     },
   },
   projects: [

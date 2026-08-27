@@ -33,7 +33,7 @@ export default async function SecurityPage() {
       </div>
     </section>
     <section className="command-section"><SectionHeader index="02" title="Eventos recentes" meta={`${data.events.length} registros append-only`} />
-      <DataTable rows={data.events} columns={[
+      <DataTable caption="Eventos recentes de segurança" rows={data.events} columns={[
         { key: "created_at", label: "DATA", render: (row) => dateTime(Number(row.created_at)) },
         { key: "severity", label: "SEVERIDADE", render: (row) => <Status value={row.severity} /> },
         { key: "event_type", label: "EVENTO", render: (row) => <strong>{label(row.event_type)}</strong> },

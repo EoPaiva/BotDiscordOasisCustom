@@ -26,7 +26,7 @@ export default async function CareerPage() {
       {ranks.length ? <div className="rank-roster">{ranks.map(([rank, rows]) => <div key={rank}><span>{rank}</span><strong>{rows?.length ?? 0}</strong><p>{rows?.filter((row) => row.status === "ACTIVE").length ?? 0} ativos</p></div>)}</div> : <EmptyState title="Nenhum membro em carreira" detail="Cadastros aprovados com vínculo funcional aparecerão neste quadro." />}
     </section>
     <section className="command-section"><SectionHeader index="02" title="Efetivo e elegibilidade" meta="Abra o dossiê para revisar e confirmar uma movimentação" />
-      {members.length ? <DataTable rows={members} rowKey="discord_id" columns={[
+      {members.length ? <DataTable caption="Efetivo e elegibilidade" rows={members} rowKey="discord_id" columns={[
         { key: "mta_nick", label: "MILITAR", render: (row) => <Link className="member-link" href={`/members/${String(row.discord_id)}`}><strong>{String(row.rank_prefix ?? "")} {String(row.mta_nick)}</strong><code>ID {String(row.character_id ?? "—")}</code></Link> },
         { key: "rank_name", label: "PATENTE" },
         { key: "status", label: "STATUS", render: (row) => <Status value={row.status} /> },
@@ -40,7 +40,7 @@ export default async function CareerPage() {
       ]} /> : <EmptyState title="Quadro funcional vazio" detail="Não existe membro cadastrado elegível para gestão de carreira." />}
     </section>
     <section className="command-section"><SectionHeader index="03" title="Movimentações recentes" meta={`${data.movements.length} registros`} />
-      {data.movements.length ? <DataTable rows={data.movements} columns={[
+      {data.movements.length ? <DataTable caption="Movimentações recentes" rows={data.movements} columns={[
         { key: "created_at", label: "DATA", render: (row) => dateTime(Number(row.created_at)) },
         { key: "mta_nick", label: "MILITAR", render: (row) => <Link className="member-link" href={`/members/${String(row.discord_id)}`}><strong>{String(row.mta_nick)}</strong><code>{String(row.discord_id)}</code></Link> },
         { key: "action_type", label: "MOVIMENTO", render: (row) => <strong>{label(row.action_type)}</strong> },

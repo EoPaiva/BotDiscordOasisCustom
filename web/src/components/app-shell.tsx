@@ -341,6 +341,9 @@ export function AppShell({ context, children }: { context: AccessContext; childr
               {revalidationState === "CURRENT" ? "IDENTIDADE SINCRONIZADA" : revalidationState === "CHECKING" ? "REVALIDANDO ACESSO" : "REVALIDAÇÃO PENDENTE"}
             </span>
           </div>
+          <p aria-atomic="true" aria-live="polite" className="visually-hidden">
+            {revalidationState === "DEGRADED" ? "Revalidação de acesso pendente." : ""}
+          </p>
           <div className="member-control">
             <div><strong>{liveContext.member.mta_nick}</strong><span>{identityLine}</span></div>
             <ChevronDown className="member-chevron" size={15} aria-hidden="true" />

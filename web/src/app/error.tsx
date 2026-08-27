@@ -1,5 +1,7 @@
 "use client";
 
+import { CommandState } from "@/components/ui";
+
 export default function ErrorBoundary({
   error,
   reset,
@@ -9,11 +11,15 @@ export default function ErrorBoundary({
 }) {
   return (
     <main className="standalone-state">
-      <span className="technical-index">SYS / FALHA</span>
-      <h1>Comunicação interrompida</h1>
-      <p>{error.message}</p>
-      {error.digest && <code>Referência {error.digest}</code>}
-      <button className="button button-primary" onClick={reset}>Tentar novamente</button>
+      <CommandState
+        actions={<button className="button button-primary" onClick={reset}>Tentar novamente</button>}
+        code="SYS / FALHA"
+        happened="Uma parte do sistema não conseguiu concluir o carregamento. Nenhuma confirmação deve ser presumida."
+        next="Tente novamente. Se o problema continuar, informe a referência ao responsável pelo sistema."
+        reference={error.digest}
+        title="Comunicação interrompida"
+        tone="danger"
+      />
     </main>
   );
 }

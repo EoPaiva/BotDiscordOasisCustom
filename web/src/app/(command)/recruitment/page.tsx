@@ -1,7 +1,7 @@
-import { Ban, Bot, FileCog, Flag, ListChecks } from "lucide-react";
+import { Ban, Bot, FileCog, Flag } from "lucide-react";
 import Link from "next/link";
 
-import { MetricStrip, PageHeader, SectionHeader, StatusLabel } from "@/components/ui";
+import { DataTable, MetricStrip, PageHeader, SectionHeader, StatusLabel } from "@/components/ui";
 import { recruitmentAdminFetch } from "@/lib/api";
 import { label } from "@/lib/format";
 
@@ -34,8 +34,17 @@ export default async function RecruitmentAdminPage({ searchParams }: PageProps<"
     ]} />
     <div className="recruitment-admin-links"><Link className="button button-secondary" href="/recruitment/campaign"><Flag size={15} /> Processo seletivo</Link><Link className="button button-secondary" href="/recruitment/form"><FileCog size={15} /> Formulário e questões</Link><Link className="button button-secondary" href="/recruitment/ai"><Bot size={15} /> Analista IA</Link><Link className="button button-secondary" href="/recruitment/blocks"><Ban size={15} /> Bloqueios</Link></div>
     <section className="command-section"><SectionHeader index="01" title="Fila de candidaturas" meta="Decisão final sempre humana" />
-      <form className="recruitment-filters"><input defaultValue={search} name="search" placeholder="Nick, Discord, ID BGR ou protocolo" /><select defaultValue={status} name="status"><option value="">Todos os status</option>{["DRAFT","SUBMITTED","UNDER_REVIEW","INTERVIEW_SCHEDULED","FINAL_REVIEW","APPROVED","REJECTED"].map((item) => <option key={item}>{item}</option>)}</select><input defaultValue={assignedTo} name="assigned_to" inputMode="numeric" pattern="[0-9]*" placeholder="ID do responsável" aria-label="Filtrar por ID do responsável" /><button className="button button-secondary compact" type="submit">Filtrar</button></form>
-      <div className="table-scroll"><table className="data-table"><thead><tr><th>Protocolo</th><th>Candidato</th><th>ID BGR</th><th>Envio</th><th>Etapa</th><th>Integridade</th><th>Responsável</th><th>Status</th></tr></thead><tbody>{data.applications.map((application) => <tr key={String(application.id)}><td data-label="PROTOCOLO"><Link className="member-link" href={`/recruitment/${application.id}`}><strong>{String(application.protocol)}</strong><code>abrir dossiê</code></Link></td><td data-label="CANDIDATO"><strong>{String(application.candidate_nick)}</strong><br /><code>{String(application.discord_id)}</code></td><td data-label="ID BGR"><code>{String(application.bgr_id)}</code></td><td data-label="ENVIO">{application.submitted_at ? new Date(Number(application.submitted_at)).toLocaleString("pt-BR") : "Rascunho"}</td><td data-label="ETAPA">{label(String(application.stage))}</td><td data-label="INTEGRIDADE"><StatusLabel label={Number(application.integrity_signals) ? `${application.integrity_signals} sinais` : "Normal"} tone={Number(application.integrity_signals) ? "warning" : "success"} /></td><td data-label="RESPONSÁVEL">{application.assigned_to ? <code>{String(application.assigned_to)}</code> : "Não atribuído"}</td><td data-label="STATUS"><StatusLabel label={label(String(application.status))} tone={application.status === "APPROVED" ? "success" : application.status === "REJECTED" ? "danger" : "warning"} /></td></tr>)}</tbody></table>{!data.applications.length && <div className="empty-state"><ListChecks /><div><strong>Fila sem registros</strong><p>Nenhuma candidatura corresponde aos filtros.</p></div></div>}</div>
+      <form className="recruitment-filters"><input aria-label="Pesquisar por nick, Discord, ID BGR ou protocolo" defaultValue={search} name="search" placeholder="Nick, Discord, ID BGR ou protocolo" /><select aria-label="Filtrar por status" defaultValue={status} name="status"><option value="">Todos os status</option>{["DRAFT","SUBMITTED","UNDER_REVIEW","INTERVIEW_SCHEDULED","FINAL_REVIEW","APPROVED","REJECTED"].map((item) => <option key={item}>{item}</option>)}</select><input defaultValue={assignedTo} name="assigned_to" inputMode="numeric" pattern="[0-9]*" placeholder="ID do responsável" aria-label="Filtrar por ID do responsável" /><button className="button button-secondary compact" type="submit">Filtrar</button></form>
+      <DataTable caption="Fila de candidaturas" emptyTitle="Fila sem registros" emptyDetail="Nenhuma candidatura corresponde aos filtros atuais." rows={data.applications} columns={[
+        { key: "protocol", label: "PROTOCOLO", render: (application) => <Link className="member-link" href={`/recruitment/${application.id}`}><strong>{String(application.protocol)}</strong><code>abrir dossiê</code></Link> },
+        { key: "candidate_nick", label: "CANDIDATO", render: (application) => <><strong>{String(application.candidate_nick)}</strong><br /><code>{String(application.discord_id)}</code></> },
+        { key: "bgr_id", label: "ID BGR", render: (application) => <code>{String(application.bgr_id)}</code> },
+        { key: "submitted_at", label: "ENVIO", render: (application) => application.submitted_at ? new Date(Number(application.submitted_at)).toLocaleString("pt-BR") : "Rascunho" },
+        { key: "stage", label: "ETAPA", render: (application) => label(String(application.stage)) },
+        { key: "integrity_signals", label: "INTEGRIDADE", render: (application) => <StatusLabel label={Number(application.integrity_signals) ? `${application.integrity_signals} sinais` : "Normal"} tone={Number(application.integrity_signals) ? "warning" : "success"} /> },
+        { key: "assigned_to", label: "RESPONSÁVEL", render: (application) => application.assigned_to ? <code>{String(application.assigned_to)}</code> : "Não atribuído" },
+        { key: "status", label: "STATUS", render: (application) => <StatusLabel label={label(String(application.status))} tone={application.status === "APPROVED" ? "success" : application.status === "REJECTED" ? "danger" : "warning"} /> },
+      ]} />
     </section>
   </>;
 }

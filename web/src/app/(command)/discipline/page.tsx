@@ -14,17 +14,17 @@ export default async function DisciplinePage() {
       { label: "HISTÓRICO EXIBIDO", value: data.measures.length },
     ]} />
     <div className="dashboard-grid">
-      <section className="command-section"><SectionHeader index="01" title="Ocorrências" /><DataTable rows={data.occurrences} columns={[
+      <section className="command-section"><SectionHeader index="01" title="Ocorrências" /><DataTable caption="Ocorrências disciplinares" emptyTitle="Nenhuma ocorrência" emptyDetail="Não há ocorrência disciplinar registrada nesta consulta." rows={data.occurrences} columns={[
         { key: "id", label: "REGISTRO", render: (row) => <code>OCR-{String(row.id).padStart(4, "0")}</code> },
         { key: "mta_nick", label: "MEMBRO" },
         { key: "description", label: "DESCRIÇÃO" },
         { key: "status", label: "STATUS", render: (row) => <Status value={row.status} /> },
         { key: "created_at", label: "DATA", render: (row) => dateTime(Number(row.created_at)) },
       ]} /></section>
-      <section className="command-section"><SectionHeader index="02" title="Medidas registradas" /><DataTable rows={data.measures} columns={[
+      <section className="command-section"><SectionHeader index="02" title="Medidas registradas" /><DataTable caption="Medidas disciplinares registradas" emptyTitle="Nenhuma medida" emptyDetail="Não há medida disciplinar registrada nesta consulta." rows={data.measures} columns={[
         { key: "punishment_type", label: "MEDIDA", render: (row) => label(row.punishment_type) },
         { key: "mta_nick", label: "MEMBRO" },
-        { key: "status", label: "STATUS", render: (row) => <Status value={row.status} /> },
+        { key: "status", label: "STATUS", render: (row) => <Status tone={["ACTIVE", "SCHEDULED"].includes(String(row.status)) ? "danger" : undefined} value={row.status} /> },
         { key: "starts_at", label: "INÍCIO", render: (row) => dateTime(Number(row.starts_at)) },
       ]} /></section>
     </div>
