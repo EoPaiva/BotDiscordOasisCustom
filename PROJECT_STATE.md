@@ -241,7 +241,7 @@ handoff.
 - Auditoria na máquina principal dos blocos locais, seguida de eventual rollout somente após gates e
   autorização explícita.
 - A Fase 58 de identidade visual e design system foi concluída e publicada; a Fase 57 possui
-  vinte e dois cortes publicados do Centro de Comando e sua reformulação funcional restante continua
+  vinte e quatro cortes publicados do Centro de Comando e sua reformulação funcional restante continua
   ativa na fila oficial.
 
 ### Planejado

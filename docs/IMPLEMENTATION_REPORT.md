@@ -1512,3 +1512,15 @@ Fora do escopo atual: eventos, API e integração MTA.
 - `origin/main` e `private/main` receberam ambos os cortes. O deploy Vercel agrupado
   `dpl_Cmxd8P8muVj3Nc2U3CmnQsHHHwjC` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
   estrito permaneceu ativo. As páginas autenticadas e o leitor de tela real ainda requerem smoke humano.
+
+# Fase 57 — instantes semânticos da Central de Segurança publicados em 2026-08-27
+
+- O instante `Desde` do lockdown ativo e a coluna `DATA` dos eventos recentes em `/security` agora
+  usam `<time dateTime="…">`, preservando razão, eventos, tabela, ações e controles de emergência.
+  Os testes mockam `setSecurityLockdown` e `revokeSecuritySessions`; nenhuma ação sensível foi chamada.
+- TDD `32b4bbf`/`a7314c6` cobre os dois valores no mesmo fixture isolado. Gates: **99 testes web em
+  25 arquivos**, lint, typecheck, build, `npm audit` sem vulnerabilidades e **8 E2E aprovados**, com
+  1 cenário visual Firefox intencionalmente ignorado.
+- `origin/main` e `private/main` receberam o lote. O deploy Vercel
+  `dpl_BkSZCWmRcqrW4xvgVgea9vaqqgZW` ficou `READY`; `/login` e `/status` responderam HTTP 200 e o CSP
+  estrito permaneceu ativo. A tela autenticada e o leitor de tela real ainda requerem smoke humano.

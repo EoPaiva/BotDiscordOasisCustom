@@ -845,9 +845,13 @@ e recua atrás dos trabalhos independentes. Ele nunca é descartado nem bloqueia
     `c15202b` registra o RED e `e019266` entrega o GREEN. O vigésimo segundo faz o mesmo com `Último
     sync` em `/profile`, preservando o fallback textual; `34843f8` registra o RED e `756371d` entrega
     o GREEN. Gate consolidado atual: 97 testes web em 24 arquivos, lint, typecheck, build, `npm audit`
-    sem vulnerabilidades e 8 E2E aprovados com 1 cenário visual Firefox intencionalmente ignorado. Os
-    cortes foram integrados à `main`; 21 e 22 foram publicados juntos no deploy
-    `dpl_Cmxd8P8muVj3Nc2U3CmnQsHHHwjC`, `READY` em 2026-08-27; `/login` e `/status` responderam HTTP
+    sem vulnerabilidades e 8 E2E aprovados com 1 cenário visual Firefox intencionalmente ignorado. O
+    lote vigésimo terceiro/vigésimo quarto cobre, em `/security`, o instante `Desde` do lockdown e a
+    coluna `DATA` dos eventos recentes. `32b4bbf` registra ambos os contratos RED e `a7314c6` entrega
+    o GREEN sem tocar nas ações sensíveis. Gate consolidado atual: 99 testes web em 25 arquivos,
+    lint, typecheck, build, `npm audit` sem vulnerabilidades e 8 E2E aprovados com 1 cenário visual
+    Firefox intencionalmente ignorado. Os cortes foram integrados à `main` e publicados no deploy
+    `dpl_BkSZCWmRcqrW4xvgVgea9vaqqgZW`, `READY` em 2026-08-27; `/login` e `/status` responderam HTTP
     200 no alias público.
 
 58. ✅ **Prompt Master — Identidade Visual / Design System CHOQUE — concluída e publicada em 2026-08-27.**

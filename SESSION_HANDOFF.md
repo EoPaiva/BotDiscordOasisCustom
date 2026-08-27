@@ -3,21 +3,19 @@
 > Checkpoint operacional atual. O código e o estado real do repositório prevalecem.
 > Estado estrutural permanente: `PROJECT_STATE.md`.
 
-## 0. Checkpoint mais recente — cortes 21 e 22 da Fase 57 publicados
+## 0. Checkpoint mais recente — cortes 23 e 24 da Fase 57 publicados
 
-**Branch:** `main`. **TDD:** `c15202b`/`e019266` cobrem o início da manutenção e
-`34843f8`/`756371d` cobrem o último sync do perfil. Todos foram enviados para `origin/main` e
-`private/main`.
+**Branch:** `main`. **TDD:** `32b4bbf` registra os contratos RED e `a7314c6` entrega o GREEN para
+os dois timestamps. Ambos foram enviados para `origin/main` e `private/main`.
 
-**Entregue:** o campo `Desde` dos módulos ativos em `/maintenance` e `Último sync` em `/profile`
-agora usam `<time dateTime="…">`. A ação de manutenção, o fallback de primeira sincronização, URLs,
-APIs, RBAC e regras de negócio permanecem iguais.
+**Entregue:** o instante `Desde` do lockdown e a coluna `DATA` dos eventos em `/security` agora usam
+`<time dateTime="…">`. Ações sensíveis, controles, URLs, APIs, RBAC e regras permanecem iguais.
 
-**Gates locais:** 2 testes focados; 97 testes em 24 arquivos; lint; typecheck; build;
+**Gates locais:** 2 testes focados; 99 testes em 25 arquivos; lint; typecheck; build;
 `npm audit` sem vulnerabilidades; 8 E2E aprovados e 1 cenário visual Firefox intencionalmente
 ignorado.
 
-**Produção técnica:** deploy Vercel `dpl_Cmxd8P8muVj3Nc2U3CmnQsHHHwjC`, `READY` em 2026-08-27,
+**Produção técnica:** deploy Vercel `dpl_BkSZCWmRcqrW4xvgVgea9vaqqgZW`, `READY` em 2026-08-27,
 com alias `choquebgr.online`. `/login` e `/status` responderam HTTP 200 e o CSP estrito permaneceu
 ativo. Isso é smoke técnico; sessão autenticada e leitor de tela real continuam validações humanas
 distintas.
@@ -148,7 +146,7 @@ confirmar seu hash com `git log -1 --oneline` em vez de manter uma autorreferên
 Na máquina principal, auditar os blocos locais ADV, Cursos, Transferências e Registro de
 Desligamentos contra o checkout que opera o projeto, validar migrations 49–52 numa cópia do banco e
 preparar um rollout controlado. As implementações locais estão concluídas. Enquanto essa etapa externa permanece
-bloqueada, a Fase 57 pode avançar localmente em cortes pequenos e fecháveis; vinte e dois cortes do Centro
+bloqueada, a Fase 57 pode avançar localmente em cortes pequenos e fecháveis; vinte e quatro cortes do Centro
 de Comando estão concluídos e não há código parcial neste computador.
 
 ### Critério de conclusão
@@ -164,7 +162,7 @@ de Comando estão concluídos e não há código parcial neste computador.
 
 ### Última ação concluída
 
-O protocolo de continuidade foi instalado na raiz. Depois, a Fase 57 avançou em vinte e dois cortes do
+O protocolo de continuidade foi instalado na raiz. Depois, a Fase 57 avançou em vinte e quatro cortes do
 Centro de Comando: `2ca8770`/`20d4153` entregam o drawer móvel acessível;
 `5e36506`/`098fea0` fazem o cabeçalho usar o `generated_at` real da API em um elemento `<time>`, em
 vez do relógio do render; `093a1cf`/`d0eecb6` expõem todas as faixas de métricas como pares
@@ -185,7 +183,8 @@ duração das fichas legível por máquina; `4a42580`/`74bf8c7` fazem o mesmo co
 `c8ebb65`/`5703f8b` cobrem a coluna `ENTRADA` da fila FIFO; `85dd140`/`07880c4` marcam o início do
 briefing de mudanças; `425a69f`/`8200b63` fazem o mesmo com a data de cada evento;
 `c15202b`/`e019266` cobrem o início de manutenção; e `34843f8`/`756371d` cobrem o último sync do
-perfil. Nenhum contrato, URL, RBAC, API ou regra de negócio foi alterado.
+perfil; e `32b4bbf`/`a7314c6` cobrem o início do lockdown e as datas dos eventos de segurança. Nenhum
+contrato, URL, RBAC, API ou regra de negócio foi alterado.
 
 Em seguida, o Registro de Desligamento de Efetivo foi concluído localmente. `25c593c` e `8d7a323`
 preservam os contratos RED; `1526e03` entrega migration 52, política fechada pelo perfil
@@ -194,7 +193,7 @@ declarativo. Nenhum Discord real ou produção foi tocado.
 
 ### Ação em andamento
 
-Nenhuma alteração está em andamento. Transferências, os vinte e dois cortes acessíveis da Fase 57 e o
+Nenhuma alteração está em andamento. Transferências, os vinte e quatro cortes acessíveis da Fase 57 e o
 Registro de Desligamentos terminaram em pontos seguros e commitados.
 
 ### PRÓXIMA AÇÃO EXATA
@@ -387,6 +386,9 @@ npm run build
 - [x] Fase 57 em manutenção e perfil: `Desde` e `Último sync` publicados em `<time dateTime>`. TDD
   `c15202b`/`e019266` e `34843f8`/`756371d`; 97 testes web e gates completos verdes; deploy agrupado
   `dpl_Cmxd8P8muVj3Nc2U3CmnQsHHHwjC` `READY` em 2026-08-27.
+- [x] Fase 57 em segurança: início do lockdown e datas dos eventos publicados em `<time dateTime>`.
+  TDD `32b4bbf`/`a7314c6`; 99 testes web e gates completos verdes; deploy
+  `dpl_BkSZCWmRcqrW4xvgVgea9vaqqgZW` `READY` em 2026-08-27.
 - [x] Fase 58 consolidada e publicada em `2f284ba`/`c704553`, sem inventar o trecho ausente do
   prompt original; deploy `dpl_DPCNG8jUHVzxVzFjncvqzF5CK9Js` `READY`.
 - [ ] Continuar os blocos restantes do Prompt Master do ecossistema pela ordem da fila oficial.
