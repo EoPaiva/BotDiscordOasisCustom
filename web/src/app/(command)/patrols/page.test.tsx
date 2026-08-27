@@ -45,4 +45,24 @@ describe("patrols command center", () => {
     expect(patrolStartedAt).toHaveAttribute("dateTime", "2026-08-27T05:29:00.000Z");
     expect(patrolStartedAt).toHaveTextContent("27 de ago., 02:29");
   });
+
+  it("exposes the FIFO entry timestamp as machine-readable time", async () => {
+    api.commandCenterFetch.mockResolvedValue({
+      generated_at: Date.parse("2026-08-27T05:30:00.000Z"),
+      active: [],
+      queue: [{
+        id: 8,
+        mta_nick: "Sentinela",
+        queue_entered_at: Date.parse("2026-08-27T05:29:00.000Z"),
+        status: "QUEUED",
+      }],
+    });
+
+    render(await PatrolsPage());
+    const queue = screen.getByRole("region", { name: "Fila de patrulha" });
+    const queueEnteredAt = queue.querySelector("time");
+
+    expect(queueEnteredAt).toHaveAttribute("dateTime", "2026-08-27T05:29:00.000Z");
+    expect(queueEnteredAt).toHaveTextContent("27 de ago., 02:29");
+  });
 });
