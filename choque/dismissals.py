@@ -104,8 +104,15 @@ async def enqueue_dismissal_notification(
     """Persiste registro público sem aceitar motivo fornecido pelo chamador."""
 
     is_high_command = await actor_has_high_command(connection, guild_id, actor_id)
+    cursor = await connection.execute(
+        "SELECT character_id FROM members WHERE guild_id=? AND discord_id=?",
+        (guild_id, discord_id),
+    )
+    member = await cursor.fetchone()
+    character_id = str(member["character_id"]).strip() if member and member["character_id"] else ""
     payload = {
         "discord_id": discord_id,
+        "character_id": character_id or "Não informado",
         "actor_id": actor_id,
         "occurred_at": occurred_at,
         "actor_has_high_command": is_high_command,

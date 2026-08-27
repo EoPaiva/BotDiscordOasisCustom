@@ -88,6 +88,7 @@ async def test_high_command_dismissal_enqueues_automatic_public_reason(
     payload = json.loads(notification["payload_json"])
     assert payload == {
         "discord_id": DISCORD_ID,
+        "character_id": "77",
         "actor_id": actor_id,
         "occurred_at": service_bundle["clock"](),
         "actor_has_high_command": True,
@@ -160,6 +161,7 @@ def test_dismissal_embed_is_formal_and_uses_recorded_timestamp() -> None:
         "DISMISSAL",
         {
             "discord_id": 456,
+            "character_id": "77",
             "actor_id": 999,
             "occurred_at": 1_700_000_000_000,
             "actor_has_high_command": False,
@@ -171,6 +173,7 @@ def test_dismissal_embed_is_formal_and_uses_recorded_timestamp() -> None:
     assert embed.title == "⚔️ DESLIGAMENTO DE EFETIVO"
     assert {field.name: field.value for field in embed.fields} == {
         "Militar": "<@456>",
+        "ID in-game": "77",
         "Responsável": "<@999>",
         "Situação": "Desligado da Corporação",
         "Data": "<t:1700000000:F>",

@@ -678,6 +678,11 @@ class CareerCommands(commands.Cog):
             )
             embed.add_field(name="Militar", value=f"<@{int(payload['discord_id'])}>", inline=False)
             embed.add_field(
+                name="ID in-game",
+                value=str(payload.get("character_id") or "Não informado"),
+                inline=False,
+            )
+            embed.add_field(
                 name="Responsável",
                 value=f"<@{int(payload['actor_id'])}>",
                 inline=False,
@@ -742,6 +747,63 @@ class CareerCommands(commands.Cog):
         )
         return embed
 
+    async def _enrich_dismissal_payload(
+        self,
+        payload: dict[str, object],
+        *,
+        guild_id: int,
+        notification_id: int,
+    ) -> dict[str, object]:
+        member = await self.bot.services.database.fetchone(
+            "SELECT character_id FROM members WHERE guild_id=? AND discord_id=?",
+            (guild_id, int(payload["discord_id"])),
+        )
+        character_id = (
+            str(member["character_id"]).strip()
+            if member is not None and member["character_id"]
+            else "Não informado"
+        )
+        if payload.get("character_id") != character_id:
+            payload["character_id"] = character_id
+            await self.bot.services.database.execute(
+                "UPDATE career_notifications SET payload_json=?, updated_at=? WHERE id=?",
+                (
+                    json.dumps(payload, ensure_ascii=False),
+                    self.bot.services.career.clock(),
+                    notification_id,
+                ),
+            )
+        return payload
+
+    async def _refresh_delivered_dismissals(self, guild: discord.Guild) -> None:
+        channel_id = await self.bot.services.settings.get(guild.id, "dismissal_log_channel_id")
+        channel = guild.get_channel(int(channel_id)) if channel_id else None
+        if not isinstance(channel, discord.TextChannel):
+            return
+        rows = await self.bot.services.database.fetchall(
+            """
+            SELECT * FROM career_notifications
+            WHERE guild_id=? AND notification_type='DISMISSAL'
+              AND status='DELIVERED' AND channel_message_id IS NOT NULL
+            ORDER BY id
+            """,
+            (guild.id,),
+        )
+        for row in rows:
+            try:
+                payload = await self._enrich_dismissal_payload(
+                    json.loads(str(row["payload_json"])),
+                    guild_id=guild.id,
+                    notification_id=int(row["id"]),
+                )
+                message = await channel.fetch_message(int(row["channel_message_id"]))
+                await message.edit(embed=self._notification_embed("DISMISSAL", payload))
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException, ValueError, KeyError):
+                LOGGER.exception(
+                    "Falha ao atualizar ID in-game no desligamento publicado #%s",
+                    row["id"],
+                )
+
     async def _deliver_notification(self, row: dict[str, object]) -> None:
         now = self.bot.services.career.clock()
         notification_id = int(row["id"])
@@ -750,6 +812,12 @@ class CareerCommands(commands.Cog):
             guild = self.bot.get_guild(int(row["guild_id"]))
             if guild is None:
                 raise NotFoundError("Servidor da notificação não está disponível.")
+            if row["notification_type"] == "DISMISSAL":
+                payload = await self._enrich_dismissal_payload(
+                    payload,
+                    guild_id=guild.id,
+                    notification_id=notification_id,
+                )
             embed = self._notification_embed(str(row["notification_type"]), payload)
             channel_message_id = row["channel_message_id"]
             channel_key = row["channel_setting_key"]
@@ -881,6 +949,10 @@ class CareerCommands(commands.Cog):
                 await self._initialize_guild(guild)
             except Exception:
                 LOGGER.exception("Falha ao restaurar o núcleo de carreira e oficialato")
+            try:
+                await self._refresh_delivered_dismissals(guild)
+            except Exception:
+                LOGGER.exception("Falha ao reconciliar desligamentos já publicados")
             channel_id = await self.bot.services.settings.get(guild.id, "career_panel_channel_id")
             channel = guild.get_channel(int(channel_id)) if channel_id else None
             if not isinstance(channel, discord.TextChannel):
