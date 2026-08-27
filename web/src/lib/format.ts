@@ -5,6 +5,16 @@ export function duration(milliseconds: number | null | undefined): string {
   return hours ? `${hours}h ${String(minutes).padStart(2, "0")}m` : `${minutes}m`;
 }
 
+export function isoDuration(milliseconds: number | null | undefined): string {
+  const numeric = Number(milliseconds ?? 0);
+  const totalMinutes = Number.isFinite(numeric)
+    ? Math.max(0, Math.floor(numeric / 60_000))
+    : 0;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `PT${hours ? `${hours}H` : ""}${minutes || !hours ? `${minutes}M` : ""}`;
+}
+
 export function dateTime(epoch: number | null | undefined): string {
   if (!epoch) return "—";
   return new Intl.DateTimeFormat("pt-BR", {

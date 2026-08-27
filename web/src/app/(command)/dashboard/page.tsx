@@ -4,7 +4,7 @@ import Link from "next/link";
 import { EmptyState, MetricStrip, PageHeader, SectionHeader, Status } from "@/components/ui";
 import { LiveDataRefresh } from "@/components/live-data-refresh";
 import { commandCenterFetch } from "@/lib/api";
-import { dateTime, duration, isoDateTime, label } from "@/lib/format";
+import { dateTime, duration, isoDateTime, isoDuration, label } from "@/lib/format";
 
 type Row = Record<string, unknown>;
 type DashboardData = {
@@ -56,8 +56,9 @@ export default async function DashboardPage() {
         <section className="command-section patrol-sector">
           <SectionHeader index="02" title="Patrulhas em andamento" meta={`${data.patrols.length} operações ativas`} />
           {data.patrols.length ? <ul aria-label="Patrulhas em andamento" className="patrol-list">
-            {data.patrols.map((patrol) => (
-              <li key={String(patrol.id)}>
+            {data.patrols.map((patrol) => {
+              const elapsed = data.generated_at - Number(patrol.started_at ?? data.generated_at);
+              return <li key={String(patrol.id)}>
                 <article className="patrol-record">
                   <div className="patrol-code"><span>PTR</span><strong>{String(patrol.sequence_number ?? patrol.id).padStart(3, "0")}</strong></div>
                   <div className="patrol-body">
@@ -67,10 +68,10 @@ export default async function DashboardPage() {
                       {!patrol.member_names && memberIds(patrol.member_ids).map((id) => <span key={id}>{id === String(patrol.commander_discord_id ?? "") ? "COMANDANTE" : "EFETIVO"} <strong>{id}</strong></span>)}
                     </div>
                   </div>
-                  <div className="patrol-time"><Radio size={15} aria-hidden="true" /><strong>{duration(data.generated_at - Number(patrol.started_at ?? data.generated_at))}</strong><span>{String(patrol.member_count ?? 0)} militares</span></div>
+                  <div className="patrol-time"><Radio size={15} aria-hidden="true" /><strong><time dateTime={isoDuration(elapsed)}>{duration(elapsed)}</time></strong><span>{String(patrol.member_count ?? 0)} militares</span></div>
                 </article>
               </li>
-            ))}
+            })}
           </ul> : <EmptyState title="Nenhuma patrulha ativa" detail="As calls de patrulhamento permanecem disponíveis." />}
           <Link className="text-link" href="/patrols">Abrir central de patrulhas <ArrowRight size={15} /></Link>
         </section>
